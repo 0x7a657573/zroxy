@@ -126,7 +126,7 @@ void *Monitor_HandleConnection(void *vargp)
 	}
 }
 
-
+/*https://www.tutorialspoint.com/http/http_message_examples.htm*/
 void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *sta)
 {
 	/*incoming data and possess it*/
@@ -135,7 +135,6 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *sta)
 
 	time_t CurrentTime = time ( NULL );
 	time_t LiveTime = CurrentTime - stdata.StartTime;
-	LiveTime = 3600*24*5+5;
 	struct tm *lt = gmtime(&LiveTime);
 
 	char message[2048] = {0};
