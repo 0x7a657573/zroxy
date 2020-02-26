@@ -19,7 +19,7 @@ void state_init(statistics_t **self)
 	    log_error("statistics mutex init has failed");
 	    exit(0);
 	}
-	time ( &(*self)->stat.StartTime );
+	(*self)->stat.StartTime = time ( NULL );
 }
 
 

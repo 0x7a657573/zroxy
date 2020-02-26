@@ -133,9 +133,16 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *sta)
 	stat_t stdata;
 	state_get(sta,&stdata);	/*get static data*/
 
+	time_t CurrentTime = time ( NULL );
+	time_t LiveTime = CurrentTime - stdata.StartTime;
+	LiveTime = 3600*24*5+5;
+	struct tm *lt = gmtime(&LiveTime);
+
 	char message[2048] = {0};
 	char *ptr = message;
 
+
+	ptr += sprintf(ptr,"Up Time: %i days, %i:%i:%i </br>", lt->tm_yday,lt->tm_hour,lt->tm_min,lt->tm_sec);
 	ptr += sprintf(ptr,"Max Connection : %i</br>",stdata.MaxConnection);
 	ptr += sprintf(ptr,"Active Connection : %i</br>",stdata.ActiveConnection);
 	ptr += sprintf(ptr,"Total Connection : %i</br>",stdata.TotalConnection);
