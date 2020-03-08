@@ -19,7 +19,6 @@
 #include "net/net.h"
 #include <stdint.h>
 
-char ServerReplay[]  = "HTTP/1.1 200 OK\r\n\r\n<h1>Zrozy</h1>";
 
 void *SniClientHandler(void *arg)
 {
