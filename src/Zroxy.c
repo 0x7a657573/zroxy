@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include "args.h"
 #include "statistics/monitor.h"
+#include "filter/filter.h"
 
 zroxy_t prg_setting = {0};
 
@@ -48,8 +49,17 @@ int main(int argc, const char **argv)
 		state = monitor_Init(prg_setting.monitorPort);
 	}
 
+	/*chack white list*/
+	filter_t *whitelist = NULL;
+	if(prg_setting.WhitePath)
+	{
+		log_info("load white list from %s",prg_setting.WhitePath);
+		whitelist = filter_init(prg_setting.WhitePath);
+		free(prg_setting.WhitePath);
+	}
+
 	lport_t *p=prg_setting.ports;
-	SniServer_t Xconf = { .Port = 443, .Socks = NULL ,.sta = state};
+	SniServer_t Xconf = { .Port = 443, .Socks = NULL ,.sta = state ,.wlist = whitelist };
 	if(prg_setting.socks)	/*if Set Socks proxy*/
 	{
 		log_info("enable socks on %s:%i",prg_setting.socks->host,prg_setting.socks->port);

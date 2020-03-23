@@ -71,6 +71,13 @@ void *SniClientHandler(void *arg)
 
 		if(net_GetHost(buffer,Windex,HostName,_MaxHostName_))
 		{
+			/*Check host validate*/
+			if(client->SniConfig.wlist && filter_IsWhite(client->SniConfig.wlist,HostName)==false)
+			{
+				log_info("filter tid:%i Host %s ",client->connid,HostName);
+				break;
+			}
+
 			log_info(" Open tid:%i Host %s ",client->connid,HostName);
 			if(isTrueIpAddress(HostName))
 			{

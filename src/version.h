@@ -9,7 +9,7 @@
 #define VERSION_H_
 
 
-//#define version	 "0.3"
+#define version	 "0.3"
 /*
  * monitor : show usage in human readable format
  * monitor : remove 'gmtime' function

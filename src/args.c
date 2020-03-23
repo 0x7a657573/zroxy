@@ -18,12 +18,14 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state);
 void Parse_Ports(zroxy_t *ptr,char *str);
 void Parse_Socks(zroxy_t *ptr,char *str);
 void Parse_Monit(zroxy_t *ptr,char *str);
+void Parse_whitelist(zroxy_t *ptr,char *str);
 
 static struct argp_option options[] =
 {
     { "port", 'p', "port list", 0, "list of port to listen. -p 80,443,8080..."},
 	{ "socks", 's', "socks proxy", 0, "set proxy for up stream. -s 127.0.0.1:9050"},
 	{ "monitor", 'm', "monitor port", 0, "set monitor port. -m 1234"},
+	{ "white", 'w' , "white list" , 0, "white list for host -w /etc/withlist.txt"},
     { 0 }
 };
 
@@ -45,10 +47,19 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		case 'p': Parse_Ports(setting,arg); break;
 		case 's': Parse_Socks(setting,arg); break;
 		case 'm': Parse_Monit(setting,arg); break;
+		case 'w': Parse_whitelist(setting,arg); break;
 		case ARGP_KEY_ARG: return 0;
 		default: return ARGP_ERR_UNKNOWN;
     }
     return 0;
+}
+
+void Parse_whitelist(zroxy_t *ptr,char *str)
+{
+	while(*str==' ') str++; /*remove space before path*/
+	ptr->WhitePath = (char *)malloc(strlen(str)+1);
+	bzero(ptr->WhitePath,strlen(str)+1);
+	strcpy(ptr->WhitePath,str);
 }
 
 void Parse_Monit(zroxy_t *ptr,char *str)
