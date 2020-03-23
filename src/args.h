@@ -24,6 +24,7 @@ typedef struct
 	lport_t 	*ports;
 	sockshost_t *socks;
 	uint16_t	*monitorPort;
+	char 		*WhitePath;
 }zroxy_t;
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv);

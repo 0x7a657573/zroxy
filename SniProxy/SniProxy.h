@@ -10,8 +10,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <statistics/statistics.h>
-
-#define _MaxHostName_	(255)
+#include <filter/filter.h>
 
 
 typedef struct
@@ -25,6 +24,7 @@ typedef struct
 	uint16_t 	Port;
 	sockshost_t	 *Socks;
 	statistics_t *sta;
+	filter_t	 *wlist;
 	bool UserInternalDNS;
 	char DNSServer[20];
 }SniServer_t;
