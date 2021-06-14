@@ -11,13 +11,7 @@
 #include <stdbool.h>
 #include <statistics/statistics.h>
 #include <filter/filter.h>
-
-
-typedef struct
-{
-	char 	host[_MaxHostName_];
-	uint16_t port;
-}sockshost_t;
+#include <socks.h>
 
 typedef struct
 {
