@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <SniProxy.h>
 
+#include "../DnsProxy/DnsServer.h"
 
 typedef struct
 {
@@ -25,6 +26,7 @@ typedef struct
 	sockshost_t *socks;
 	uint16_t	*monitorPort;
 	char 		*WhitePath;
+	dnshost_t	*dnsserver;
 }zroxy_t;
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv);

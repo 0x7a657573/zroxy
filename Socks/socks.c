@@ -50,10 +50,7 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
     // +-----+----------+----------+
     // |  1  |    1     | 1 to 255 |
     // +-----+----------+----------+
-	 Tempbuf[0] = 0x05;
-	 Tempbuf[1] = 0x01;
-	 Tempbuf[2] = 0x00;
-	 write(*sockfd,Tempbuf,3);	/*Write Hello*/
+	 write(*sockfd,"\x05\x01\x00",3);	/*Write Hello*/
 
     // SOCKS5 SERVER HELLO
     // +-----+--------+
@@ -64,14 +61,14 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 uint8_t SocksVer = 0;
 	 if(read(*sockfd,&SocksVer,sizeof(uint8_t))<=0)
 	 {
-		 log_error("Error Read Socks Ver");
+		 log_error("[!] Error Read Socks Ver");
 		 close(*sockfd);
 		 return false;
 	 }
 
 	 if(SocksVer!=5)
 	 {
-		 log_error("We can not support ver %d",SocksVer);
+		 log_error("[!] We can not support ver %d",SocksVer);
 		 close(*sockfd);
 		 return false;
 	 }
@@ -79,17 +76,20 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 uint8_t SocksMethod;
 	 if(read(*sockfd,&SocksMethod,sizeof(uint8_t))<=0)
 	 {
-		 log_error("Error Read Socks Ver");
+		 log_error("[!] Error Read Socks Ver");
 		 close(*sockfd);
 	 	 return false;
 	 }
 
 	 if(SocksMethod!=0)
 	 {
-		 log_error("We can not support Method %d",SocksMethod);
+		 log_error("[!] We can not support Method %d",SocksMethod);
 		 close(*sockfd);
 		 return false;
 	 }
+
+	 /*check domain or ip*/
+	 in_addr_t host_ip = inet_addr(host);
 
 	 // SOCKS5 CLIENT REQUEST
 	 // +-----+-----+-------+------+----------+----------+
@@ -100,11 +100,26 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 Tempbuf[0] = 0x05;  // VER 5
 	 Tempbuf[1] = 0x01;  // CONNECT
 	 Tempbuf[2] = 0x00;
-	 Tempbuf[3] = 0x03;  // Domain name
-	 Tempbuf[4] = (uint8_t)strlen(host);
-	 memcpy(Tempbuf + 5, host, Tempbuf[4]);
-	 *(uint16_t *)(Tempbuf + 5 + Tempbuf[4]) = htons(port);
-	 write(*sockfd,Tempbuf,5 + Tempbuf[4] + 2);
+
+	 uint16_t datalen = 10;
+	 if(host_ip!=-1)
+	 {
+		 /*if host is domain*/
+		 Tempbuf[3] = 0x03;  // Domain name
+		 Tempbuf[4] = (uint8_t)strlen(host);
+		 memcpy(Tempbuf + 5, host, Tempbuf[4]);				    /*copy host*/
+		 *(uint16_t *)(Tempbuf + 5 + Tempbuf[4]) = htons(port); /*copy port*/
+		 datalen = 5 + Tempbuf[4] + 2;
+	 }
+	 else
+	 {
+		 /*if host is ip*/
+		 Tempbuf[3] = 0x01;	/*IP V4 address*/
+		 memcpy(Tempbuf + 4, &host_ip, 4);		   /*copy ip*/
+		 *(uint16_t *)(Tempbuf + 8) = htons(port); /*copy port*/
+	 }
+
+	 write(*sockfd,Tempbuf,datalen);
 
     // SOCKS5 SERVER REPLY
     // +-----+-----+-------+------+----------+----------+
@@ -115,21 +130,21 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 SocksReplayHeader_t Replay;
 	 if(read(*sockfd,&Replay,sizeof(SocksReplayHeader_t))<=0)
 	 {
-		 log_error("Error Read Replay");
+		 log_error("[!] Error Read Replay");
 		 close(*sockfd);
 	 	 return false;
 	 }
 
 	 if(Replay.ver!=5)
 	 {
-		log_error("Error Socks Ver");
+		log_error("[!] Error Socks Ver");
 		close(*sockfd);
 		return false;
 	 }
 
 	 if(Replay.rep!=0)
 	 {
-		log_error("Error Success Command");
+		log_error("[!] Error Success Command");
 		close(*sockfd);
 		return false;
 	 }
@@ -138,7 +153,7 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 {
 		 if(read(*sockfd,Tempbuf,4)<=0)
 		 {
-		 	 log_error("Error Read Replay");
+		 	 log_error("[!] Error Read Replay");
 		 	 close(*sockfd);
 		 	 return false;
 		 }
@@ -148,14 +163,14 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 		 uint8_t len;
 		 if(read(*sockfd,&len,sizeof(uint8_t))<=0)
 		 {
-		  	 log_error("Error Read Replay");
+		  	 log_error("[!] Error Read Replay");
 		  	 close(*sockfd);
 		  	 return false;
 		 }
 
 		 if(read(*sockfd,&Tempbuf,len)<=0)
 		 {
-		  	 log_error("Error Read Replay");
+		  	 log_error("[!] Error Read Replay");
 		  	 close(*sockfd);
 		  	 return false;
 		 }
@@ -164,21 +179,21 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 {
 		 if(read(*sockfd,&Tempbuf,16)<=0)
 		 {
-		   	 log_error("Error Read Replay");
+		   	 log_error("[!] Error Read Replay");
 		   	 close(*sockfd);
 		   	 return false;
 		 }
 	 }
 	 else
 	 {
-		 log_error("unsupported address type");
+		 log_error("[!] unsupported address type");
 		 close(*sockfd);
 		 return false;
 	 }
 
 	 if(read(*sockfd,&Tempbuf,sizeof(uint16_t))<=0)	/*Read Port*/
 	 {
-	   	 log_error("Error Read Replay");
+	   	 log_error("[!] Error Read Replay");
 	   	  close(*sockfd);
 	   	 return false;
 	 }

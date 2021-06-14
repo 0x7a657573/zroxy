@@ -15,7 +15,7 @@
 #include "log/log.h"
 #include <string.h>
 #include "SniClient.h"
-#include "socks/socks.h"
+#include <socks.h>
 #include "net/net.h"
 #include <stdint.h>
 

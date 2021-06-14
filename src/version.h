@@ -8,8 +8,16 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
+#define version	 "0.4"
+/*
+ * Add DNS Proxy
+ * Add Config File
+ * Add u & d key for input argumant
+ * DNS : Add dns proxy from Socks socket
+ * Socks : add domain/ip support
+ */
 
-#define version	 "0.3"
+//#define version	 "0.3"
 /*
  * monitor : show usage in human readable format
  * monitor : remove 'gmtime' function

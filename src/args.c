@@ -11,6 +11,8 @@
 #include "version.h"
 #include <stdbool.h>
 #include <argp.h>
+#include <log/log.h>
+#include <netdb.h>
 
 const char *argp_program_version = "zroxy "version ;
 static char doc[] = "simple and smart sni-proxy.";
@@ -19,13 +21,17 @@ void Parse_Ports(zroxy_t *ptr,char *str);
 void Parse_Socks(zroxy_t *ptr,char *str);
 void Parse_Monit(zroxy_t *ptr,char *str);
 void Parse_whitelist(zroxy_t *ptr,char *str);
+void Parse_DNSServer(zroxy_t *ptr,char *str);
+void Parse_DnsUpstream(zroxy_t *ptr,char *str);
 
 static struct argp_option options[] =
 {
-    { "port", 'p', "port list", 0, "list of port to listen. -p 80,443,8080..."},
+    { "port", 'p', "sni port", 0, "sni port that listens. -p 80,443,8080..."},
 	{ "socks", 's', "socks proxy", 0, "set proxy for up stream. -s 127.0.0.1:9050"},
-	{ "monitor", 'm', "monitor port", 0, "set monitor port. -m 1234"},
+	{ "monitor", 'm', "monitor port", 0, "monitor port that listens. -m 1234"},
 	{ "white", 'w' , "white list" , 0, "white list for host -w /etc/withlist.txt"},
+	{ "dport", 'd' , "DNS local server" , 0, "dns server that listens. -d 0.0.0.0:53"},
+	{ "dns", 'u' , "DNS servers to use" , 0, "upstream DNS providers. -u 8.8.8.8"},
     { 0 }
 };
 
@@ -33,9 +39,8 @@ static struct argp argp = { options, parse_opt, NULL, doc, 0, 0, 0 };
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
 {
-
 	pgp->ports = NULL;
-    argp_parse(&argp, argc, argv, 0, 0, pgp);
+    argp_parse(&argp, argc, (char **)argv, 0, 0, pgp);
     return true;
 }
 
@@ -48,6 +53,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		case 's': Parse_Socks(setting,arg); break;
 		case 'm': Parse_Monit(setting,arg); break;
 		case 'w': Parse_whitelist(setting,arg); break;
+		case 'd': Parse_DNSServer(setting,arg); break;
+		case 'u': Parse_DnsUpstream(setting,arg); break;
 		case ARGP_KEY_ARG: return 0;
 		default: return ARGP_ERR_UNKNOWN;
     }
@@ -66,6 +73,57 @@ void Parse_Monit(zroxy_t *ptr,char *str)
 {
 	ptr->monitorPort = (uint16_t*)malloc(sizeof(uint16_t));
 	*ptr->monitorPort = atol(str);
+}
+
+void Parse_DNSServer(zroxy_t *ptr,char *str)
+{
+	if(!ptr->dnsserver)
+	{
+		ptr->dnsserver = (dnshost_t*)malloc(sizeof(dnshost_t));
+	}
+
+	ptr->dnsserver->port = 53;
+	bzero(ptr->dnsserver->host,_MaxIPAddress_);
+	strcpy(ptr->dnsserver->host,"127.0.0.1");
+
+
+	char *endname = strchr(str,':');
+	if(endname)
+	{
+		*endname++ = 0;
+		strncpy(ptr->dnsserver->host,str,_MaxIPAddress_-1);
+		ptr->dnsserver->port = atol(endname);
+	}
+	else
+	{
+		strncpy(ptr->dnsserver->host,str,_MaxIPAddress_-1);
+	}
+}
+
+void Parse_DnsUpstream(zroxy_t *ptr,char *str)
+{
+	/*check dns config is exisit*/
+	if(!ptr->dnsserver)
+	{
+		ptr->dnsserver = (dnshost_t*)malloc(sizeof(dnshost_t));
+		ptr->dnsserver->port = 53;
+		bzero(ptr->dnsserver->host,_MaxIPAddress_);
+		strcpy(ptr->dnsserver->host,"127.0.0.1");
+	}
+
+	char *port = "53";
+	char *endname = strchr(str,':');
+	if(endname)
+	{
+		*endname++ =0;
+	}
+	else
+	{
+		endname = port;
+	}
+
+	ptr->dnsserver->dnsserver.port = atol(endname);
+	strcpy(ptr->dnsserver->dnsserver.ip,str);
 }
 
 void Parse_Socks(zroxy_t *ptr,char *str)

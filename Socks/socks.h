@@ -10,6 +10,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <config.h>
+
+typedef struct
+{
+	char 	host[_MaxHostName_];
+	uint16_t port;
+}sockshost_t;
 
 typedef struct
 {

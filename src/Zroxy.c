@@ -27,6 +27,9 @@ zroxy_t prg_setting = {0};
 
 
 /*
+ * for test dns server
+ * dig @127.0.0.1 google.com -p5656
+ *
  * about tcp/ip and socket in c:
  * https://www.csd.uoc.gr/~hy556/material/tutorials/cs556-3rd-tutorial.pdf
  *
@@ -40,6 +43,14 @@ int main(int argc, const char **argv)
 
 	Log_init();
 	arg_Init(&prg_setting,argc,argv);
+
+	/*check for dns server*/
+	if(prg_setting.dnsserver)
+	{
+		prg_setting.dnsserver->Socks = prg_setting.socks; /*copy socks setting*/
+		log_info("start dns server ...");
+		dnsserver_init(prg_setting.dnsserver);
+	}
 
 	statistics_t *state = NULL;
 	/*check Monitor*/
@@ -60,7 +71,8 @@ int main(int argc, const char **argv)
 
 	lport_t *p=prg_setting.ports;
 	SniServer_t Xconf = { .Port = 443, .Socks = NULL ,.sta = state ,.wlist = whitelist };
-	if(prg_setting.socks)	/*if Set Socks proxy*/
+	/*if Set Socks proxy*/
+	if(prg_setting.socks)
 	{
 		log_info("enable socks on %s:%i",prg_setting.socks->host,prg_setting.socks->port);
 		Xconf.Socks = prg_setting.socks;

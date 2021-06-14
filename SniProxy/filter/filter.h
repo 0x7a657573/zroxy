@@ -10,8 +10,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <config.h>
 
-#define _MaxHostName_	(255)
 
 typedef struct
 {
