@@ -25,7 +25,7 @@ void *SniClientHandler(void *arg)
 	if (!arg) pthread_exit(0);
 	sniclient_t *client = (sniclient_t*)arg;
 	sockshost_t *socks = client->SniConfig.Socks;
-	uint16_t 	port = client->SniConfig.Port;
+	lport_t 	xport = client->SniConfig.Port;
 
 	//log_info("client thread %i",client->connid);
 	uint8_t buffer[0x4000]; /*16Kb memory tmp*/
@@ -90,12 +90,12 @@ void *SniClientHandler(void *arg)
 			{
 				//log_info("socks host %s:%i",socks->host,socks->port);
 				//log_info("host %s:%i",HostName,port);
-				if(!socks5_connect(&sockssocket,socks->host,socks->port,HostName,port))
+				if(!socks5_connect(&sockssocket,socks->host,socks->port,HostName,xport.remote_port))
 					break;
 			}
 			else	/*connect directly*/
 			{
-				if(!net_connect(&sockssocket,HostName,port))
+				if(!net_connect(&sockssocket,HostName,xport.remote_port))
 					break;
 			}
 

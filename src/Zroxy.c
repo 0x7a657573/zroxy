@@ -70,7 +70,7 @@ int main(int argc, const char **argv)
 	}
 
 	lport_t *p=prg_setting.ports;
-	SniServer_t Xconf = { .Port = 443, .Socks = NULL ,.sta = state ,.wlist = whitelist };
+	SniServer_t Xconf = { /*.Port = {0},*/ .Socks = NULL ,.sta = state ,.wlist = whitelist };
 	/*if Set Socks proxy*/
 	if(prg_setting.socks)
 	{
@@ -80,8 +80,9 @@ int main(int argc, const char **argv)
 
 	while(p)
 	{
-		Xconf.Port = p->port;
+		Xconf.Port = *p;
 		SniProxy_Start(&Xconf);
+
 		p=p->next;
 	}
 	Free_PortList(&prg_setting); /*free Port List*/

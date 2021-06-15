@@ -14,8 +14,9 @@
 #include <log/log.h>
 #include <netdb.h>
 
-const char *argp_program_version = "zroxy "version ;
-static char doc[] = "simple and smart sni-proxy.";
+
+static char doc[] = "zroxy v"version "\nsimple sni and dns proxy.";
+
 static error_t parse_opt(int key, char *arg, struct argp_state *state);
 void Parse_Ports(zroxy_t *ptr,char *str);
 void Parse_Socks(zroxy_t *ptr,char *str);
@@ -26,7 +27,7 @@ void Parse_DnsUpstream(zroxy_t *ptr,char *str);
 
 static struct argp_option options[] =
 {
-    { "port", 'p', "sni port", 0, "sni port that listens. -p 80,443,8080..."},
+    { "port", 'p', "sni port", 0, "sni port that listens.\n<bind ip>:<local port>#<remote port>\n -p 127.0.0.1:8080#80,4433#433,853..."},
 	{ "socks", 's', "socks proxy", 0, "set proxy for up stream. -s 127.0.0.1:9050"},
 	{ "monitor", 'm', "monitor port", 0, "monitor port that listens. -m 1234"},
 	{ "white", 'w' , "white list" , 0, "white list for host -w /etc/withlist.txt"},
@@ -59,6 +60,58 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		default: return ARGP_ERR_UNKNOWN;
     }
     return 0;
+}
+
+bool validate_number(char *str)
+{
+   while (*str)
+   {
+	   //if the character is not a number, return false
+      if(!isdigit(*str))
+      {
+         return false;
+      }
+      str++; //point to next character
+   }
+   return true;
+}
+
+//check whether the IP is valid or not
+bool validate_ip(char *ip)
+{
+   int i, num, dots = 0;
+   char *ptr;
+   if (ip == NULL)
+      return false;
+
+   //cut the string using dor delimiter
+   ptr = strtok(ip, ".");
+   if (ptr == NULL)
+      return false;
+
+   while (ptr)
+   {
+	   //check whether the sub string is holding only number or not
+      if (!validate_number(ptr))
+         return false;
+
+         //convert substring to number
+         num = atoi(ptr);
+         if (num >= 0 && num <= 255)
+         {
+        	//cut the next part of the string
+            ptr = strtok(NULL, ".");
+            if (ptr != NULL)
+               //increase the dot count
+               dots++;
+         } else
+            return false;
+    }
+
+    //if the number of dots are not 3, return false
+    if (dots != 3)
+       return false;
+      return true;
 }
 
 void Parse_whitelist(zroxy_t *ptr,char *str)
@@ -150,11 +203,50 @@ void Parse_Ports(zroxy_t *ptr,char *str)
 	void *perv = NULL;
 	do{
 		ptr->ports = (lport_t*)malloc(sizeof(lport_t));
-		ptr->ports->port = atol(str);
+
+		char *xptr = str;
+		str = strchr(str,',');
+		if(str)
+		{
+			*str++=0;
+		}
+
+		/*check for ip*/
+		char *Iptr = strchr(xptr,':');
+		if(Iptr)
+		{
+			*Iptr++=0;
+			strcpy(ptr->ports->bindip,xptr);
+			bool valid_ip = validate_ip(xptr);
+			if(valid_ip==false)
+			{
+				log_error("[!] Error Not valid ip -> %s.",ptr->ports->bindip);
+				exit(0);
+			}
+
+			xptr = Iptr;
+		}
+		else
+		{
+			strcpy(ptr->ports->bindip,"0.0.0.0");
+		}
+
+		char *Pptr = strchr(xptr,'#');
+		if(Pptr)
+		{
+			*Pptr++=0;
+			ptr->ports->local_port = atol(xptr);
+			ptr->ports->remote_port = atol(Pptr);
+		}
+		else
+		{
+			ptr->ports->local_port = atol(xptr);
+			ptr->ports->remote_port = ptr->ports->local_port;
+		}
+
 		ptr->ports->next = perv;
 		perv = ptr->ports;
-		str = strchr(str,',');
-		if(str) str++;
+
 	}while( str!=NULL );
 }
 

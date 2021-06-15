@@ -16,6 +16,7 @@
 #include <string.h>
 #include "SniClient.h"
 #include "net/net.h"
+#include <arpa/inet.h>
 
 void *SniProxy_HandleIncomingConnection(void *vargp);
 
@@ -23,14 +24,14 @@ bool SniProxy_Start(SniServer_t *Sni)
 {
 	int sockfd;
 
-
-	if(net_ListenIp4(htonl(INADDR_ANY), Sni->Port,&sockfd)==false)
+	in_addr_t host_ip = inet_addr(Sni->Port.bindip);
+	if(net_ListenIp4(host_ip, Sni->Port.local_port,&sockfd)==false)
 	{
-		log_error("can not listen on Port %i",Sni->Port);
+		log_error("can not listen on Port %s:%i",Sni->Port.bindip,Sni->Port.local_port);
 		return false;
 	}
 
-	log_info("socket listen on %d",Sni->Port);
+	log_info("socket listen on %s:%d",Sni->Port.bindip,Sni->Port.local_port);
 
 	pthread_t thread_id;
 	server_t *ptr = malloc(sizeof(server_t));
@@ -52,7 +53,7 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 	SniServer_t sniconf = soc->SniConfig;
 	free(soc);
 
-	log_info("thread start on socket %i Port %d",sockfd,sniconf.Port);
+	//log_info("thread start on socket %i Port %d",sockfd,sniconf.Port);
 	sniclient_t *client;
 	while(1)
 	{
