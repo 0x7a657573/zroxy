@@ -8,7 +8,15 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "0.4"
+#define version	 "0.5"
+/*
+ * Socks : Fix bug in detection domain/ip
+ * SNI   : add remote port for send request to this port
+ * SNI   : add local port for listen to this port
+ * SNI   : add bind ip
+ */
+
+//#define version	 "0.4"
 /*
  * Add DNS Proxy
  * Add Config File

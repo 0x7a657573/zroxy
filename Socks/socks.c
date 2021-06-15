@@ -102,7 +102,8 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 Tempbuf[2] = 0x00;
 
 	 uint16_t datalen = 10;
-	 if(host_ip!=-1)
+	 /*if it's Domain*/
+	 if(host_ip==-1)
 	 {
 		 /*if host is domain*/
 		 Tempbuf[3] = 0x03;  // Domain name

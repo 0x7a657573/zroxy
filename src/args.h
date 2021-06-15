@@ -13,11 +13,7 @@
 
 #include "../DnsProxy/DnsServer.h"
 
-typedef struct
-{
-	uint16_t port;
-	void 	 *next;
-}lport_t;
+
 
 
 typedef struct

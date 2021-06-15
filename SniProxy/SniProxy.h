@@ -15,7 +15,15 @@
 
 typedef struct
 {
-	uint16_t 	Port;
+	char	 bindip[_MaxIPAddress_];
+	uint16_t local_port;
+	uint16_t remote_port;
+	void 	 *next;
+}lport_t;
+
+typedef struct
+{
+	lport_t 	Port;
 	sockshost_t	 *Socks;
 	statistics_t *sta;
 	filter_t	 *wlist;
