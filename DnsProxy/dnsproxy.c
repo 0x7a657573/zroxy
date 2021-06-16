@@ -122,5 +122,7 @@ bool localdns_pull(dnsserver_t *dns)
 	// send the reply back to the client (minus the length at the beginning)
 	sendto(dns->local_sock, buffer + 2, rlen - 2 , 0, (struct sockaddr *)&dns_client, sizeof(dns_client));
 
+	/*exit from this fork*/
+	exit(0);
 	return true;
 }
