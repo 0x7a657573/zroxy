@@ -8,7 +8,13 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "0.5"
+#define version	 "0.6"
+/*
+ * DNS : installs SIGCHLD handler to die when the child exits
+ * DNS : Fix bug in not exit from fork process
+ */
+
+//#define version	 "0.5"
 /*
  * Socks : Fix bug in detection domain/ip
  * SNI   : add remote port for send request to this port

@@ -10,7 +10,10 @@
 #include <unistd.h>  	/*Header file for sleep(). man 3 sleep for details.*/
 #include <pthread.h>	/* http://www.csc.villanova.edu/~mdamian/threads/posixthreads.html */
 #include <stdlib.h>
-#include "../DnsProxy/dnsproxy.h"
+#include "dnsproxy.h"
+#include <signal.h>
+#include <sys/wait.h>
+#include <string.h>
 
 void *dnsserver_HandleIncomingConnection(void *vargp);
 
@@ -19,6 +22,12 @@ void dnsserver_init(dnshost_t *config)
 	/*make thread for dns server*/
 	pthread_t thread_id;
 	pthread_create(&thread_id, NULL, dnsserver_HandleIncomingConnection, (void*)config);
+}
+
+// handle children
+void reaper_handle (int sig)
+{
+  while (waitpid(-1, NULL, WNOHANG) > 0) { };
 }
 
 void *dnsserver_HandleIncomingConnection(void *vargp)
@@ -40,6 +49,12 @@ void *dnsserver_HandleIncomingConnection(void *vargp)
 	}
 
 	log_info("dns server start on %s:%d",conf->host,conf->port);
+
+	// setup SIGCHLD handler to kill off zombie children
+	struct sigaction reaper;
+	memset(&reaper, 0, sizeof(struct sigaction));
+	reaper.sa_handler = reaper_handle;
+	sigaction(SIGCHLD, &reaper, 0);
 
 	while(1)
 	{
