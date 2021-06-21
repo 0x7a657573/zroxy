@@ -44,7 +44,7 @@ statistics_t *monitor_Init(uint16_t *Port)
 	return mon->state;
 }
 
-void Minitor_HandelConnection(void *arg);
+void *Minitor_HandelConnection(void *arg);
 void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *sta);
 void *Monitor_HandleConnection(void *vargp)
 {
@@ -71,7 +71,7 @@ void *Monitor_HandleConnection(void *vargp)
 	}
 }
 
-void Minitor_HandelConnection(void *arg)
+void *Minitor_HandelConnection(void *arg)
 {
 	if (!arg) pthread_exit(0);
 	monclient_t *client = (monclient_t*)arg;
@@ -115,6 +115,7 @@ void Minitor_HandelConnection(void *arg)
 	close(client->connid);
 	free(client);
 	pthread_exit(0);
+	return NULL;
 }
 
 /*https://www.tutorialspoint.com/http/http_message_examples.htm*/
