@@ -48,6 +48,11 @@ bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
 	zroxy_t *setting = state->input;
+
+	/*remove space form arg*/
+	if(arg)
+		while(*arg==' ') arg++;
+
     switch (key)
     {
 		case 'p': Parse_Ports(setting,arg); break;
@@ -220,7 +225,7 @@ void Parse_Ports(zroxy_t *ptr,char *str)
 			bool valid_ip = validate_ip(xptr);
 			if(valid_ip==false)
 			{
-				log_error("[!] Error Not valid ip -> %s.",ptr->ports->bindip);
+				log_error("[!] Error Not valid ip -> %s",ptr->ports->bindip);
 				exit(0);
 			}
 
