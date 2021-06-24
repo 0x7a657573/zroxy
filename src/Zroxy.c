@@ -20,7 +20,7 @@
 #include <argp.h>
 #include <stdbool.h>
 #include "args.h"
-#include "statistics/monitor.h"
+#include <monitor.h>
 #include "filter/filter.h"
 
 zroxy_t prg_setting = {0};
@@ -44,20 +44,22 @@ int main(int argc, const char **argv)
 	Log_init();
 	arg_Init(&prg_setting,argc,argv);
 
-	/*check for dns server*/
-	if(prg_setting.dnsserver)
-	{
-		prg_setting.dnsserver->Socks = prg_setting.socks; /*copy socks setting*/
-		log_info("start dns server ...");
-		dnsserver_init(prg_setting.dnsserver);
-	}
-
-	statistics_t *state = NULL;
+	mon_t *monitor = NULL;
 	/*check Monitor*/
 	if(prg_setting.monitorPort)
 	{
 		log_info("enable monitor on port %i",*prg_setting.monitorPort);
-		state = monitor_Init(prg_setting.monitorPort);
+		monitor = monitor_Init(prg_setting.monitorPort);
+	}
+
+	/*check for dns server*/
+	if(prg_setting.dnsserver)
+	{
+		if(monitor)
+			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
+		prg_setting.dnsserver->Socks = prg_setting.socks; /*copy socks setting*/
+		log_info("start dns server ...");
+		dnsserver_init(prg_setting.dnsserver);
 	}
 
 	/*chack white list*/
@@ -70,7 +72,11 @@ int main(int argc, const char **argv)
 	}
 
 	lport_t *p=prg_setting.ports;
-	SniServer_t Xconf = { /*.Port = {0},*/ .Socks = NULL ,.sta = state ,.wlist = whitelist };
+	statistics_t *SniStat = NULL;
+	if(monitor)
+		SniStat = monitor_AddNewStat(monitor,"SNI Server");
+
+	SniServer_t Xconf = { /*.Port = {0},*/ .Socks = NULL ,.sta = SniStat ,.wlist = whitelist };
 	/*if Set Socks proxy*/
 	if(prg_setting.socks)
 	{

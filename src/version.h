@@ -8,7 +8,16 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "0.6"
+#define version	 "0.7"
+/*
+ * args: fix in passing argument error
+ * SNI : Limit client buffer to 8kb
+ * Statistics : change folder
+ * DNS : Move to thered from fork
+ * DNS : Add statistic
+ */
+
+//#define version	 "0.6"
 /*
  * DNS : installs SIGCHLD handler to die when the child exits
  * DNS : Fix bug in not exit from fork process

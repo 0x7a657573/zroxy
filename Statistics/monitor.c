@@ -14,14 +14,14 @@
 #include <arpa/inet.h>
 #include "monitor.h"
 #include "log/log.h"
-#include "net/net.h"
+#include "net.h"
 #include <inttypes.h>
 
 void *Monitor_HandleConnection(void *vargp);
 void Conv_Time(time_t Up,UpTime_t *tm);
 char *Print_humanSize(char *ptr,uint64_t bytes);
 
-statistics_t *monitor_Init(uint16_t *Port)
+mon_t *monitor_Init(uint16_t *Port)
 {
 	int sockfd;
 
@@ -33,7 +33,8 @@ statistics_t *monitor_Init(uint16_t *Port)
 
 	log_info("monitor listen on %d",*Port);
 	mon_t	*mon = malloc(sizeof(mon_t));
-	state_init(&mon->state);		/*create statistics var*/
+	mon->state = NULL;
+	//state_init(&mon->state);		/*create statistics var*/
 	mon->fd = sockfd;
 	mon->Port = *Port;
 
@@ -41,7 +42,15 @@ statistics_t *monitor_Init(uint16_t *Port)
 	pthread_create(&thread_id, NULL, Monitor_HandleConnection, (void*)mon);
 	//pthread_join(thread_id, NULL);
 
-	return mon->state;
+	return mon;
+}
+
+statistics_t *monitor_AddNewStat(mon_t *self,char *name)
+{
+	statistics_t *stat = self->state;
+	state_init(&self->state,name);		/*create statistics var*/
+	self->state->next = stat;
+	return self->state;
 }
 
 void *Minitor_HandelConnection(void *arg);
@@ -56,8 +65,8 @@ void *Monitor_HandleConnection(void *vargp)
 	while(1)
 	{
 		client = (monclient_t *)malloc(sizeof(monclient_t));
-		client->state = mon->state;
 		client->connid = accept(sockfd, (struct sockaddr*)&client->cli, &client->addr_len);
+		client->state = mon->state;
 		if (client->connid < 0)
 		{
 			free(client);
@@ -119,31 +128,40 @@ void *Minitor_HandelConnection(void *arg)
 }
 
 /*https://www.tutorialspoint.com/http/http_message_examples.htm*/
-void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *sta)
+void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *stat)
 {
-	/*incoming data and possess it*/
-	stat_t stdata;
-	state_get(sta,&stdata);	/*get static data*/
-	time_t CurrentTime;
-	time ( &CurrentTime );
-	time_t LiveTime = CurrentTime - stdata.StartTime;
-	UpTime_t lt;
-	Conv_Time(LiveTime,&lt);
-
 	char message[2048] = {0};
 	char *ptr = message;
 
-	ptr += sprintf(ptr,"Up Time: %i days, %i:%i:%i </br>", lt.tm_yday,lt.tm_hour,lt.tm_min,lt.tm_sec);
-	ptr += sprintf(ptr,"Max Connection : %i</br>",stdata.MaxConnection);
-	ptr += sprintf(ptr,"Active Connection : %i</br>",stdata.ActiveConnection);
-	ptr += sprintf(ptr,"Total Connection : %i</br>",stdata.TotalConnection);
+	statistics_t *sta = stat;
+	while(sta)
+	{
+		/*incoming data and possess it*/
+		stat_t stdata;
+		state_get(sta,&stdata);	/*get static data*/
+		time_t CurrentTime;
+		time ( &CurrentTime );
+		time_t LiveTime = CurrentTime - stdata.StartTime;
+		UpTime_t lt;
+		Conv_Time(LiveTime,&lt);
 
-	ptr += sprintf(ptr,"Total Rx : ");
-	ptr = Print_humanSize(ptr,stdata.TotalRx);
-	ptr += sprintf(ptr,"</br>");
-	ptr += sprintf(ptr,"Total Tx : ");
-	ptr = Print_humanSize(ptr,stdata.TotalTx);
-	ptr += sprintf(ptr,"</br>");
+		ptr += sprintf(ptr,"<h1>%s</h1> </br>",sta->name);
+		ptr += sprintf(ptr,"Up Time: %i days, %i:%i:%i </br>", lt.tm_yday,lt.tm_hour,lt.tm_min,lt.tm_sec);
+		ptr += sprintf(ptr,"Max Connection : %i</br>",stdata.MaxConnection);
+		ptr += sprintf(ptr,"Active Connection : %i</br>",stdata.ActiveConnection);
+		ptr += sprintf(ptr,"Total Connection : %i</br>",stdata.TotalConnection);
+
+		ptr += sprintf(ptr,"Total Rx : ");
+		ptr = Print_humanSize(ptr,stdata.TotalRx);
+		ptr += sprintf(ptr,"</br>");
+		ptr += sprintf(ptr,"Total Tx : ");
+		ptr = Print_humanSize(ptr,stdata.TotalTx);
+		ptr += sprintf(ptr,"</br></br>");
+
+		sta = (statistics_t*)sta->next;
+	}
+
+
 
 
 

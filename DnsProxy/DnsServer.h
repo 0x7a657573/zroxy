@@ -11,7 +11,10 @@
 #include <stdbool.h>
 #include <config.h>
 #include <socks.h>
+#include <monitor.h>
 #include <sys/socket.h>
+
+
 
 typedef struct
 {
@@ -25,6 +28,7 @@ typedef struct
 	uint16_t 	  port;
 	dnsUpstream_t dnsserver;
 	sockshost_t	  *Socks;
+	statistics_t  *Stat;
 }dnshost_t;
 
 void dnsserver_init(dnshost_t *config);

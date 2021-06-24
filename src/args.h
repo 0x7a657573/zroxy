@@ -10,11 +10,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <SniProxy.h>
-
-#include "../DnsProxy/DnsServer.h"
-
-
-
+#include <DnsServer.h>
 
 typedef struct
 {

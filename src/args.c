@@ -84,7 +84,7 @@ bool validate_number(char *str)
 //check whether the IP is valid or not
 bool validate_ip(char *ip)
 {
-   int i, num, dots = 0;
+   int num=0, dots = 0;
    char *ptr;
    if (ip == NULL)
       return false;
@@ -96,20 +96,22 @@ bool validate_ip(char *ip)
 
    while (ptr)
    {
+	   num = -1;
 	   //check whether the sub string is holding only number or not
-      if (!validate_number(ptr))
-         return false;
+      if(validate_number(ptr)==true)
+    	  //convert substring to number
+    	  num = atoi(ptr);
 
-         //convert substring to number
-         num = atoi(ptr);
-         if (num >= 0 && num <= 255)
-         {
+
+       if (num >= 0 && num <= 255)
+       {
         	//cut the next part of the string
             ptr = strtok(NULL, ".");
             if (ptr != NULL)
                //increase the dot count
                dots++;
-         } else
+       }
+       else
             return false;
     }
 
@@ -140,6 +142,7 @@ void Parse_DNSServer(zroxy_t *ptr,char *str)
 		ptr->dnsserver = (dnshost_t*)malloc(sizeof(dnshost_t));
 	}
 
+	ptr->dnsserver->Stat = NULL;
 	ptr->dnsserver->port = 53;
 	bzero(ptr->dnsserver->host,_MaxIPAddress_);
 	strcpy(ptr->dnsserver->host,"127.0.0.1");

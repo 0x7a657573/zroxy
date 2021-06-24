@@ -18,10 +18,10 @@ set(SOURCES
     SniProxy/SniClient.c
     SniProxy/log/loglock.c
     SniProxy/log/log.c
-    SniProxy/net/net.c
+    Network/net.c
     SniProxy/filter/filter.c
-    SniProxy/statistics/monitor.c
-    SniProxy/statistics/statistics.c
+    Statistics/monitor.c
+    Statistics/statistics.c
     DnsProxy/DnsServer.c
     DnsProxy/dnsproxy.c
 )
@@ -37,6 +37,8 @@ target_include_directories(zroxy
         ${PROJECT_SOURCE_DIR}/Socks
         ${PROJECT_SOURCE_DIR}/SniProxy
         ${PROJECT_SOURCE_DIR}/DnsProxy
+        ${PROJECT_SOURCE_DIR}/Statistics
+        ${PROJECT_SOURCE_DIR}/Network
 )
 
 TARGET_LINK_LIBRARIES(zroxy
