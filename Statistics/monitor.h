@@ -4,8 +4,12 @@
  *  Created on: Feb 17, 2020
  *      Author: zeus
  */
+#ifndef MONITOR_H_
+#define MONITOR_H_
 #include <stdbool.h>
-#include "statistics.h"
+#include <statistics.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 typedef struct
 {
@@ -30,5 +34,7 @@ typedef struct
 	uint8_t  tm_sec;
 }UpTime_t;
 
-statistics_t *monitor_Init(uint16_t *Port);
+mon_t *monitor_Init(uint16_t *Port);
+statistics_t *monitor_AddNewStat(mon_t *self,char *name);
 
+#endif /* MONITOR_H_ */

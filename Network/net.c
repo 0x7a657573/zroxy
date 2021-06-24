@@ -65,6 +65,21 @@ bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd)
 
 	struct  sockaddr_in servaddr;
 
+	/*
+	 * 	╔═══════════╦══════════════════════════╗
+		║           ║       Socket Type        ║
+		║ Address   ╟────────────┬─────────────╢
+		║ Family    ║ SOCK_DGRAM │ SOCK_STREAM ║
+		╠═══════════╬════════════╪═════════════╣
+		║ IPX/SPX   ║ SPX        │ IPX         ║
+		║ NetBIOS   ║ NetBIOS    │ n/a         ║
+		║ IPv4      ║ UDP        │ TCP         ║
+		║ AppleTalk ║ DDP        │ ADSP        ║
+		║ IPv6      ║ UDP        │ TCP         ║
+		║ IrDA      ║ IrLMP      │ IrTTP       ║
+		║ Bluetooth ║ ?          │ RFCOMM      ║
+		╚═══════════╩════════════╧═════════════╝
+	 */
 	// socket create and verification
 	*sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (*sockfd == -1)

@@ -15,7 +15,7 @@
 #include "log/log.h"
 #include <string.h>
 #include "SniClient.h"
-#include "net/net.h"
+#include "net.h"
 #include <arpa/inet.h>
 
 void *SniProxy_HandleIncomingConnection(void *vargp);

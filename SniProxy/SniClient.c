@@ -16,7 +16,7 @@
 #include <string.h>
 #include "SniClient.h"
 #include <socks.h>
-#include "net/net.h"
+#include "net.h"
 #include <stdint.h>
 
 
@@ -28,7 +28,7 @@ void *SniClientHandler(void *arg)
 	lport_t 	xport = client->SniConfig.Port;
 
 	//log_info("client thread %i",client->connid);
-	uint8_t buffer[0x4000]; /*16Kb memory tmp*/
+	uint8_t buffer[0x2000]; /*8Kb memory tmp*/
 	uint32_t Windex = 0;
 	char HostName[_MaxHostName_] = {0};
 	uint32_t TotalRx = 0;

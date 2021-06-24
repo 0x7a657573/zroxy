@@ -9,7 +9,7 @@
 #define SNIPROXY_H_
 #include <stdint.h>
 #include <stdbool.h>
-#include <statistics/statistics.h>
+#include <statistics.h>
 #include <filter/filter.h>
 #include <socks.h>
 

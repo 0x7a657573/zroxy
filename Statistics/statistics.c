@@ -10,7 +10,7 @@
 #include <string.h>
 
 
-void state_init(statistics_t **self)
+void state_init(statistics_t **self,char *name)
 {
 	*self = malloc(sizeof(statistics_t));
 	memset(*self,0,sizeof(statistics_t));
@@ -19,7 +19,9 @@ void state_init(statistics_t **self)
 	    log_error("statistics mutex init has failed");
 	    exit(0);
 	}
+	strcpy((*self)->name,name);
 	time ( &(*self)->stat.StartTime );
+	(*self)->next = NULL;
 }
 
 

@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <config.h>
 #include <sys/select.h>
-
+#include <arpa/inet.h>
 #include "DnsServer.h"
 
 
@@ -26,7 +26,13 @@ typedef struct
 	sockshost_t	  socks;
 	/*socket file handler*/
 	int local_sock;
+	statistics_t  *Stat;
+	char buffer[TMP_BUF_SIZE];
+	int  len;
+	struct sockaddr_in client;
+	socklen_t client_size;
 }dnsserver_t;
+
 
 dnsserver_t *localdns_init_config(dnshost_t *conf);
 void localdns_free(dnsserver_t *dns);

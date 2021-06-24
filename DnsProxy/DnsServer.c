@@ -24,11 +24,11 @@ void dnsserver_init(dnshost_t *config)
 	pthread_create(&thread_id, NULL, dnsserver_HandleIncomingConnection, (void*)config);
 }
 
-// handle children
-void reaper_handle (int sig)
-{
-  while (waitpid(-1, NULL, WNOHANG) > 0) { };
-}
+//// handle children
+//void reaper_handle (int sig)
+//{
+//  while (waitpid(-1, NULL, WNOHANG) > 0) { };
+//}
 
 void *dnsserver_HandleIncomingConnection(void *vargp)
 {
@@ -50,11 +50,11 @@ void *dnsserver_HandleIncomingConnection(void *vargp)
 
 	log_info("dns server start on %s:%d",conf->host,conf->port);
 
-	// setup SIGCHLD handler to kill off zombie children
-	struct sigaction reaper;
-	memset(&reaper, 0, sizeof(struct sigaction));
-	reaper.sa_handler = reaper_handle;
-	sigaction(SIGCHLD, &reaper, 0);
+//	// setup SIGCHLD handler to kill off zombie children
+//	struct sigaction reaper;
+//	memset(&reaper, 0, sizeof(struct sigaction));
+//	reaper.sa_handler = reaper_handle;
+//	sigaction(SIGCHLD, &reaper, 0);
 
 	while(1)
 	{
