@@ -105,7 +105,6 @@ void *DNS_HandleIncomingRequset(void *dnsreq)
 		//Update statistics
 		if(dns->Stat)
 		{
-			state_IncConnection(dns->Stat);
 			state_RxTxClose(dns->Stat,rlen,dns->len+2);
 		}
 
@@ -141,6 +140,9 @@ bool localdns_pull(dnsserver_t *dns)
 	/*clone dns server*/
 	dnsserver_t *ptr = malloc(sizeof(dnsserver_t));
 	memcpy(ptr,dns,sizeof(dnsserver_t));
+
+	if(dns->Stat)
+		state_IncConnection(dns->Stat);
 
 	// fork so we can keep receiving requests
 	pthread_t thread_id;
