@@ -8,7 +8,12 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "0.7"
+#define version	 "0.8"
+/*
+ * DNS : fix Statistics
+ */
+
+//#define version	 "0.7"
 /*
  * args: fix in passing argument error
  * SNI : Limit client buffer to 8kb
