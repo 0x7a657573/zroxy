@@ -24,5 +24,16 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
 
 
 #  Features
+- Supporting incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs
+- Support upstream DIRECT/SOCKS4/SOCKS5 proxy
+- Support independent port for one service (src/dst)
+- Name-based proxying of HTTPS without decrypting traffic.
+- Supports both TLS and HTTP protocols.
+- Traffic monitor with web user interface
+- forward DNS request (**UDP**) from SOCKS5 (**TCP**)
+- Support domain whitelist
+- Multi-thread
+- Etc.
+
 #  Usage
 #  Build
