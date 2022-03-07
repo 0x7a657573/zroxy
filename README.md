@@ -37,7 +37,7 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
 
 #  Usage
 ## Command Details
-
+```
     $ zroxy --help
     
     Usage: zroxy [OPTION...]
@@ -54,6 +54,24 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
 	  -w, --white=white list     white list for host -w /etc/withlist.txt
 	  -?, --help                 Give this help list
 	      --usage                Give a short usage message
-
+```
 
 #  Build
+for build zroxy you need `CMake` tools. please check installed CMake on your device.
+## Linux/OS X/FreeBSD
+
+```
+	# clone the project 
+	git clone https://github.com/0x7a657573/zroxy.git
+	cd zroxy
+	
+	# make build dir
+	mkdir build
+	cd build
+	
+	# config project
+	cmake ..
+	
+	# build
+	make
+```
