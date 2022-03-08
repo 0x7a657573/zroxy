@@ -4,7 +4,7 @@
  *  Created on: Jun 2, 2021
  *      Author: zeus
  */
-#include "../DnsProxy/DnsServer.h"
+#include "../dnsproxy/dnsserver.h"
 
 #include <log/log.h>
 #include <unistd.h>  	/*Header file for sleep(). man 3 sleep for details.*/

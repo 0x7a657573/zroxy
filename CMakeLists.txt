@@ -11,19 +11,19 @@ find_package(Threads REQUIRED)
 
 # Create a sources variable with a link to all cpp files to compile
 set(SOURCES
-    src/Zroxy.c
+    src/zroxy.c
     src/args.c
-    Socks/socks.c
-    SniProxy/SniProxy.c
-    SniProxy/SniClient.c
-    SniProxy/log/loglock.c
-    SniProxy/log/log.c
-    Network/net.c
-    SniProxy/filter/filter.c
-    Statistics/monitor.c
-    Statistics/statistics.c
-    DnsProxy/DnsServer.c
-    DnsProxy/dnsproxy.c
+    socks/socks.c
+    sniproxy/sniproxy.c
+    sniproxy/sniclient.c
+    sniproxy/log/loglock.c
+    sniproxy/log/log.c
+    network/net.c
+    sniproxy/filter/filter.c
+    statistics/monitor.c
+    statistics/statistics.c
+    dnsproxy/dnsserver.c
+    dnsproxy/dnsproxy.c
 )
 
 # Add an executable
@@ -34,11 +34,11 @@ add_executable(zroxy ${SOURCES})
 target_include_directories(zroxy
     PRIVATE 
         ${PROJECT_SOURCE_DIR}/src
-        ${PROJECT_SOURCE_DIR}/Socks
-        ${PROJECT_SOURCE_DIR}/SniProxy
-        ${PROJECT_SOURCE_DIR}/DnsProxy
-        ${PROJECT_SOURCE_DIR}/Statistics
-        ${PROJECT_SOURCE_DIR}/Network
+        ${PROJECT_SOURCE_DIR}/socks
+        ${PROJECT_SOURCE_DIR}/sniproxy
+        ${PROJECT_SOURCE_DIR}/dnsproxy
+        ${PROJECT_SOURCE_DIR}/statistics
+        ${PROJECT_SOURCE_DIR}/network
 )
 
 TARGET_LINK_LIBRARIES(zroxy
