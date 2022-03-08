@@ -9,8 +9,8 @@
 #define ARGS_H_
 #include <stdint.h>
 #include <stdbool.h>
-#include <SniProxy.h>
-#include <DnsServer.h>
+#include <sniproxy.h>
+#include <dnsserver.h>
 
 typedef struct
 {

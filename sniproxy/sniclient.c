@@ -11,10 +11,10 @@
 #include <sys/types.h>
 #include <unistd.h>  	/*Header file for sleep(). man 3 sleep for details.*/
 #include <pthread.h>	/* http://www.csc.villanova.edu/~mdamian/threads/posixthreads.html */
-#include "SniProxy.h"
+#include "sniproxy.h"
 #include "log/log.h"
 #include <string.h>
-#include "SniClient.h"
+#include "sniclient.h"
 #include <socks.h>
 #include "net.h"
 #include <stdint.h>

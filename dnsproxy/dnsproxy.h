@@ -12,7 +12,7 @@
 #include <config.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
-#include "DnsServer.h"
+#include "dnsserver.h"
 
 
 #define TMP_BUF_SIZE	512
