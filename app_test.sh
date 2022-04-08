@@ -20,7 +20,7 @@ function stop_socks ()
 function start_zorxy ()
 {
     zroxy_path=$1
-    nohup $zroxy_path -p127.0.0.1:4433#443 -d 0.0.0.0:53000 -u8.8.8.8 -s127.0.0.1:58080 > /tmp/zroxy.txt &
+    nohup $zroxy_path -p127.0.0.1:4433#443 -d 127.0.0.1:53000 -u8.8.8.8 -s127.0.0.1:58080 > /tmp/zroxy.txt &
     echo $!
 }
 
