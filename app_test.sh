@@ -1,5 +1,10 @@
 #!/bin/bash
 
+C_RED="\033[0;31m"
+C_GREEN="\033[0;32m"
+C_WHITE="\033[1;37m"
+C_NoColor="\033[0m"
+C_YELLOW="\033[0;33m"
 
 function start_socks () 
 {
@@ -24,10 +29,28 @@ function stop_zroxy ()
     echo $(kill -9 $1)
 }
 
+function domain_test ()
+{
+    org_ip=$(dig $1 A @8.8.8.8 +short -p53 +tcp | head -n 1)
+    zro_ip=$(dig $1 A @127.0.0.1 +short -p53000  | head -n 1)
+    if [ "$org_ip" = "$zro_ip" ]; then
+        echo "pass"
+    else
+        echo "fail"
+    fi
+}
+
 function dns_test ()
 {
-    echo "start dns test..."
-    sleep 5
+    domains=("ping.eu" "blog.com" "bing.com" "wix.com" "gitlab.com")
+    for domain in ${domains[@]}; do
+        res=$(domain_test $domain)
+        if [ "$res" = "pass" ]; then
+            echo -e "Domain $C_YELLOW$domain$C_NoColor Test $C_GREEN$res$C_NoColor" >&2
+        else
+            echo -e "Domain $C_YELLOW$domain$C_NoColor Test $C_RED$res$C_NoColor" >&2    
+        fi
+    done
 }
 
 zroxy=$1
@@ -41,7 +64,10 @@ socks_pid=$(start_socks)
 echo "start zroxy app"
 zroxy_pid=$(start_zorxy $zroxy)
 
-dns_test "ping.eu"
+sleep 0.5
+echo -e "\ndsn test..."
+res=$(dns_test)
+
 
 #stop zroxy
 echo "stop zroxy"
