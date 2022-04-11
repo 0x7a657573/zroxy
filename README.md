@@ -32,6 +32,7 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
 - Traffic monitor with web user interface
 - forward DNS request (**UDP**) from SOCKS5 (**TCP**)
 - Support domain whitelist
+- auto reload whitelist
 - Multi-thread
 - Etc.
 
