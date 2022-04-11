@@ -21,6 +21,7 @@ typedef struct
 
 typedef struct
 {
+	char   *filepath; /*filter file path*/
 	item_t *item;			/*start */
 	pthread_mutex_t Lock;	/*thread lock*/
 }filter_t;
