@@ -8,7 +8,12 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "0.8"
+#define version	 "0.9"
+/*
+ * filter: auto reload filter
+*/
+
+//#define version	 "0.8"
 /*
  * DNS : fix Statistics
  */
