@@ -45,16 +45,18 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
 	zroxy v0.8
 	simple sni and dns proxy.
 
-	  -d, --dport=DNS local server   dns server that listens. -d 0.0.0.0:53
-	  -m, --monitor=monitor port monitor port that listens. -m 1234
-	  -p, --port=sni port        sni port that listens.
-	                             <bind ip>:<local port>#<remote port>
-	                              -p 127.0.0.1:8080#80,4433#433,853...
-	  -s, --socks=socks proxy    set proxy for up stream. -s 127.0.0.1:9050
-	  -u, --dns=DNS servers to use   upstream DNS providers. -u 8.8.8.8
-	  -w, --white=white list     white list for host -w /etc/withlist.txt
-	  -?, --help                 Give this help list
-	      --usage                Give a short usage message
+		-c, --config=path to config   path to config. -c /etc/zroxy.conf
+		-d, --ldns=local DNS server   dns server that listens. -d 0.0.0.0:53
+		-m, --monitor=monitor port monitor port that listens. -m 1234
+		-p, --port=sni port        sni port that listens.
+									<bind ip>:<local port>!<remote port>
+									-p 127.0.0.1:8080!80,4433!433,853...
+		-s, --socks=socks proxy    set proxy for up stream. -s 127.0.0.1:9050
+		-u, --dns=upstream DNS providers
+									upstream DNS providers. -u 8.8.8.8
+		-w, --white=white list     white list for host -w /etc/withlist.txt
+		-?, --help                 Give this help list
+			--usage                Give a short usage message
 ```
 
 #  Build
