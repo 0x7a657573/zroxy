@@ -42,7 +42,7 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
     $ zroxy --help
     
     Usage: zroxy [OPTION...]
-	zroxy v0.8
+	zroxy v1.0
 	simple sni and dns proxy.
 
 		-c, --config=path to config   path to config. -c /etc/zroxy.conf
