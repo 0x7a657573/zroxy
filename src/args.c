@@ -30,7 +30,7 @@ bool Parse_config(zroxy_t *ptr,char *str);
 static struct argp_option options[] =
 {
 	{ "config", 'c' , "path to config" , 0, "path to config. -c /etc/zroxy.conf"},
-    { "port", 'p', "sni port", 0, "sni port that listens.\n<bind ip>:<local port>!<remote port>\n -p 127.0.0.1:8080!80,4433!433,853..."},
+    { "port", 'p', "sni port", 0, "sni port that listens.\n<bind ip>:<local port>@<remote port>\n -p 127.0.0.1:8080@80,4433@433,853..."},
 	{ "socks", 's', "socks proxy", 0, "set proxy for up stream. -s 127.0.0.1:9050"},
 	{ "monitor", 'm', "monitor port", 0, "monitor port that listens. -m 1234"},
 	{ "white", 'w' , "white list" , 0, "white list for host -w /etc/withlist.txt"},
@@ -187,7 +187,7 @@ bool Parse_config(zroxy_t *ptr,char *str)
 	{
 		char key[100]={0};
 		char val[100]={0};
-		int xpars = sscanf(line,"%99[a-zA-Z_ ]=%99[!:,a-zA-Z.0-9 ]",key,val);
+		int xpars = sscanf(line,"%99[a-zA-Z_ ]=%99[@:,a-zA-Z.0-9 ]",key,val);
 		if(xpars!=2)
 			continue;
 		char *fix_key = toLower(trim(key));
@@ -330,7 +330,7 @@ void Parse_Ports(zroxy_t *ptr,char *str)
 			strcpy(ptr->ports->bindip,"0.0.0.0");
 		}
 
-		char *Pptr = strchr(xptr,'!');
+		char *Pptr = strchr(xptr,'@');
 		if(Pptr)
 		{
 			*Pptr++=0;
