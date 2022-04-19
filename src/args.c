@@ -24,15 +24,18 @@ void Parse_Monit(zroxy_t *ptr,char *str);
 void Parse_whitelist(zroxy_t *ptr,char *str);
 void Parse_DNSServer(zroxy_t *ptr,char *str);
 void Parse_DnsUpstream(zroxy_t *ptr,char *str);
+bool Parse_config(zroxy_t *ptr,char *str);
+
 
 static struct argp_option options[] =
 {
-    { "port", 'p', "sni port", 0, "sni port that listens.\n<bind ip>:<local port>#<remote port>\n -p 127.0.0.1:8080#80,4433#433,853..."},
+	{ "config", 'c' , "path to config" , 0, "path to config. -c /etc/zroxy.conf"},
+    { "port", 'p', "sni port", 0, "sni port that listens.\n<bind ip>:<local port>!<remote port>\n -p 127.0.0.1:8080!80,4433!433,853..."},
 	{ "socks", 's', "socks proxy", 0, "set proxy for up stream. -s 127.0.0.1:9050"},
 	{ "monitor", 'm', "monitor port", 0, "monitor port that listens. -m 1234"},
 	{ "white", 'w' , "white list" , 0, "white list for host -w /etc/withlist.txt"},
-	{ "dport", 'd' , "DNS local server" , 0, "dns server that listens. -d 0.0.0.0:53"},
-	{ "dns", 'u' , "DNS servers to use" , 0, "upstream DNS providers. -u 8.8.8.8"},
+	{ "ldns", 'd' , "local DNS server" , 0, "dns server that listens. -d 0.0.0.0:53"},
+	{ "dns", 'u' , "upstream DNS providers" , 0, "upstream DNS providers. -u 8.8.8.8"},
     { 0 }
 };
 
@@ -41,7 +44,13 @@ static struct argp argp = { options, parse_opt, NULL, doc, 0, 0, 0 };
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
 {
 	pgp->ports = NULL;
-    argp_parse(&argp, argc, (char **)argv, 0, 0, pgp);
+	/*ran without parameter*/
+	if(argc==1) 
+	{
+		return Parse_config(pgp,DEF_CONFIG_PATH);
+	}
+	
+	argp_parse(&argp, argc, (char **)argv, 0, 0, pgp);
     return true;
 }
 
@@ -55,6 +64,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 
     switch (key)
     {
+		case 'c': Parse_config(setting,arg); break;
 		case 'p': Parse_Ports(setting,arg); break;
 		case 's': Parse_Socks(setting,arg); break;
 		case 'm': Parse_Monit(setting,arg); break;
@@ -65,6 +75,31 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		default: return ARGP_ERR_UNKNOWN;
     }
     return 0;
+}
+
+char *ltrim(char *s)
+{
+    while(isspace(*s)) s++;
+    return s;
+}
+
+char *rtrim(char *s)
+{
+    char* back = s + strlen(s);
+    while(isspace(*--back));
+    *(back+1) = '\0';
+    return s;
+}
+
+char *trim(char *s)
+{
+    return rtrim(ltrim(s)); 
+}
+
+char* toLower(char* s) 
+{
+  for(char *p=s; *p; p++) *p=tolower(*p);
+  return s;
 }
 
 bool validate_number(char *str)
@@ -121,12 +156,68 @@ bool validate_ip(char *ip)
       return true;
 }
 
+int config_find_key(char *key)
+{
+	for(struct argp_option *ptr=options;ptr->name!=NULL;ptr++)
+	{
+		if(strcmp(ptr->name,key)==0)
+			return ptr->key;
+	}
+	return -1;
+}
+
+bool Parse_config(zroxy_t *ptr,char *str)
+{
+	while(*str==' ') str++; /*remove space*/
+	FILE *ConfigFile  = fopen(str, "r"); // read only
+	if(ConfigFile==NULL)
+	{
+		log_error("config file not found");
+		return false;
+	}
+
+	/*read and load config from file*/
+	struct argp_state state = {.input = ptr};
+	bool ret_status = true;
+	size_t len = 0;
+	char *line = NULL;
+	ssize_t read;
+	
+	while ((read = getline(&line, &len, ConfigFile)) != -1)
+	{
+		char key[100]={0};
+		char val[100]={0};
+		int xpars = sscanf(line,"%99[a-zA-Z_ ]=%99[!:,a-zA-Z.0-9 ]",key,val);
+		if(xpars!=2)
+			continue;
+		char *fix_key = toLower(trim(key));
+		char *fix_val = toLower(trim(val));
+
+		int ckey = config_find_key(fix_key);
+		if(ckey<0)
+		{
+			log_error("error invalid key in config: %s",fix_key);
+			ret_status = false;
+			break;
+		}
+
+		if(parse_opt(ckey, fix_val, &state)!=0)
+		{
+			log_error("error invalid value in config: %s",fix_val);
+			ret_status = false;
+			break;
+		}
+	}
+
+	free(line);
+	fclose(ConfigFile);
+	return ret_status;
+}
+
 void Parse_whitelist(zroxy_t *ptr,char *str)
 {
 	while(*str==' ') str++; /*remove space before path*/
-	ptr->WhitePath = (char *)malloc(strlen(str)+1);
-	bzero(ptr->WhitePath,strlen(str)+1);
-	strcpy(ptr->WhitePath,str);
+	ptr->WhitePath = strdup(str);
 }
 
 void Parse_Monit(zroxy_t *ptr,char *str)
@@ -239,7 +330,7 @@ void Parse_Ports(zroxy_t *ptr,char *str)
 			strcpy(ptr->ports->bindip,"0.0.0.0");
 		}
 
-		char *Pptr = strchr(xptr,'#');
+		char *Pptr = strchr(xptr,'!');
 		if(Pptr)
 		{
 			*Pptr++=0;
@@ -268,3 +359,5 @@ void Free_PortList(zroxy_t *ptr)
 		p=next;
 	}
 }
+
+

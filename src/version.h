@@ -8,7 +8,14 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "0.9"
+#define version	 "1.0"
+/*
+ * args: add flag -c for load config file
+ * args: add load config from file
+ * args: check config file when no args uses
+*/
+
+//#define version	 "0.9"
 /*
  * filter: auto reload filter
 */
