@@ -12,6 +12,8 @@
 #include <sniproxy.h>
 #include <dnsserver.h>
 
+#define DEF_CONFIG_PATH	"zroxy.conf"
+
 typedef struct
 {
 	lport_t 	*ports;

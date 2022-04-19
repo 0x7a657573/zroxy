@@ -46,30 +46,7 @@ void filter_Reload(filter_t *self)
 	ssize_t read;
 	while ((read = getline(&line, &len, FilterFile)) != -1)
 	{
-		if(read>=_MaxHostName_)
-		{
-			log_error("Filter Item Len Bigest Buffer");
-			break;
-		}
-
-	    self->item = malloc(sizeof(item_t));
-	    if(self->item==NULL)
-	    {
-	    	log_error("we don't have enough memory for loading filter");
-	    	break;
-	    }
-
-	    memset(self->item,0,sizeof(item_t));
-
-	    char *pos;	/*remove new line*/
-	    if ((pos=strchr(line, '\n')) != NULL)
-	        *pos = '\0';
-
-	    strcpy(self->item->Rec,line);
-
-	    self->item->Next = Pvitem;
-	    Pvitem = self->item;
-	    num++;
+		log_info("we read %s",line);
 	}
 
 	free(line);

@@ -42,8 +42,12 @@ int main(int argc, const char **argv)
 {
 
 	Log_init();
-	arg_Init(&prg_setting,argc,argv);
-
+	if(arg_Init(&prg_setting,argc,argv)==false)
+	{
+		log_error("use --help for more");
+		return 1;
+	}
+	
 	mon_t *monitor = NULL;
 	/*check Monitor*/
 	if(prg_setting.monitorPort)
