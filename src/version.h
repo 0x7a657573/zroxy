@@ -8,7 +8,12 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.0"
+#define version	 "1.1"
+/*
+* dns: add dns decoder packet library
+*/
+
+//#define version	 "1.0"
 /*
  * args: add flag -c for load config file
  * args: add load config from file

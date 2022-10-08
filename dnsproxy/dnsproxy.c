@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <socks.h>
 #include <pthread.h>
+#include <dns.h>
 
 dnsserver_t *localdns_init_config(dnshost_t *conf)
 {
@@ -83,6 +84,21 @@ void *DNS_HandleIncomingRequset(void *dnsreq)
 	dnsserver_t *dns = (dnsserver_t*) dnsreq;
 	do
 	{
+
+		/*Check and Print DNS Question*/
+		struct Message dns_msg = {0};
+		if(dns_decode_msg(&dns_msg, &dns->buffer[2], dns->len))
+		{
+			struct Question *q;
+			q = dns_msg.questions;
+			while (q) 
+			{
+				log_info("DNS Question { qName '%s'}",q->qName);
+				q = q->next;
+			}
+		}
+		free_msg(&dns_msg);
+
 		// make socks5 socket
 		int sockssocket = 0;
 		if(!socks5_connect(&sockssocket,dns->socks.host , dns->socks.port, dns->upstream.ip, dns->upstream.port))
@@ -95,8 +111,7 @@ void *DNS_HandleIncomingRequset(void *dnsreq)
 		// close socks socket
 		close(sockssocket);
 
-
-		log_info("DNS we GET %i and SEND %i",dns->len,rlen);
+		log_info("DNS SEND %i and GET %i",dns->len,rlen);
 
 		// forward the packet to the tcp dns server
 		// send the reply back to the client (minus the length at the beginning)
