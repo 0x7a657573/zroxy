@@ -24,6 +24,7 @@ set(SOURCES
     statistics/statistics.c
     dnsproxy/dnsserver.c
     dnsproxy/dnsproxy.c
+    dnsproxy/dns.c
 )
 
 # Add an executable

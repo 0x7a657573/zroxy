@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <string.h>
+#include "dns.h"
 
 void *dnsserver_HandleIncomingConnection(void *vargp);
 
