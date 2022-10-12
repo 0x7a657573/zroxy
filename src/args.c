@@ -282,18 +282,54 @@ void Parse_Socks(zroxy_t *ptr,char *str)
 {
 	ptr->socks = (sockshost_t*)malloc(sizeof(sockshost_t));
 	ptr->socks->port = 9050;
-	memset(ptr->socks->host,0,_MaxHostName_);
-
-	char *endname = strchr(str,':');
-	if(endname)
+	
+	char *Userpass = strchr(str,'@'); 
+	/*we have user passWord*/
+	if(Userpass)
 	{
-		*endname++ = 0;
-		strncpy(ptr->socks->host,str,_MaxHostName_-1);
-		ptr->socks->port = atol(endname);
+		*Userpass++ = 0;
+		char *ipPort = Userpass;
+		Userpass = str;
+
+		char *endname = strchr(Userpass,':');
+		if(endname)
+		{
+			*endname++ = 0;
+			ptr->socks->user = strdup(Userpass);
+			ptr->socks->pass = strdup(endname);
+		}
+		else
+		{
+			ptr->socks->user = strdup(Userpass);
+		}
+
+
+		endname = strchr(ipPort,':');
+		if(endname)
+		{
+			*endname++ = 0;
+			ptr->socks->host = strdup(ipPort);
+			ptr->socks->port = atol(endname);
+		}
+		else
+		{
+			ptr->socks->host = strdup(ipPort);
+		}
 	}
 	else
 	{
-		strncpy(ptr->socks->host,str,_MaxHostName_-1);
+		/*we don't have user password*/
+		char *endname = strchr(str,':');
+		if(endname)
+		{
+			*endname++ = 0;
+			ptr->socks->host = strdup(str);
+			ptr->socks->port = atol(endname);
+		}
+		else
+		{
+			ptr->socks->host = strdup(str);
+		}
 	}
 }
 
