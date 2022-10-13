@@ -101,7 +101,7 @@ void *DNS_HandleIncomingRequset(void *dnsreq)
 
 		// make socks5 socket
 		int sockssocket = 0;
-		if(!socks5_connect(&sockssocket,dns->socks.host , dns->socks.port, dns->upstream.ip, dns->upstream.port))
+		if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port))
 			break;
 
 		// forward dns query

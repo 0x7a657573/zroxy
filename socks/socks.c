@@ -16,10 +16,14 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include "socks.h"
+#include "net.h"
 
-bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const char *host, int port)
+
+bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port)
 {
-
+	uint16_t socks5_port = socks->port;
+	char *socks5_host = socks->host;
+	
 	 if((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	 {
 	     log_error("Socks Error : Could not create socket");
@@ -30,27 +34,42 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 serv_addr.sin_family = AF_INET;
 	 serv_addr.sin_port = htons(socks5_port);
 	 //serv_addr.sin_addr.s_addr = inet_addr(socks5_host);
+	
+	bool IsIp = isTrueIpAddress(socks5_host);
+	/*if host is domain need resolve domain*/
+	if(!IsIp)
+	{
+		bool status = net_connect(sockfd,socks5_host, socks5_port);
+		if (!status)
+		{
+			log_error("Socks Error: Connect to %s Failed", socks5_host);
+			return false;
+		}
+	}
+	else
+	{
+		if(inet_pton(AF_INET, socks5_host, &serv_addr.sin_addr)<=0)
+		{
+			log_error("inet_pton error occured");
+			return false;
+		}
 
-	 if(inet_pton(AF_INET, socks5_host, &serv_addr.sin_addr)<=0)
-	 {
-		 log_error("inet_pton error occured");
-	     return false;
-	 }
+		if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+		{
+			log_error("Socks Error : Connect Failed");
+			return false;
+		}
+	}
 
-	 if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-	 {
-		log_error("Socks Error : Connect Failed");
-	    return false;
-	 }
 
-	 uint8_t Tempbuf[300] = {0};
+	uint8_t Tempbuf[300] = {0};
     // SOCKS5 CLIENT HELLO
     // +-----+----------+----------+
     // | VER | NMETHODS | METHODS  |
     // +-----+----------+----------+
     // |  1  |    1     | 1 to 255 |
     // +-----+----------+----------+
-	 write(*sockfd,"\x05\x01\x00",3);	/*Write Hello*/
+	write(*sockfd,"\x05\x02\x00\x02",4);	/*Write Hello*/
 
     // SOCKS5 SERVER HELLO
     // +-----+--------+
@@ -76,17 +95,60 @@ bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const 
 	 uint8_t SocksMethod;
 	 if(read(*sockfd,&SocksMethod,sizeof(uint8_t))<=0)
 	 {
-		 log_error("[!] Error Read Socks Ver");
+		 log_error("[!] Error Read Socks Method");
 		 close(*sockfd);
 	 	 return false;
 	 }
 
-	 if(SocksMethod!=0)
+	 if(!(SocksMethod==0 || SocksMethod==2))
 	 {
 		 log_error("[!] We can not support Method %d",SocksMethod);
 		 close(*sockfd);
 		 return false;
 	 }
+	
+
+	if(SocksMethod==2)
+	{
+		/*Authentication With Socks,
+		*
+		* From RFC1929:
+		* Once the SOCKS V5 server has started, and the client has selected the
+		* Username/Password Authentication protocol, the Username/Password
+		* subnegotiation begins.  This begins with the client producing a
+		* Username/Password request:
+		*
+		* +----+------+----------+------+----------+
+		* |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
+		* +----+------+----------+------+----------+
+		* | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
+		* +----+------+----------+------+----------+
+		*
+		* The VER field contains the current version of the subnegotiation,
+		* which is X'01'
+		*/
+		uint8_t uLen = strlen(socks->user);
+		uint8_t pLen = strlen(socks->pass);
+		char temp[512+4] = {0};
+		int packet_len = sprintf(temp,"\x01%c%s%c%s",uLen,socks->user,pLen,socks->pass);
+		
+		write(*sockfd,temp,packet_len); /*write UserPass*/
+
+		SocksAuthenticationReplay_t SocksAuth;
+	 	if(read(*sockfd,&SocksAuth,sizeof(SocksAuthenticationReplay_t))<=0)
+	 	{
+			log_error("[!] Error Read Socks Authentication");
+			close(*sockfd);
+	 		return false;
+		}
+
+		if(SocksAuth.status!=0)
+		{
+			log_error("[!] Error Socks Authentication:%02X",SocksAuth.status);
+			close(*sockfd);
+	 		return false;
+		}
+	}
 
 	 /*check domain or ip*/
 	 in_addr_t host_ip = inet_addr(host);

@@ -8,7 +8,13 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.1"
+#define version	 "1.2"
+/*
+* socks: add domain support for socks
+* socks: add Authentication user/pass method(RFC 1929)
+*/
+
+//#define version	 "1.1"
 /*
 * dns: add dns decoder packet library
 */
