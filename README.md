@@ -25,7 +25,8 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
 
 #  Features
 - Supporting incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs
-- Support upstream DIRECT/SOCKS4/SOCKS5 proxy
+- Support upstream DIRECT/SOCKS5 proxy
+- Support SOCKS5 user/pass Authentication method(RFC 1929)
 - Support independent port for one service (src/dst)
 - Name-based proxying of HTTPS without decrypting traffic.
 - Supports both TLS and HTTP protocols.
