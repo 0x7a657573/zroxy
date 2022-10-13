@@ -14,8 +14,10 @@
 
 typedef struct
 {
-	char 	host[_MaxHostName_];
+	char 	*host;
 	uint16_t port;
+	char	*user;
+	char	*pass;
 }sockshost_t;
 
 typedef struct
@@ -26,7 +28,12 @@ typedef struct
 	uint8_t atyp;
 }SocksReplayHeader_t;
 
+typedef struct
+{
+	uint8_t ver;
+	uint8_t status;
+}SocksAuthenticationReplay_t;
 
-bool socks5_connect(int *sockfd,const char *socks5_host, int socks5_port, const char *host, int port);
+bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port);
 
 #endif /* SOCKS_H_ */
