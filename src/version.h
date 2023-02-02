@@ -8,6 +8,11 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
+#define version	 "1.2.1"
+/*
+* dns: fix segmentfault !
+*/
+
 #define version	 "1.2"
 /*
 * socks: add domain support for socks
