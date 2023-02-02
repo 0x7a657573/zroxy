@@ -84,7 +84,6 @@ void *DNS_HandleIncomingRequset(void *dnsreq)
 	dnsserver_t *dns = (dnsserver_t*) dnsreq;
 	do
 	{
-
 		/*Check and Print DNS Question*/
 		struct Message dns_msg = {0};
 		if(dns_decode_msg(&dns_msg, &dns->buffer[2], dns->len))

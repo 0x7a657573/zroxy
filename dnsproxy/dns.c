@@ -210,5 +210,5 @@ void free_msg(struct Message *msg)
   free_resource_records(msg->answers);
   free_resource_records(msg->authorities);
   free_resource_records(msg->additionals);
-  memset(&msg, 0, sizeof(struct Message));
+  memset(msg, 0, sizeof(struct Message));
 }
