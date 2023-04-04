@@ -20,13 +20,12 @@ typedef struct
 {
 	char 	 ip[_MaxIPAddress_];
 	uint16_t port;
-}dnsUpstream_t;
+}dnsStream_t;
 
 typedef struct
 {
-	char 	 	  host[_MaxIPAddress_];
-	uint16_t 	  port;
-	dnsUpstream_t dnsserver;
+	dnsStream_t	  Local;
+	dnsStream_t   Remote;
 	sockshost_t	  *Socks;
 	statistics_t  *Stat;
 }dnshost_t;
