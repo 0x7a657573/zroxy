@@ -22,7 +22,7 @@ typedef struct
 	/*bind ip/port*/
 	char 	 	  listen_addr[_MaxIPAddress_];
 	char	 	  listen_port[_MaxPORTAddress_];
-	dnsUpstream_t upstream;
+	dnsStream_t   upstream;
 	sockshost_t	  socks;
 	/*socket file handler*/
 	int local_sock;
