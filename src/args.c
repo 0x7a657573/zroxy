@@ -234,21 +234,21 @@ void Parse_DNSServer(zroxy_t *ptr,char *str)
 	}
 
 	ptr->dnsserver->Stat = NULL;
-	ptr->dnsserver->port = 53;
-	bzero(ptr->dnsserver->host,_MaxIPAddress_);
-	strcpy(ptr->dnsserver->host,"127.0.0.1");
+	ptr->dnsserver->Local.port = 53;
+	bzero(ptr->dnsserver->Local.ip,_MaxIPAddress_);
+	strcpy(ptr->dnsserver->Local.ip,"127.0.0.1");
 
 
 	char *endname = strchr(str,':');
 	if(endname)
 	{
 		*endname++ = 0;
-		strncpy(ptr->dnsserver->host,str,_MaxIPAddress_-1);
-		ptr->dnsserver->port = atol(endname);
+		strncpy(ptr->dnsserver->Local.ip,str,_MaxIPAddress_-1);
+		ptr->dnsserver->Local.port = atol(endname);
 	}
 	else
 	{
-		strncpy(ptr->dnsserver->host,str,_MaxIPAddress_-1);
+		strncpy(ptr->dnsserver->Local.ip,str,_MaxIPAddress_-1);
 	}
 }
 
@@ -258,9 +258,9 @@ void Parse_DnsUpstream(zroxy_t *ptr,char *str)
 	if(!ptr->dnsserver)
 	{
 		ptr->dnsserver = (dnshost_t*)malloc(sizeof(dnshost_t));
-		ptr->dnsserver->port = 53;
-		bzero(ptr->dnsserver->host,_MaxIPAddress_);
-		strcpy(ptr->dnsserver->host,"127.0.0.1");
+		ptr->dnsserver->Local.port = 53;
+		bzero(ptr->dnsserver->Local.ip,_MaxIPAddress_);
+		strcpy(ptr->dnsserver->Local.ip,"127.0.0.1");
 	}
 
 	char *port = "53";
@@ -274,8 +274,8 @@ void Parse_DnsUpstream(zroxy_t *ptr,char *str)
 		endname = port;
 	}
 
-	ptr->dnsserver->dnsserver.port = atol(endname);
-	strcpy(ptr->dnsserver->dnsserver.ip,str);
+	ptr->dnsserver->Remote.port = atol(endname);
+	strcpy(ptr->dnsserver->Remote.ip,str);
 }
 
 void Parse_Socks(zroxy_t *ptr,char *str)
