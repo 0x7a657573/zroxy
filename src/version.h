@@ -13,7 +13,7 @@
 * dns: fix segmentfault !
 */
 
-#define version	 "1.2"
+//#define version	 "1.2"
 /*
 * socks: add domain support for socks
 * socks: add Authentication user/pass method(RFC 1929)
