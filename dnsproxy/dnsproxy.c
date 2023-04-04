@@ -35,12 +35,12 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 		return NULL;
 
 	bzero(ptr,sizeof(dnsserver_t));
-	strcpy(ptr->listen_addr,conf->host);
-	sprintf(ptr->listen_port,"%d",conf->port);
+	strcpy(ptr->listen_addr,conf->Local.ip);
+	sprintf(ptr->listen_port,"%d",conf->Local.port);
 	ptr->socks = *conf->Socks;
 
 	/*init upstream dns server*/
-	ptr->upstream = conf->dnsserver;
+	ptr->upstream = conf->Remote;
 
 	// copy stat handler
 	ptr->Stat = conf->Stat;
