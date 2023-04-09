@@ -25,6 +25,7 @@ set(SOURCES
     dnsproxy/dnsserver.c
     dnsproxy/dnsproxy.c
     dnsproxy/dns.c
+    fifo/fifo.c
 )
 
 # Add an executable
@@ -40,6 +41,7 @@ target_include_directories(zroxy
         ${PROJECT_SOURCE_DIR}/dnsproxy
         ${PROJECT_SOURCE_DIR}/statistics
         ${PROJECT_SOURCE_DIR}/network
+        ${PROJECT_SOURCE_DIR}/fifo
 )
 
 TARGET_LINK_LIBRARIES(zroxy
