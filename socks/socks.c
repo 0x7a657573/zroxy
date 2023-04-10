@@ -19,7 +19,7 @@
 #include "net.h"
 
 
-bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port)
+bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,bool keepalive)
 {
 	uint16_t socks5_port = socks->port;
 	char *socks5_host = socks->host;
@@ -29,6 +29,11 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port)
 	     log_error("Socks Error : Could not create socket");
 	     return false;
 	 }
+
+    if(keepalive)
+    {
+        net_enable_keepalive(*sockfd);
+    }
 
 	 struct sockaddr_in serv_addr;
 	 serv_addr.sin_family = AF_INET;

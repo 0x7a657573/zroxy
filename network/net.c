@@ -15,10 +15,31 @@
 #include "net.h"
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 
 void *MemSearch(const void *haystack_start, size_t haystack_len,
         		const void *needle_start, size_t needle_len);
 
+bool net_enable_keepalive(int sock) 
+{
+    int yes = 1;
+    if(setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(int)) != 0)
+        return false;
+
+    int idle = 1;
+    if(setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(int)) != 0)
+        return false;
+
+    int interval = 1;
+    if(setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(int)) != 0)
+        return false;
+
+    int maxpkt = 10;
+    if(setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &maxpkt, sizeof(int)) != 0)
+        return false;
+
+    return true;
+}
 
 bool net_connect(int *sockfd,const char *hostname, uint16_t port)
 {

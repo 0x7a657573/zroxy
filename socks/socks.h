@@ -34,6 +34,6 @@ typedef struct
 	uint8_t status;
 }SocksAuthenticationReplay_t;
 
-bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port);
+bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,bool keepalive);
 
 #endif /* SOCKS_H_ */

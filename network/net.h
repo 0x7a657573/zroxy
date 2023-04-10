@@ -25,6 +25,7 @@ bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd);
  * host -> adress of host
  * Port -> Port Number
  * sockfd -> Store Socket fd in this Pointer
+ * bool -> set keepalive tcp socket
  */
 bool net_connect(int *sockfd,const char *hostname, uint16_t port);
 
@@ -41,5 +42,6 @@ bool isTrueIpAddress(char *ipAddress);
 
 bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
 bool net_GetHttpsHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
+bool net_enable_keepalive(int sock);
 
 #endif /* NET_H_ */
