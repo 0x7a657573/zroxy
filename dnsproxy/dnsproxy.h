@@ -25,7 +25,7 @@ typedef struct
 
 
 #define D_FIFO_Message_Size	sizeof(dnsMessage_t)
-#define D_FIFO_Item			64
+#define D_FIFO_Item			128
 
 typedef struct
 {
