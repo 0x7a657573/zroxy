@@ -21,6 +21,9 @@
 
 bool fifo_init(fifo_t *self,uint16_t MessageSize,uint16_t ItemNumber)
 {
+	if(!self)
+		return false;
+		
 	if(fifo_CreateMutex(self->Mutex_Id)!=0)
 		return false;
 
