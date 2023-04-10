@@ -21,6 +21,9 @@
 #include <socks.h>
 #include <pthread.h>
 #include <dns.h>
+#include <unistd.h>
+
+void *dnsserver_workerTask(void *vargp);
 
 dnsserver_t *localdns_init_config(dnshost_t *conf)
 {
@@ -33,8 +36,17 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	dnsserver_t *ptr = (dnsserver_t*)malloc(sizeof(dnsserver_t));
 	if(!ptr)
 		return NULL;
-
 	bzero(ptr,sizeof(dnsserver_t));
+
+	/* fifo init*/
+	ptr->fifo = (fifo_t*)malloc(sizeof(fifo_t));
+	if(!fifo_init(ptr->fifo,D_FIFO_Message_Size,D_FIFO_Item))
+	{
+		log_error("[!] Error DNS fifo not Set");
+		localdns_free(ptr);
+		return NULL;
+	}
+
 	strcpy(ptr->listen_addr,conf->Local.ip);
 	sprintf(ptr->listen_port,"%d",conf->Local.port);
 	ptr->socks = *conf->Socks;
@@ -44,11 +56,18 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 
 	// copy stat handler
 	ptr->Stat = conf->Stat;
+
+	/*Create Worker Task*/
+	pthread_t thread_id;
+	pthread_create(&thread_id, NULL, dnsserver_workerTask, (void*)ptr);
+
+
 	return ptr;
 }
 
 void localdns_free(dnsserver_t *dns)
 {
+	fifo_free(dns->fifo);
 	free(dns);
 }
 
@@ -79,14 +98,53 @@ bool localdns_init_sockets(dnsserver_t *dns)
   return true;
 }
 
-void *DNS_HandleIncomingRequset(void *dnsreq)
+bool localdns_pull(dnsserver_t *dns)
 {
-	dnsserver_t *dns = (dnsserver_t*) dnsreq;
+	socklen_t client_size = sizeof(struct sockaddr_in);
+
+	dnsMessage_t	msg;
+	// receive a dns request from the client
+	msg.len = recvfrom(dns->local_sock, &msg.message[2], DNS_MSG_SIZE - 2, 0, (struct sockaddr *)&msg.client, &client_size);
+
+	// lets not fork if recvfrom was interrupted
+	if (msg.len < 0 && errno == EINTR) 
+	{ 
+		return true; 
+	}
+
+	// other invalid values from recvfrom
+	if (msg.len < 0)
+	{
+		log_error("recvfrom failed: %s\n", strerror(errno));
+		return true;
+	}
+
+	// the tcp query requires the length to precede the packet, so we put the length there
+	msg.message[0] = (msg.len>>8) & 0xFF;
+	msg.message[1] = msg.len & 0xFF;
+
+	/*send dns message to dns fifo*/
+	if(fifo_incert(dns->fifo,&msg))
+	{
+		if(dns->Stat)
+			state_IncConnection(dns->Stat);
+	}
+	else
+	{
+		log_error("dns fifo is full:");
+	}
+
+	return true;
+}
+
+void DNS_HandleIncomingRequset(dnsserver_t *dns,dnsMessage_t *msg)
+{
+	static int sockssocket = 0;
 	do
 	{
 		/*Check and Print DNS Question*/
 		struct Message dns_msg = {0};
-		if(dns_decode_msg(&dns_msg, &dns->buffer[2], dns->len))
+		if(dns_decode_msg(&dns_msg, &msg->message[2], msg->len))
 		{
 			struct Question *q;
 			q = dns_msg.questions;
@@ -98,70 +156,74 @@ void *DNS_HandleIncomingRequset(void *dnsreq)
 		}
 		free_msg(&dns_msg);
 
-		// make socks5 socket
-		int sockssocket = 0;
-		if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port))
+
+		/*forward packet to server via socks*/
+		int rlen = 0;
+		int trysend = 5;
+		while (trysend--)
+		{
+			// make socks5 socket
+			if(sockssocket==0)
+			{
+				if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port))
+					break;
+			}
+		
+			// forward dns query
+			if(send(sockssocket, msg->message, msg->len + 2,MSG_NOSIGNAL)<0)
+			{
+				/*maybe socket is not connect*/
+				close(sockssocket);
+				sockssocket = 0;
+				continue;
+			}
+
+			rlen = read(sockssocket, msg->message, DNS_MSG_SIZE);
+			if(!rlen)
+			{
+				/*maybe socket is not connect*/
+				close(sockssocket);
+				sockssocket = 0;
+				continue;
+			}
+
 			break;
+		}
 
-		// forward dns query
-		write(sockssocket, dns->buffer, dns->len + 2);
-		int rlen = read(sockssocket, dns->buffer, TMP_BUF_SIZE);
-
-		// close socks socket
-		close(sockssocket);
-
-		log_info("DNS SEND %i and GET %i",dns->len,rlen);
+		log_info("DNS SEND %i and GET %i",msg->len,rlen);
 
 		// forward the packet to the tcp dns server
 		// send the reply back to the client (minus the length at the beginning)
-		sendto(dns->local_sock, dns->buffer + 2, rlen - 2 , 0, (struct sockaddr *)&dns->client, sizeof(struct sockaddr_in));
+		sendto(dns->local_sock, msg->message + 2, rlen - 2 , 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
 
 		//Update statistics
 		if(dns->Stat)
 		{
-			state_RxTxClose(dns->Stat,rlen,dns->len+2);
+			state_RxTxClose(dns->Stat,rlen,msg->len+2);
 		}
 
 	}while(0);
 
-
-	free(dns);
-	pthread_exit(0);
-	return NULL;
+	return;
 }
 
-bool localdns_pull(dnsserver_t *dns)
+void *dnsserver_workerTask(void *vargp)
 {
-	dns->client_size = sizeof(struct sockaddr_in);
-
-	// receive a dns request from the client
-	dns->len = recvfrom(dns->local_sock, &dns->buffer[2], TMP_BUF_SIZE - 2, 0, (struct sockaddr *)&dns->client, &dns->client_size);
-
-	// lets not fork if recvfrom was interrupted
-	if (dns->len < 0 && errno == EINTR) { return true; }
-
-	// other invalid values from recvfrom
-	if (dns->len < 0)
+	dnsserver_t *dns = (dnsserver_t*) vargp;
+	dnsMessage_t msg;
+	
+	log_info("DNS Worker Started");
+	while(1)
 	{
-		log_error("recvfrom failed: %s\n", strerror(errno));
-		return true;
+		if(!fifo_Read(dns->fifo,&msg))
+		{
+			usleep(10000);
+			continue;
+		}
+		
+		/*Process incoming dns message*/
+		DNS_HandleIncomingRequset(dns,&msg);
 	}
 
-	// the tcp query requires the length to precede the packet, so we put the length there
-	dns->buffer[0] = (dns->len>>8) & 0xFF;
-	dns->buffer[1] = dns->len & 0xFF;
-
-	/*clone dns server*/
-	dnsserver_t *ptr = malloc(sizeof(dnsserver_t));
-	memcpy(ptr,dns,sizeof(dnsserver_t));
-
-	if(dns->Stat)
-		state_IncConnection(dns->Stat);
-
-	// fork so we can keep receiving requests
-	pthread_t thread_id;
-	pthread_create(&thread_id, NULL, DNS_HandleIncomingRequset, (void*)ptr);
-	pthread_detach(thread_id);
-
-	return true;
+	return NULL;
 }

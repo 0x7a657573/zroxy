@@ -45,12 +45,6 @@ void *dnsserver_HandleIncomingConnection(void *vargp)
 
 	log_info("dns server start on %s:%d",conf->Local.ip,conf->Local.port);
 
-//	// setup SIGCHLD handler to kill off zombie children
-//	struct sigaction reaper;
-//	memset(&reaper, 0, sizeof(struct sigaction));
-//	reaper.sa_handler = reaper_handle;
-//	sigaction(SIGCHLD, &reaper, 0);
-
 	while(1)
 	{
 		if(!localdns_pull(dns))
