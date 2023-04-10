@@ -165,7 +165,7 @@ void DNS_HandleIncomingRequset(dnsserver_t *dns,dnsMessage_t *msg)
 			// make socks5 socket
 			if(sockssocket==0)
 			{
-				if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port))
+				if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port,true))
 					break;
 			}
 		

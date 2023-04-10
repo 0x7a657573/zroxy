@@ -90,7 +90,7 @@ void *SniClientHandler(void *arg)
 			{
 				//log_info("socks host %s:%i",socks->host,socks->port);
 				//log_info("host %s:%i",HostName,port);
-				if(!socks5_connect(&sockssocket,socks,HostName,xport.remote_port))
+				if(!socks5_connect(&sockssocket,socks,HostName,xport.remote_port,false))
 					break;
 			}
 			else	/*connect directly*/
