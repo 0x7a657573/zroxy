@@ -13,24 +13,35 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include "dnsserver.h"
+#include <fifo.h>
+
+#define DNS_MSG_SIZE	512
+typedef struct
+{
+	uint16_t len;
+	char message[DNS_MSG_SIZE];
+	struct sockaddr_in client;
+}dnsMessage_t;
 
 
-#define TMP_BUF_SIZE	512
+#define D_FIFO_Message_Size	sizeof(dnsMessage_t)
+#define D_FIFO_Item			64
 
 typedef struct
 {
+	/* Fifo */
+	fifo_t		  *fifo;
+
 	/*bind ip/port*/
 	char 	 	  listen_addr[_MaxIPAddress_];
 	char	 	  listen_port[_MaxPORTAddress_];
+
 	dnsStream_t   upstream;
 	sockshost_t	  socks;
+	
 	/*socket file handler*/
 	int local_sock;
 	statistics_t  *Stat;
-	char buffer[TMP_BUF_SIZE];
-	int  len;
-	struct sockaddr_in client;
-	socklen_t client_size;
 }dnsserver_t;
 
 
