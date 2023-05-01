@@ -25,6 +25,12 @@
 
 void *dnsserver_workerTask(void *vargp);
 
+typedef struct
+{
+	dnsserver_t	*dns;
+	dnsMessage_t msg;
+}dnsThread_t;
+
 dnsserver_t *localdns_init_config(dnshost_t *conf)
 {
 	if(!conf->Socks)
@@ -137,9 +143,13 @@ bool localdns_pull(dnsserver_t *dns)
 	return true;
 }
 
-void DNS_HandleIncomingRequset(dnsserver_t *dns,dnsMessage_t *msg)
+void *DNS_HandleIncomingRequset(void *ptr)
 {
-	static int sockssocket = 0;
+
+	dnsserver_t *dns = ((dnsThread_t*)ptr)->dns;
+	dnsMessage_t *msg = &((dnsThread_t*)ptr)->msg;
+
+	int sockssocket = 0;
 	do
 	{
 		/*Check and Print DNS Question*/
@@ -163,17 +173,13 @@ void DNS_HandleIncomingRequset(dnsserver_t *dns,dnsMessage_t *msg)
 		while (trysend--)
 		{
 			// make socks5 socket
-			if(sockssocket==0)
-			{
-				if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port,true))
-					break;
-			}
+			if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port,true))
+				break;
 		
 			// forward dns query
 			if(send(sockssocket, msg->message, msg->len + 2,MSG_NOSIGNAL)<0)
 			{
 				/*maybe socket is not connect*/
-				close(sockssocket);
 				sockssocket = 0;
 				continue;
 			}
@@ -183,12 +189,14 @@ void DNS_HandleIncomingRequset(dnsserver_t *dns,dnsMessage_t *msg)
 			{
 				/*maybe socket is not connect*/
 				close(sockssocket);
-				sockssocket = 0;
 				continue;
 			}
 
 			break;
 		}
+
+		/*close sockst*/
+		close(sockssocket);
 
 		log_info("DNS SEND %i and GET %i",msg->len,rlen);
 
@@ -204,7 +212,9 @@ void DNS_HandleIncomingRequset(dnsserver_t *dns,dnsMessage_t *msg)
 
 	}while(0);
 
-	return;
+	free(ptr);
+	pthread_exit(0);
+	return 0;
 }
 
 void *dnsserver_workerTask(void *vargp)
@@ -221,8 +231,16 @@ void *dnsserver_workerTask(void *vargp)
 			continue;
 		}
 		
+		
+		
+		/*clone message*/
+		dnsThread_t *newmsg = malloc(sizeof(dnsThread_t));
+		memcpy(&newmsg->msg,&msg,sizeof(dnsMessage_t));
+		newmsg->dns = dns;
 		/*Process incoming dns message*/
-		DNS_HandleIncomingRequset(dns,&msg);
+		pthread_t thread_id;
+		pthread_create(&thread_id, NULL, DNS_HandleIncomingRequset, (void*)newmsg);
+		pthread_detach(thread_id);
 	}
 
 	return NULL;
