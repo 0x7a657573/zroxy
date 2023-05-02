@@ -24,6 +24,7 @@ void Parse_Monit(zroxy_t *ptr,char *str);
 void Parse_whitelist(zroxy_t *ptr,char *str);
 void Parse_DNSServer(zroxy_t *ptr,char *str);
 void Parse_DnsUpstream(zroxy_t *ptr,char *str);
+void Parse_DnsSocks(zroxy_t *ptr,char *str);
 bool Parse_config(zroxy_t *ptr,char *str);
 
 
@@ -36,6 +37,7 @@ static struct argp_option options[] =
 	{ "white", 'w' , "white list" , 0, "white list for host -w /etc/withlist.txt"},
 	{ "ldns", 'd' , "local DNS server" , 0, "dns server that listens. -d 0.0.0.0:53"},
 	{ "dns", 'u' , "upstream DNS providers" , 0, "upstream DNS providers. -u 8.8.8.8"},
+	{ "dsocks", 'x' , "DNS upstream socks" , 0, "DNS upstream socks. -x 127.0.0.1:9050"},
     { 0 }
 };
 
@@ -71,6 +73,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		case 'w': Parse_whitelist(setting,arg); break;
 		case 'd': Parse_DNSServer(setting,arg); break;
 		case 'u': Parse_DnsUpstream(setting,arg); break;
+		case 'x': Parse_DnsSocks(setting,arg); break;
 		case ARGP_KEY_ARG: return 0;
 		default: return ARGP_ERR_UNKNOWN;
     }
@@ -397,3 +400,59 @@ void Free_PortList(zroxy_t *ptr)
 }
 
 
+void Parse_DnsSocks(zroxy_t *ptr,char *str)
+{
+	ptr->dnsserver->Socks = (sockshost_t*)malloc(sizeof(sockshost_t));
+	sockshost_t *socks = ptr->dnsserver->Socks;
+
+	socks->port = 1080;
+	
+	char *Userpass = strchr(str,'@'); 
+	/*we have user passWord*/
+	if(Userpass)
+	{
+		*Userpass++ = 0;
+		char *ipPort = Userpass;
+		Userpass = str;
+
+		char *endname = strchr(Userpass,':');
+		if(endname)
+		{
+			*endname++ = 0;
+			socks->user = strdup(Userpass);
+			socks->pass = strdup(endname);
+		}
+		else
+		{
+			socks->user = strdup(Userpass);
+		}
+
+
+		endname = strchr(ipPort,':');
+		if(endname)
+		{
+			*endname++ = 0;
+			socks->host = strdup(ipPort);
+			socks->port = atol(endname);
+		}
+		else
+		{
+			socks->host = strdup(ipPort);
+		}
+	}
+	else
+	{
+		/*we don't have user password*/
+		char *endname = strchr(str,':');
+		if(endname)
+		{
+			*endname++ = 0;
+			socks->host = strdup(str);
+			socks->port = atol(endname);
+		}
+		else
+		{
+			socks->host = strdup(str);
+		}
+	}
+}
