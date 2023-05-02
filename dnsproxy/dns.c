@@ -57,8 +57,17 @@ static void put32bits(uint8_t **buffer, uint32_t value)
 // 3foo3bar3com0 => foo.bar.com (No full validation is done!)
 char *decode_domain_name(const uint8_t **buf, size_t len)
 {
+  /*find end if name*/
+  int domain_len = 0;
+  for(size_t i=0;i<len;i++)
+    if((*buf)[i]==0)
+    {
+      domain_len = i+1;
+      break;
+    }  
+
   char domain[_MaxHostName_];
-  for (int i = 1; i < MIN(_MaxHostName_, len); i += 1) 
+  for (int i = 1; i < MIN(_MaxHostName_, domain_len); i++) 
   {
     uint8_t c = (*buf)[i];
     if (c == 0) 
@@ -67,7 +76,7 @@ char *decode_domain_name(const uint8_t **buf, size_t len)
       *buf += i + 1;
       return strdup(domain);
     } 
-    else if (c <= 63) 
+    else if (c <= 63 && c <= (domain_len-i)) 
     {
       domain[i - 1] = '.';
     } 
