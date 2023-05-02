@@ -61,7 +61,6 @@ int main(int argc, const char **argv)
 	{
 		if(monitor)
 			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
-		prg_setting.dnsserver->Socks = prg_setting.socks; /*copy socks setting*/
 		log_info("start dns server ...");
 		dnsserver_init(prg_setting.dnsserver);
 	}

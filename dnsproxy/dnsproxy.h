@@ -37,7 +37,7 @@ typedef struct
 	char	 	  listen_port[_MaxPORTAddress_];
 
 	dnsStream_t   upstream;
-	sockshost_t	  socks;
+	sockshost_t	  *socks;
 	
 	/*socket file handler*/
 	int local_sock;

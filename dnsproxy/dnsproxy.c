@@ -22,6 +22,7 @@
 #include <pthread.h>
 #include <dns.h>
 #include <unistd.h>
+#include <net.h>
 
 void *dnsserver_workerTask(void *vargp);
 
@@ -33,12 +34,6 @@ typedef struct
 
 dnsserver_t *localdns_init_config(dnshost_t *conf)
 {
-	if(!conf->Socks)
-	{
-		log_error("[!] Error DNS Socks not Set");
-		return NULL;
-	}
-
 	dnsserver_t *ptr = (dnsserver_t*)malloc(sizeof(dnsserver_t));
 	if(!ptr)
 		return NULL;
@@ -55,7 +50,7 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 
 	strcpy(ptr->listen_addr,conf->Local.ip);
 	sprintf(ptr->listen_port,"%d",conf->Local.port);
-	ptr->socks = *conf->Socks;
+	ptr->socks = conf->Socks;
 
 	/*init upstream dns server*/
 	ptr->upstream = conf->Remote;
@@ -67,13 +62,13 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	pthread_t thread_id;
 	pthread_create(&thread_id, NULL, dnsserver_workerTask, (void*)ptr);
 
-
 	return ptr;
 }
 
 void localdns_free(dnsserver_t *dns)
 {
 	fifo_free(dns->fifo);
+	free(dns->socks);
 	free(dns);
 }
 
@@ -172,10 +167,19 @@ void *DNS_HandleIncomingRequset(void *ptr)
 		int trysend = 5;
 		while (trysend--)
 		{
-			// make socks5 socket
-			if(!socks5_connect(&sockssocket,&dns->socks, dns->upstream.ip, dns->upstream.port,true))
-				break;
-		
+			if(dns->socks)
+			{
+				// make socks5 socket
+				if(!socks5_connect(&sockssocket,dns->socks, dns->upstream.ip, dns->upstream.port,true))
+					break;
+			}
+			else
+			{
+				/*direct connect to dns server*/
+				if(!net_connect(&sockssocket, dns->upstream.ip, dns->upstream.port))
+					break;
+			}
+			
 			// forward dns query
 			if(send(sockssocket, msg->message, msg->len + 2,MSG_NOSIGNAL)<0)
 			{
