@@ -13,7 +13,7 @@
 #include <socks.h>
 #include <monitor.h>
 #include <sys/socket.h>
-
+#include <filter/filter.h>
 
 
 typedef struct
@@ -24,7 +24,7 @@ typedef struct
 
 typedef struct
 {
-	bool		  en_whitelist;
+	filter_t 	  *whitelist;
 	uint8_t		  sni_ip[4];
 	dnsStream_t	  Local;
 	dnsStream_t   Remote;
