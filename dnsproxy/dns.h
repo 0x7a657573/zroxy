@@ -156,6 +156,7 @@ struct Message
 */
 /*decode dns message*/
 bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size);
+bool dns_encode_msg(struct Message *msg, uint8_t **buffer);
 
 /*free dns message struct*/
 void free_msg(struct Message *msg);
