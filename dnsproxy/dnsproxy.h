@@ -31,6 +31,12 @@ typedef struct
 {
 	/* Fifo */
 	fifo_t		  *fifo;
+	
+	/*is ebable whitelist*/
+	bool is_en_dns_local;
+	
+	/*sni server ip*/
+	uint8_t sni_ip[4];
 
 	/*bind ip/port*/
 	char 	 	  listen_addr[_MaxIPAddress_];
