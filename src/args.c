@@ -190,7 +190,7 @@ bool Parse_config(zroxy_t *ptr,char *str)
 	{
 		char key[100]={0};
 		char val[100]={0};
-		int xpars = sscanf(line,"%99[a-zA-Z_ ]=%99[@:,\/\\a-zA-Z.0-9 ]",key,val);
+		int xpars = sscanf(line,"%99[a-zA-Z_ ]=%99[@:,/\\a-zA-Z.0-9 ]",key,val);
 		if(xpars!=2)
 			continue;
 		char *fix_key = toLower(trim(key));
