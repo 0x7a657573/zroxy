@@ -23,6 +23,7 @@
 #include <dns.h>
 #include <unistd.h>
 #include <net.h>
+#include <filter/filter.h>
 
 void *dnsserver_workerTask(void *vargp);
 
@@ -59,10 +60,11 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	ptr->Stat = conf->Stat;
 
 	// copy withlist status;
-	ptr->is_en_dns_local = conf->en_whitelist;
+	ptr->whitelist = conf->whitelist;
 
 	// copy sni ip
 	memcpy(ptr->sni_ip,conf->sni_ip,4);
+
 	/*Create Worker Task*/
 	pthread_t thread_id;
 	pthread_create(&thread_id, NULL, dnsserver_workerTask, (void*)ptr);
@@ -143,6 +145,48 @@ bool localdns_pull(dnsserver_t *dns)
 	return true;
 }
 
+/* Return Len of packet*/
+int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
+{
+	struct ResourceRecord *rr = malloc(sizeof(struct ResourceRecord));
+	bzero(rr,sizeof(struct ResourceRecord));
+
+	rr->name = strdup(msg->questions->qName);
+	rr->type = msg->questions->qType;
+	rr->class = msg->questions->qClass;
+	rr->ttl = 60*60; // in seconds; 0 means no caching
+
+	rr->rd_length = 4;
+	rr->rd_data.a_record.addr[0] = dns->sni_ip[0];
+    rr->rd_data.a_record.addr[1] = dns->sni_ip[1];
+    rr->rd_data.a_record.addr[2] = dns->sni_ip[2];
+    rr->rd_data.a_record.addr[3] = dns->sni_ip[3];
+
+	// leave most values intact for response
+	msg->qr = 1; // this is a response
+	msg->aa = 1; // this server is authoritative
+	msg->ra = 0; // no recursion available
+	msg->rcode = Ok_ResponseType;
+	
+	// should already be 0
+	msg->anCount = 0;
+	msg->nsCount = 0;
+	msg->arCount = 0;
+
+	msg->anCount++;
+
+	// prepend resource record to answers list
+    msg->answers = rr;
+    
+	uint8_t *p = buf;
+	if (!dns_encode_msg(msg, &p)) 
+	{
+    	return 0;
+    }
+
+	return p - buf;
+}
+
 void *DNS_HandleIncomingRequset(void *ptr)
 {
 
@@ -158,10 +202,28 @@ void *DNS_HandleIncomingRequset(void *ptr)
 		{
 			struct Question *q;
 			q = dns_msg.questions;
-			while (q) 
+			log_info("DNS Question { qName '%s'}",q->qName);
+
+			/*try make replay*/
+			if(dns->whitelist && q->qType == A_Resource_RecordType &&
+				filter_IsWhite(dns->whitelist,q->qName))
 			{
-				log_info("DNS Question { qName '%s'}",q->qName);
-				q = q->next;
+				uint8_t buffer[DNS_MSG_SIZE];
+				int len = dns_resolve_query(dns,&dns_msg,buffer);
+				/*if packet fill send to network*/
+				if(len)
+				{
+					// send the reply back to the client
+					sendto(dns->local_sock, buffer, len, 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
+					log_info("DNS local replay");
+					//Update statistics
+					if(dns->Stat)
+					{
+						state_RxTxClose(dns->Stat,len,msg->len);
+					}
+					free_msg(&dns_msg);
+					break;
+				}
 			}
 		}
 		free_msg(&dns_msg);
