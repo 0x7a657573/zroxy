@@ -282,5 +282,5 @@ bool dns_encode_msg(struct Message *msg, uint8_t **buffer)
   rc |= encode_resource_records(msg->authorities, buffer);
   rc |= encode_resource_records(msg->additionals, buffer);
 
-  return rc!=0;
+  return rc==0;
 }
