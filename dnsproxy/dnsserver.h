@@ -24,6 +24,8 @@ typedef struct
 
 typedef struct
 {
+	bool		  en_whitelist;
+	uint8_t		  sni_ip[4];
 	dnsStream_t	  Local;
 	dnsStream_t   Remote;
 	sockshost_t	  *Socks;
