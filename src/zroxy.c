@@ -56,15 +56,6 @@ int main(int argc, const char **argv)
 		monitor = monitor_Init(prg_setting.monitorPort);
 	}
 
-	/*check for dns server*/
-	if(prg_setting.dnsserver)
-	{
-		if(monitor)
-			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
-		log_info("start dns server ...");
-		dnsserver_init(prg_setting.dnsserver);
-	}
-
 	/*chack white list*/
 	filter_t *whitelist = NULL;
 	if(prg_setting.WhitePath)
@@ -72,6 +63,20 @@ int main(int argc, const char **argv)
 		log_info("load white list from %s",prg_setting.WhitePath);
 		whitelist = filter_init(prg_setting.WhitePath);
 		free(prg_setting.WhitePath);
+	}
+
+
+	/*check for dns server*/
+	if(prg_setting.dnsserver)
+	{
+		if(monitor)
+			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
+		
+		if(whitelist)
+			prg_setting.dnsserver->en_whitelist = true;
+
+		log_info("start dns server ...");
+		dnsserver_init(prg_setting.dnsserver);
 	}
 
 	lport_t *p=prg_setting.ports;
