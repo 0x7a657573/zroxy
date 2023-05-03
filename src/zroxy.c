@@ -72,8 +72,7 @@ int main(int argc, const char **argv)
 		if(monitor)
 			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
 		
-		if(whitelist)
-			prg_setting.dnsserver->en_whitelist = true;
+		prg_setting.dnsserver->whitelist = whitelist;
 
 		log_info("start dns server ...");
 		dnsserver_init(prg_setting.dnsserver);

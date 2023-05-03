@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include "dnsserver.h"
 #include <fifo.h>
+#include <filter/filter.h>
 
 #define DNS_MSG_SIZE	512
 typedef struct
@@ -32,8 +33,8 @@ typedef struct
 	/* Fifo */
 	fifo_t		  *fifo;
 	
-	/*is ebable whitelist*/
-	bool is_en_dns_local;
+	/* whitelist*/
+	filter_t *whitelist;
 	
 	/*sni server ip*/
 	uint8_t sni_ip[4];
