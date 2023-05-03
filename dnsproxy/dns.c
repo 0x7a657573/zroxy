@@ -2,6 +2,7 @@
  * File : dns.c
  * Copyright (c) Zeus@Sisoog.com.
  * Created On : Tue Apr 26 2022
+ * based on https://github.com/mwarning/SimpleDNS
  * 
  * This program is free software: you can redistribute it and/or modify  
  * it under the terms of the GNU General Public License as published by  
@@ -220,4 +221,66 @@ void free_msg(struct Message *msg)
   free_resource_records(msg->authorities);
   free_resource_records(msg->additionals);
   memset(msg, 0, sizeof(struct Message));
+}
+
+/* @return 0 upon failure, 1 upon success */
+int encode_resource_records(struct ResourceRecord *rr, uint8_t **buffer)
+{
+  int i;
+  while (rr) {
+    // Answer questions by attaching resource sections.
+    encode_domain_name(buffer, rr->name);
+    put16bits(buffer, rr->type);
+    put16bits(buffer, rr->class);
+    put32bits(buffer, rr->ttl);
+    put16bits(buffer, rr->rd_length);
+
+    switch (rr->type) {
+      case A_Resource_RecordType:
+        for (i = 0; i < 4; ++i)
+          put8bits(buffer, rr->rd_data.a_record.addr[i]);
+        break;
+      case AAAA_Resource_RecordType:
+        for (i = 0; i < 16; ++i)
+          put8bits(buffer, rr->rd_data.aaaa_record.addr[i]);
+        break;
+      case TXT_Resource_RecordType:
+        put8bits(buffer, rr->rd_data.txt_record.txt_data_len);
+        for (i = 0; i < rr->rd_data.txt_record.txt_data_len; i++)
+          put8bits(buffer, rr->rd_data.txt_record.txt_data[i]);
+        break;
+      default:
+        fprintf(stderr, "Unknown type %u. => Ignore resource record.\n", rr->type);
+      return 1;
+    }
+
+    rr = rr->next;
+  }
+
+  return 0;
+}
+
+bool dns_encode_msg(struct Message *msg, uint8_t **buffer)
+{
+  struct Question *q;
+  int rc;
+
+  dns_encode_header(msg, buffer);
+
+  q = msg->questions;
+  while (q) 
+  {
+    encode_domain_name(buffer, q->qName);
+    put16bits(buffer, q->qType);
+    put16bits(buffer, q->qClass);
+
+    q = q->next;
+  }
+
+  rc = 0;
+  rc |= encode_resource_records(msg->answers, buffer);
+  rc |= encode_resource_records(msg->authorities, buffer);
+  rc |= encode_resource_records(msg->additionals, buffer);
+
+  return rc!=0;
 }
