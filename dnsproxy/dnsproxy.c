@@ -58,6 +58,11 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	// copy stat handler
 	ptr->Stat = conf->Stat;
 
+	// copy withlist status;
+	ptr->is_en_dns_local = conf->en_whitelist;
+
+	// copy sni ip
+	memcpy(ptr->sni_ip,conf->sni_ip,4);
 	/*Create Worker Task*/
 	pthread_t thread_id;
 	pthread_create(&thread_id, NULL, dnsserver_workerTask, (void*)ptr);
