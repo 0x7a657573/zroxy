@@ -26,7 +26,7 @@ void Parse_DNSServer(zroxy_t *ptr,char *str);
 void Parse_DnsUpstream(zroxy_t *ptr,char *str);
 void Parse_DnsSocks(zroxy_t *ptr,char *str);
 bool Parse_config(zroxy_t *ptr,char *str);
-
+void Parse_Snip(zroxy_t *ptr,char *str);
 
 static struct argp_option options[] =
 {
@@ -38,6 +38,7 @@ static struct argp_option options[] =
 	{ "ldns", 'd' , "local DNS server" , 0, "dns server that listens. -d 0.0.0.0:53"},
 	{ "dns", 'u' , "upstream DNS providers" , 0, "upstream DNS providers. -u 8.8.8.8"},
 	{ "dsocks", 'x' , "DNS upstream socks" , 0, "DNS upstream socks. -x 127.0.0.1:9050"},
+	{ "snip", 'i' , "SNI IP for DNS server" , 0, "SNI IP for DNS server. -i 127.0.0.1"},
     { 0 }
 };
 
@@ -74,6 +75,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		case 'd': Parse_DNSServer(setting,arg); break;
 		case 'u': Parse_DnsUpstream(setting,arg); break;
 		case 'x': Parse_DnsSocks(setting,arg); break;
+		case 'i': Parse_Snip(setting,arg); break;
 		case ARGP_KEY_ARG: return 0;
 		default: return ARGP_ERR_UNKNOWN;
     }
@@ -253,6 +255,34 @@ void Parse_DNSServer(zroxy_t *ptr,char *str)
 	{
 		strncpy(ptr->dnsserver->Local.ip,str,_MaxIPAddress_-1);
 	}
+}
+
+void Parse_Snip(zroxy_t *ptr,char *str)
+{
+	while(*str==' ')
+		str++;
+
+	/*check dns config is exisit*/
+	if(!ptr->dnsserver)
+	{
+		ptr->dnsserver = (dnshost_t*)malloc(sizeof(dnshost_t));
+		ptr->dnsserver->Local.port = 53;
+		bzero(ptr->dnsserver->Local.ip,_MaxIPAddress_);
+		strcpy(ptr->dnsserver->Local.ip,"127.0.0.1");
+	}
+
+	uint8_t *sni_ip = ptr->dnsserver->sni_ip;
+	
+	int si[4];
+	int p = sscanf(str,"%i.%i.%i.%i",&si[0],&si[1],&si[2],&si[3]);
+	if(p==4)
+	{
+		sni_ip[0] = si[0];
+		sni_ip[1] = si[1];
+		sni_ip[2] = si[2];
+		sni_ip[3] = si[3];
+	}
+
 }
 
 void Parse_DnsUpstream(zroxy_t *ptr,char *str)
