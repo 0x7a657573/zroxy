@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 void filter_Remove(filter_t *self);
+void filter_Remove_Itemlist(item_t *ptr);
 
 void filter_Reload(filter_t *self)
 {
@@ -27,32 +28,50 @@ void filter_Reload(filter_t *self)
 		return;
 	}
 
-	pthread_mutex_lock(&self->Lock);
-
-	/*remove all entry*/
-	item_t *ptr = self->item;
-	while(ptr)
-	{
-		item_t *next = ptr->Next;
-		free(ptr);
-		ptr = next;
-	}
-
-	/*read and load filter from file*/
-	size_t len = 0;
-	char *line = NULL;
+	/*load domain from file to new list*/
+	item_t *NewList = NULL;
 	item_t *Pvitem = NULL;
-	int num = 0;
+	char *line = NULL;
+	size_t len = 0;
 	ssize_t read;
+	int num = 0;
 	while ((read = getline(&line, &len, FilterFile)) != -1)
 	{
-		log_info("we read %s",line);
+		if(read>=_MaxHostName_)
+		{
+			log_error("Filter Item Len Bigest Buffer");
+			break;
+		}
+
+	    NewList = malloc(sizeof(item_t));
+	    if(NewList==NULL)
+	    {
+	    	filter_Remove_Itemlist(Pvitem);
+	    	break;
+	    }
+
+	    memset(self->item,0,sizeof(item_t));
+
+	    char *pos;	/*remove new line*/
+	    if ((pos=strchr(line, '\n')) != NULL)
+	        *pos = '\0';
+
+	    strcpy(self->item->Rec,line);
+
+	    NewList->Next = Pvitem;
+	    Pvitem = NewList;
+	    num++;
 	}
 
-	free(line);
-	log_info("Reload filter: %i valid host loaded",num);
-	
+	/*replace new list with old one*/
+	pthread_mutex_lock(&self->Lock);
+	item_t *ptr = self->item;
+	self->item = NewList;
 	pthread_mutex_unlock(&self->Lock);
+
+	/*remove old entry entry*/
+	filter_Remove_Itemlist(ptr);
+	log_info("Reload filter: %i valid host loaded",num);
 }
 
 void *filter_Handlefilewatcher(void *vargp)
@@ -103,7 +122,6 @@ void *filter_Handlefilewatcher(void *vargp)
 
 	pthread_exit(0);
 }
-
 
 filter_t *filter_init(char *filename)
 {
@@ -185,20 +203,22 @@ filter_t *filter_init(char *filename)
 	return self;
 }
 
-
-void filter_Remove(filter_t *self)
+void filter_Remove_Itemlist(item_t *ptr)
 {
-	if(!self)
-		return;
-
-	item_t *ptr = self->item;
 	while(ptr)
 	{
 		item_t *next = ptr->Next;
 		free(ptr);
 		ptr = next;
 	}
+}
 
+void filter_Remove(filter_t *self)
+{
+	if(!self)
+		return;
+
+	filter_Remove_Itemlist(self->item);
 	free(self->filepath);
 	free(self);
 }
