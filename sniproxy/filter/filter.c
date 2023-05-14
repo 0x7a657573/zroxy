@@ -223,6 +223,50 @@ void filter_Remove(filter_t *self)
 	free(self);
 }
 
+/*
+this function chack str2 match patern in str1 
+str1 = apple, str2 = app* -return-> true
+str1 = apple, str2 = *ple -return-> true
+str1 = apple, str2 = *plex -return-> false
+*/
+bool match(char *str1, char *str2) 
+{
+   int i = 0;
+   int j = 0;
+   int star = -1;
+   int match = 0;
+
+   while (str1[i] != '\0' && str2[j] != '\0') 
+   {
+      if (str2[j] == '*') 
+	  {
+         star = j++;
+         match = i;
+      } 
+	  else if (str1[i] == str2[j] || str2[j] == '?') 
+	  {
+         i++;
+         j++;
+      }
+	  else if (star != -1) 
+	  {
+         j = star + 1;
+         i = ++match;
+      }
+	  else 
+	  {
+         return false;
+      }
+   }
+
+   while (str2[j] == '*') 
+   {
+      j++;
+   }
+
+   return str2[j] == '\0';
+}
+
 bool filter_IsWhite(filter_t *self,char *host)
 {
 	bool res = false;
@@ -232,7 +276,7 @@ bool filter_IsWhite(filter_t *self,char *host)
 	while(ptr)
 	{
 		item_t *next = ptr->Next;
-		if(strstr(host,ptr->Rec))
+		if(match(host,ptr->Rec))
 		{
 			res = true;
 			break;
