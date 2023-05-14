@@ -187,6 +187,24 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 	return p - buf;
 }
 
+const char *DNS_GetType(uint16_t type)
+{
+  switch(type)
+  {
+  	case A_Resource_RecordType: return "A";
+  	case NS_Resource_RecordType: return "NS";
+  	case CNAME_Resource_RecordType: return "CNAME";
+  	case SOA_Resource_RecordType: return "SOA";
+  	case PTR_Resource_RecordType: return "PTR";
+  	case MX_Resource_RecordType:  return "MX";
+  	case TXT_Resource_RecordType: return "TXT";
+  	case AAAA_Resource_RecordType: return "AAAA";
+  	case SRV_Resource_RecordType: return "SRV";
+	default:	return "unknow";
+  }
+  return "";
+}
+
 void *DNS_HandleIncomingRequset(void *ptr)
 {
 
@@ -202,7 +220,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 		{
 			struct Question *q;
 			q = dns_msg.questions;
-			log_info("DNS Question { qName '%s'}",q->qName);
+			log_info("DNS Question { (%s) qName '%s'}",DNS_GetType(q->qType),q->qName);
 
 			/*try make replay*/
 			if(dns->whitelist && q->qType == A_Resource_RecordType &&
