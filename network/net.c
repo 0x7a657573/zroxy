@@ -43,13 +43,34 @@ bool net_enable_keepalive(int sock)
 
 bool net_connect(int *sockfd,const char *hostname, uint16_t port)
 {
-	char port_str[16] = {0};
+    /*check Hostname is IP or Domain*/
+    if(isTrueIpAddress(hostname))
+	{
+        struct sockaddr_in serv_addr;
+	    serv_addr.sin_family = AF_INET;
+	    serv_addr.sin_port = htons(port);
+
+        if(inet_pton(AF_INET, hostname, &serv_addr.sin_addr)<=0)
+		{
+			log_error("inet_pton error occured");
+			return false;
+		}
+
+		if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+		{
+			log_error("net_connect Error : Connect Failed");
+			return false;
+		}
+        return true;
+	}
+
+    char port_str[8] = {0};
     struct addrinfo hints = {0}, *addrs;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
+    snprintf(port_str,7,"%i",port);
 
-    sprintf(port_str,"%i",port);
     const int status = getaddrinfo(hostname, port_str, &hints, &addrs);
     if (status != 0)
     {
@@ -377,7 +398,7 @@ void *MemSearch(const void *haystack_start, size_t haystack_len,
 	return NULL;
 }
 
-bool isTrueIpAddress(char *ipAddress)
+bool isTrueIpAddress(const char *ipAddress)
 {
     struct sockaddr_in sa;
     int result = inet_pton(AF_INET, ipAddress, &(sa.sin_addr));

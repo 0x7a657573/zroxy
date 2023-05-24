@@ -42,28 +42,11 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 	
 	bool IsIp = isTrueIpAddress(socks5_host);
 	/*if host is domain need resolve domain*/
-	if(!IsIp)
+	bool status = net_connect(sockfd,socks5_host, socks5_port);
+	if (!status)
 	{
-		bool status = net_connect(sockfd,socks5_host, socks5_port);
-		if (!status)
-		{
-			log_error("Socks Error: Connect to %s Failed", socks5_host);
-			return false;
-		}
-	}
-	else
-	{
-		if(inet_pton(AF_INET, socks5_host, &serv_addr.sin_addr)<=0)
-		{
-			log_error("inet_pton error occured");
-			return false;
-		}
-
-		if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-		{
-			log_error("Socks Error : Connect Failed");
-			return false;
-		}
+		log_error("Socks Error: Connect to %s Failed", socks5_host);
+		return false;
 	}
 
 
