@@ -13,12 +13,13 @@ find_package(Threads REQUIRED)
 set(SOURCES
     src/zroxy.c
     src/args.c
-    socks/socks.c
+    
     sniproxy/sniproxy.c
     sniproxy/sniclient.c
     sniproxy/log/loglock.c
     sniproxy/log/log.c
     network/net.c
+    network/socks/socks.c
     sniproxy/filter/filter.c
     statistics/monitor.c
     statistics/statistics.c
@@ -36,11 +37,11 @@ add_executable(zroxy ${SOURCES})
 target_include_directories(zroxy
     PRIVATE 
         ${PROJECT_SOURCE_DIR}/src
-        ${PROJECT_SOURCE_DIR}/socks
         ${PROJECT_SOURCE_DIR}/sniproxy
         ${PROJECT_SOURCE_DIR}/dnsproxy
         ${PROJECT_SOURCE_DIR}/statistics
         ${PROJECT_SOURCE_DIR}/network
+        ${PROJECT_SOURCE_DIR}/network/socks
         ${PROJECT_SOURCE_DIR}/fifo
 )
 
