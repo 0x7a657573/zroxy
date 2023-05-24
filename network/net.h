@@ -37,7 +37,7 @@ bool net_GetHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
 /*
  * Get String and check it's IP or Not
  */
-bool isTrueIpAddress(char *ipAddress);
+bool isTrueIpAddress(const char *ipAddress);
 
 
 bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
