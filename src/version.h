@@ -8,7 +8,12 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.2.2"
+#define version	 "1.2.3"
+/*
+* dns : add timeout
+*/
+
+//#define version	 "1.2.2"
 /*
 * dns: add worker
 * dns: tcp pipe to server

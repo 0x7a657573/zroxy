@@ -45,6 +45,7 @@ typedef struct
 
 	dnsStream_t   upstream;
 	sockshost_t	  *socks;
+	uint32_t	  timeout;
 	
 	/*socket file handler*/
 	int local_sock;

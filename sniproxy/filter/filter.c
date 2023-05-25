@@ -224,7 +224,7 @@ void filter_Remove(filter_t *self)
 }
 
 /*
-this function chack str2 match patern in str1 
+this function chack str2 match pattern in str1 
 str1 = apple, str2 = app* -return-> true
 str1 = apple, str2 = *ple -return-> true
 str1 = apple, str2 = *plex -return-> false

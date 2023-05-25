@@ -67,6 +67,9 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	// copy sni ip
 	memcpy(ptr->sni_ip,conf->sni_ip,4);
 
+	// copy timeout
+	ptr->timeout = conf->timeout;
+
 	/*Create Worker Task*/
 	pthread_t thread_id;
 	pthread_create(&thread_id, NULL, dnsserver_workerTask, (void*)ptr);
@@ -227,7 +230,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 	
 
 	uint64_t start_time = timeInMilliseconds(); 
-
+	int rlen = 0;
 	int sockssocket = 0;
 	do
 	{
@@ -271,7 +274,6 @@ void *DNS_HandleIncomingRequset(void *ptr)
 
 
 		/*forward packet to server via socks*/
-		int rlen = 0;
 		int trysend = 2;
 		while (trysend--)
 		{
@@ -289,7 +291,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			}
 			
 			/*set socket timeout*/
-			if(!net_socket_timeout(sockssocket,5,5))
+			if(!net_socket_timeout(sockssocket,dns->timeout,dns->timeout))
 			{
 				log_error("DNS: can not set socket timeout");
 			}
@@ -319,15 +321,13 @@ void *DNS_HandleIncomingRequset(void *ptr)
 
 		if(rlen>0)
 		{
-			log_info("DNS SEND %i and GET %i",msg->len,rlen);
-
 			// forward the packet to the tcp dns server
 			// send the reply back to the client (minus the length at the beginning)
 			sendto(dns->local_sock, msg->message + 2, rlen - 2 , 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
 
 			uint64_t End_Time = timeInMilliseconds() - start_time;
 					double time_taken = ((double)End_Time)/(1000); // convert to sec
-			log_info("%s in %0.3fs",domain_resolve,time_taken);
+			log_info("%s in %0.3fs txrx(%i/%i)",domain_resolve,time_taken,msg->len,rlen);
 		}
 		else
 		{
@@ -335,14 +335,14 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			double time_taken = ((double)End_Time)/(1000); // convert to sec
 			log_error("NO DATA %s in %0.3fs",domain_resolve,time_taken);
 		}
-
-		//Update statistics
-		if(dns->Stat)
-		{
-			state_RxTxClose(dns->Stat,rlen,msg->len+2);
-		}
-
+			
 	}while(0);
+
+	//Update statistics
+	if(dns->Stat)
+	{
+		state_RxTxClose(dns->Stat,rlen,msg->len+2);
+	}
 
 	free(ptr);
 	pthread_exit(0);
