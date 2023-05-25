@@ -43,30 +43,40 @@ bool net_enable_keepalive(int sock)
 
 bool net_connect(int *sockfd,const char *hostname, uint16_t port)
 {
-    // /*check Hostname is IP or Domain*/
-    // if(isTrueIpAddress(hostname))
-	// {
-    //     struct sockaddr_in serv_addr;
-	//     serv_addr.sin_family = AF_INET;
-	//     serv_addr.sin_port = htons(port);
+    /*check Hostname is IP or Domain*/
+    if(isTrueIpAddress(hostname))
+	{
+        if((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+	    {
+	        log_error("Socks Error : Could not create socket");
+	        return false;
+	    }
 
-    //     if(inet_pton(AF_INET, hostname, &serv_addr.sin_addr)<=0)
-	// 	{
-	// 		log_error("inet_pton error occured");
-	// 		return false;
-	// 	}
+        struct sockaddr_in serv_addr;
+	    serv_addr.sin_family = AF_INET;
+	    serv_addr.sin_port = htons(port);
 
-	// 	if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-	// 	{
-	// 		log_error("net_connect Error : Connect Failed");
-	// 		return false;
-	// 	}
-    //     return true;
-	// }
+        if(inet_pton(AF_INET, hostname, &serv_addr.sin_addr)<=0)
+		{
+			log_error("inet_pton error occured");
+			return false;
+		}
+
+		if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+		{
+			log_error("net_connect Error : Connect Failed");
+			return false;
+		}
+        
+        return true;
+	}
 
     char port_str[8] = {0};
-    struct addrinfo hints = {0}, *addrs;
-    hints.ai_family = AF_INET;
+    struct addrinfo hints;
+    struct addrinfo *addrs=NULL;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     snprintf(port_str,7,"%i",port);
@@ -74,24 +84,27 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port)
     const int status = getaddrinfo(hostname, port_str, &hints, &addrs);
     if (status != 0)
     {
-    	log_error("%s: %s\n", hostname, gai_strerror(status));
+    	log_error("%s:%s -> %s\n", hostname,port_str, gai_strerror(status));
         return false;
     }
 
     int sfd;
+    bool result = false;
     for (struct addrinfo *addr = addrs; addr != NULL; addr = addr->ai_next)
     {
         sfd = socket(addrs->ai_family, addrs->ai_socktype, addrs->ai_protocol);
-        if (sfd < 0)
+        if (sfd == -1)
         {
         	log_error("Socks Error : Could not create socket");
-        	freeaddrinfo(addrs);
-            return false;
+        	//freeaddrinfo(addrs);
+            //return false;
+            continue;
         }
 
-        if (connect(sfd, addr->ai_addr, addr->ai_addrlen) == 0)
+        if (connect(sfd, addr->ai_addr, addr->ai_addrlen) != -1)
         {
-           break;
+            result = true;
+            break;
         }
 
         close(sfd);
@@ -99,7 +112,7 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port)
 
     freeaddrinfo(addrs);
     *sockfd = sfd;
-    return true;
+    return result;
 }
 
 bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd)
