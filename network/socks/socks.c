@@ -24,23 +24,11 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 	uint16_t socks5_port = socks->port;
 	char *socks5_host = socks->host;
 	
-	 if((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-	 {
-	     log_error("Socks Error : Could not create socket");
-	     return false;
-	 }
+	struct sockaddr_in serv_addr;
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_port = htons(socks5_port);
+	//serv_addr.sin_addr.s_addr = inet_addr(socks5_host);
 
-    if(keepalive)
-    {
-        net_enable_keepalive(*sockfd);
-    }
-
-	 struct sockaddr_in serv_addr;
-	 serv_addr.sin_family = AF_INET;
-	 serv_addr.sin_port = htons(socks5_port);
-	 //serv_addr.sin_addr.s_addr = inet_addr(socks5_host);
-	
-	bool IsIp = isTrueIpAddress(socks5_host);
 	/*if host is domain need resolve domain*/
 	bool status = net_connect(sockfd,socks5_host, socks5_port);
 	if (!status)
@@ -49,6 +37,10 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 		return false;
 	}
 
+	if(keepalive)
+    {
+        net_enable_keepalive(*sockfd);
+    }
 
 	uint8_t Tempbuf[300] = {0};
     // SOCKS5 CLIENT HELLO
