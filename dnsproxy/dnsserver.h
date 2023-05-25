@@ -30,6 +30,7 @@ typedef struct
 	dnsStream_t   Remote;
 	sockshost_t	  *Socks;
 	statistics_t  *Stat;
+	uint32_t	  timeout;
 }dnshost_t;
 
 void dnsserver_init(dnshost_t *config);

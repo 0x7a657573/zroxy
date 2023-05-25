@@ -27,6 +27,7 @@ void Parse_DnsUpstream(zroxy_t *ptr,char *str);
 void Parse_DnsSocks(zroxy_t *ptr,char *str);
 bool Parse_config(zroxy_t *ptr,char *str);
 void Parse_Snip(zroxy_t *ptr,char *str);
+void Parse_DNStimeout(zroxy_t *ptr,char *str);
 
 static struct argp_option options[] =
 {
@@ -38,6 +39,7 @@ static struct argp_option options[] =
 	{ "ldns", 'd' , "local DNS server" , 0, "dns server that listens. -d 0.0.0.0:53"},
 	{ "dns", 'u' , "upstream DNS providers" , 0, "upstream DNS providers. -u 8.8.8.8"},
 	{ "dsocks", 'x' , "DNS upstream socks" , 0, "DNS upstream socks. -x 127.0.0.1:9050"},
+	{ "dtimeout", 't' , "DNS upstream timeout in sec" , 0, "DNS upstream timeout. -t 5"},
 	{ "snip", 'i' , "SNI IP for DNS server" , 0, "SNI IP for DNS server. -i 127.0.0.1"},
     { 0 }
 };
@@ -76,6 +78,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		case 'u': Parse_DnsUpstream(setting,arg); break;
 		case 'x': Parse_DnsSocks(setting,arg); break;
 		case 'i': Parse_Snip(setting,arg); break;
+		case 't': Parse_DNStimeout(setting,arg); break;
 		case ARGP_KEY_ARG: return 0;
 		default: return ARGP_ERR_UNKNOWN;
     }
@@ -231,6 +234,17 @@ void Parse_Monit(zroxy_t *ptr,char *str)
 	*ptr->monitorPort = atol(str);
 }
 
+void Parse_DNStimeout(zroxy_t *ptr,char *str)
+{
+	if(!ptr->dnsserver)
+	{
+		log_error("before set dns timeout enable dns server!");
+		exit(0);
+	}
+
+	ptr->dnsserver->timeout = atol(str);
+}
+
 void Parse_DNSServer(zroxy_t *ptr,char *str)
 {
 	if(!ptr->dnsserver)
@@ -239,7 +253,8 @@ void Parse_DNSServer(zroxy_t *ptr,char *str)
 	}
 
 	ptr->dnsserver->Stat = NULL;
-	ptr->dnsserver->Local.port = 53;
+	ptr->dnsserver->Local.port	= 53;
+	ptr->dnsserver->timeout		= 5;
 	bzero(ptr->dnsserver->Local.ip,_MaxIPAddress_);
 	strcpy(ptr->dnsserver->Local.ip,"127.0.0.1");
 
