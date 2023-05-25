@@ -43,26 +43,26 @@ bool net_enable_keepalive(int sock)
 
 bool net_connect(int *sockfd,const char *hostname, uint16_t port)
 {
-    /*check Hostname is IP or Domain*/
-    if(isTrueIpAddress(hostname))
-	{
-        struct sockaddr_in serv_addr;
-	    serv_addr.sin_family = AF_INET;
-	    serv_addr.sin_port = htons(port);
+    // /*check Hostname is IP or Domain*/
+    // if(isTrueIpAddress(hostname))
+	// {
+    //     struct sockaddr_in serv_addr;
+	//     serv_addr.sin_family = AF_INET;
+	//     serv_addr.sin_port = htons(port);
 
-        if(inet_pton(AF_INET, hostname, &serv_addr.sin_addr)<=0)
-		{
-			log_error("inet_pton error occured");
-			return false;
-		}
+    //     if(inet_pton(AF_INET, hostname, &serv_addr.sin_addr)<=0)
+	// 	{
+	// 		log_error("inet_pton error occured");
+	// 		return false;
+	// 	}
 
-		if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-		{
-			log_error("net_connect Error : Connect Failed");
-			return false;
-		}
-        return true;
-	}
+	// 	if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+	// 	{
+	// 		log_error("net_connect Error : Connect Failed");
+	// 		return false;
+	// 	}
+    //     return true;
+	// }
 
     char port_str[8] = {0};
     struct addrinfo hints = {0}, *addrs;
@@ -403,4 +403,24 @@ bool isTrueIpAddress(const char *ipAddress)
     struct sockaddr_in sa;
     int result = inet_pton(AF_INET, ipAddress, &(sa.sin_addr));
     return result != 0;
+}
+
+bool net_socket_timeout(int sockfd,int txTimeout,int rxTimeout)
+{
+    struct timeval xtimeout;      
+    xtimeout.tv_sec = rxTimeout;
+    xtimeout.tv_usec = 0;
+    
+    if (setsockopt (sockfd, SOL_SOCKET, SO_RCVTIMEO, &xtimeout, sizeof(xtimeout)) < 0)
+    {
+        return false;
+    }
+        
+    xtimeout.tv_sec = txTimeout;
+    if (setsockopt (sockfd, SOL_SOCKET, SO_SNDTIMEO, &xtimeout, sizeof(xtimeout)) < 0)
+    {
+        return false;
+    }
+    
+    return true;
 }

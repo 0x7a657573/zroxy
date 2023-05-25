@@ -39,6 +39,15 @@ bool net_GetHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
  */
 bool isTrueIpAddress(const char *ipAddress);
 
+/* set socket rx/tx timeout
+ * sockfd -> socket handel
+ * txTimeout -> tx timeout in sec
+ * rxTimeout -> rx timeout in sec
+ * 
+ * return:
+ * bool -> true if set timeout ok
+ */
+bool net_socket_timeout(int sockfd,int txTimeout,int rxTimeout);
 
 bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
 bool net_GetHttpsHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
