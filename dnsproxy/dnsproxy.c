@@ -24,6 +24,8 @@
 #include <unistd.h>
 #include <net.h>
 #include <filter/filter.h>
+#include <time.h>
+
 
 void *dnsserver_workerTask(void *vargp);
 
@@ -205,11 +207,26 @@ const char *DNS_GetType(uint16_t type)
   return "";
 }
 
+uint64_t timeInMilliseconds(void) 
+{
+    struct timeval tv;
+
+    gettimeofday(&tv,NULL);
+    return (((uint64_t)tv.tv_sec)*1000)+(tv.tv_usec/1000);
+}
+
+
 void *DNS_HandleIncomingRequset(void *ptr)
 {
 
 	dnsserver_t *dns = ((dnsThread_t*)ptr)->dns;
 	dnsMessage_t *msg = &((dnsThread_t*)ptr)->msg;
+	
+	
+	char domain_resolve[1024] = {0};
+	
+
+	uint64_t start_time = timeInMilliseconds(); 
 
 	int sockssocket = 0;
 	do
@@ -221,6 +238,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			struct Question *q;
 			q = dns_msg.questions;
 			log_info("DNS Question { (%s) qName '%s'}",DNS_GetType(q->qType),q->qName);
+			snprintf(domain_resolve,1023,"resolve { (%s) qName '%s'} ",DNS_GetType(q->qType),q->qName);
 
 			/*try make replay*/
 			if(dns->whitelist && q->qType == A_Resource_RecordType &&
@@ -234,6 +252,11 @@ void *DNS_HandleIncomingRequset(void *ptr)
 					// send the reply back to the client
 					sendto(dns->local_sock, buffer, len, 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
 					log_info("DNS local replay");
+
+					uint64_t End_Time = timeInMilliseconds() - start_time;
+					double time_taken = ((double)End_Time)/(1000); // convert to sec
+					log_info("%s in %0.3fs",domain_resolve,time_taken);
+
 					//Update statistics
 					if(dns->Stat)
 					{
@@ -249,7 +272,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 
 		/*forward packet to server via socks*/
 		int rlen = 0;
-		int trysend = 5;
+		int trysend = 2;
 		while (trysend--)
 		{
 			if(dns->socks)
@@ -265,20 +288,27 @@ void *DNS_HandleIncomingRequset(void *ptr)
 					break;
 			}
 			
+			/*set socket timeout*/
+			if(!net_socket_timeout(sockssocket,5,5))
+			{
+				log_error("DNS: can not set socket timeout");
+			}
+
 			// forward dns query
 			if(send(sockssocket, msg->message, msg->len + 2,MSG_NOSIGNAL)<0)
 			{
 				/*maybe socket is not connect*/
-				sockssocket = 0;
-				continue;
+				//close(sockssocket);
+				//continue;
+				break;
 			}
 
 			rlen = read(sockssocket, msg->message, DNS_MSG_SIZE);
-			if(!rlen)
+			if(rlen<=0)
 			{
 				/*maybe socket is not connect*/
-				close(sockssocket);
-				continue;
+				//close(sockssocket);
+				//continue;
 			}
 
 			break;
@@ -287,11 +317,24 @@ void *DNS_HandleIncomingRequset(void *ptr)
 		/*close sockst*/
 		close(sockssocket);
 
-		log_info("DNS SEND %i and GET %i",msg->len,rlen);
+		if(rlen>0)
+		{
+			log_info("DNS SEND %i and GET %i",msg->len,rlen);
 
-		// forward the packet to the tcp dns server
-		// send the reply back to the client (minus the length at the beginning)
-		sendto(dns->local_sock, msg->message + 2, rlen - 2 , 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
+			// forward the packet to the tcp dns server
+			// send the reply back to the client (minus the length at the beginning)
+			sendto(dns->local_sock, msg->message + 2, rlen - 2 , 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
+
+			uint64_t End_Time = timeInMilliseconds() - start_time;
+					double time_taken = ((double)End_Time)/(1000); // convert to sec
+			log_info("%s in %0.3fs",domain_resolve,time_taken);
+		}
+		else
+		{
+			uint64_t End_Time = timeInMilliseconds() - start_time;
+			double time_taken = ((double)End_Time)/(1000); // convert to sec
+			log_error("NO DATA %s in %0.3fs",domain_resolve,time_taken);
+		}
 
 		//Update statistics
 		if(dns->Stat)
