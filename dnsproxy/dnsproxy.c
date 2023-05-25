@@ -240,7 +240,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 		{
 			struct Question *q;
 			q = dns_msg.questions;
-			log_info("DNS Question { (%s) qName '%s'}",DNS_GetType(q->qType),q->qName);
+			//log_info("DNS Question { (%s) qName '%s'}",DNS_GetType(q->qType),q->qName);
 			snprintf(domain_resolve,1023,"resolve { (%s) qName '%s'} ",DNS_GetType(q->qType),q->qName);
 
 			/*try make replay*/
@@ -335,7 +335,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			double time_taken = ((double)End_Time)/(1000); // convert to sec
 			log_error("NO DATA %s in %0.3fs",domain_resolve,time_taken);
 		}
-			
+
 	}while(0);
 
 	//Update statistics
