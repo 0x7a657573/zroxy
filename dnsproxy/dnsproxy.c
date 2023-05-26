@@ -341,6 +341,8 @@ void *DNS_HandleIncomingRequset(void *ptr)
 	//Update statistics
 	if(dns->Stat)
 	{
+		rlen = (rlen>=0) ? rlen:0;
+		msg->len = (msg->len>=0) ? msg->len:0;
 		state_RxTxClose(dns->Stat,rlen,msg->len+2);
 	}
 
