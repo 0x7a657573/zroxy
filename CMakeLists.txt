@@ -3,6 +3,7 @@
 # $ cmake --version
 cmake_minimum_required(VERSION 3.5)
 
+# set name of Project
 set(EXECUTABLE_NAME zroxy)
 
 # Set the project name
@@ -36,7 +37,6 @@ set(SOURCES
 # Add an executable
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
 
-#target_link_libraries(${EXECUTABLE_NAME} -static -static-libgcc)
 
 # Set the directories that should be included in the build command for this target
 # when running g++ these will be included as -I/directory/path/
