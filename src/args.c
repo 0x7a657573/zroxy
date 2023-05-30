@@ -40,7 +40,6 @@ typedef struct
 }arg_option;
 
 
-// TODO
 static arg_option options[] =
 {
 	{ "config", 'c' , "path to config" , required_argument, "path to config. -c /etc/zroxy.conf"},
@@ -53,6 +52,7 @@ static arg_option options[] =
 	{ "dsocks", 'x' , "DNS upstream socks" , required_argument, "DNS upstream socks. -x 127.0.0.1:9050"},
 	{ "dtimeout", 't' , "DNS timeout in sec" , required_argument, "DNS upstream timeout. -t 5"},
 	{ "snip", 'i' , "SNI IP for DNS server" , required_argument, "SNI IP for DNS server. -i 127.0.0.1"},
+	{ "help", 'h' , "Give this help list" , no_argument, ""},
     { 0 }
 };
 
@@ -149,7 +149,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'x': Parse_DnsSocks(setting,arg); break;
 		case 'i': Parse_Snip(setting,arg); break;
 		case 't': Parse_DNStimeout(setting,arg); break;
-		
+		case 'h': print_usage(); exit(0);
 		default: return -1;
     }
     return 0;
