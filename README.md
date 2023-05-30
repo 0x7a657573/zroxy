@@ -40,24 +40,23 @@ When connecting to a domain through TLS/HTTPS the initial TCP session contain th
 #  Usage
 ## Command Details
 ```
-    $ zroxy --help
-    
-    Usage: zroxy [OPTION...]
-	zroxy v1.0
+Usage: zroxy [OPTION...]
+	zroxy v1.2.3
 	simple sni and dns proxy.
 
-	-c, --config=path to config   path to config. -c /etc/zroxy.conf
-	-d, --ldns=local DNS server   dns server that listens. -d 0.0.0.0:53
-	-m, --monitor=monitor port monitor port that listens. -m 1234
-	-p, --port=sni port        sni port that listens.
+	-c, 'config'	path to config		path to config. -c /etc/zroxy.conf
+	-p, 'port'	sni port		sni port that listens.
 								<bind ip>:<local port>@<remote port>
-								-p 127.0.0.1:8080@80,4433@433,853...
-	-s, --socks=socks proxy    set proxy for up stream. -s 127.0.0.1:9050
-	-u, --dns=upstream DNS providers
-								upstream DNS providers. -u 8.8.8.8
-	-w, --white=white list     white list for host -w /etc/withlist.txt
-	-?, --help                 Give this help list
-		--usage                Give a short usage message
+						 		-p 127.0.0.1:8080@80,4433@433,853...
+	-s, 'socks'	socks proxy		set proxy for up stream. -s 127.0.0.1:9050
+	-m, 'monitor'	monitor port		monitor port that listens. -m 1234
+	-w, 'white'	white list		white list for host -w /etc/withlist.txt
+	-d, 'ldns'	local DNS server		dns server that listens. -d 0.0.0.0:53
+	-u, 'dns'	upstream DNS providers		upstream DNS providers. -u 8.8.8.8
+	-x, 'dsocks'	DNS upstream socks		DNS upstream socks. -x 127.0.0.1:9050
+	-t, 'dtimeout'	DNS timeout in sec		DNS upstream timeout. -t 5
+	-i, 'snip'	SNI IP for DNS server		SNI IP for DNS server. -i 127.0.0.1
+	-h, 'help'	Give this help list
 ```
 
 #  Build
