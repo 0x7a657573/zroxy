@@ -16,8 +16,6 @@
 #include <sniproxy.h>
 #include "version.h"
 #include <netdb.h>		/* getaddrinfo, getnameinfo */ /*https://rosettacode.org/wiki/DNS_query#C*/
-
-#include <argp.h>
 #include <stdbool.h>
 #include "args.h"
 #include <monitor.h>

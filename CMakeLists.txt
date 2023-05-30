@@ -3,15 +3,19 @@
 # $ cmake --version
 cmake_minimum_required(VERSION 3.5)
 
+set(EXECUTABLE_NAME zroxy)
+
 # Set the project name
-project (zroxy C)
+project (${EXECUTABLE_NAME} C)
+
+
 
 # check for pthread library
 find_package(Threads REQUIRED)
 
 # Create a sources variable with a link to all cpp files to compile
 set(SOURCES
-    src/zroxy.c
+    src/main.c
     src/args.c
     
     sniproxy/sniproxy.c
@@ -30,11 +34,13 @@ set(SOURCES
 )
 
 # Add an executable
-add_executable(zroxy ${SOURCES})
+add_executable(${EXECUTABLE_NAME} ${SOURCES})
+
+#target_link_libraries(${EXECUTABLE_NAME} -static -static-libgcc)
 
 # Set the directories that should be included in the build command for this target
 # when running g++ these will be included as -I/directory/path/
-target_include_directories(zroxy
+target_include_directories(${EXECUTABLE_NAME}
     PRIVATE 
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/sniproxy
@@ -45,6 +51,7 @@ target_include_directories(zroxy
         ${PROJECT_SOURCE_DIR}/fifo
 )
 
-TARGET_LINK_LIBRARIES(zroxy
+TARGET_LINK_LIBRARIES(${EXECUTABLE_NAME}
         pthread
 )
+
