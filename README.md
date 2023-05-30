@@ -67,20 +67,49 @@ for build you need `CMake` and `gcc` tools. please check install on your device 
 	# apt install cmake build-essential git
 ```
 
-## Linux/OS X/FreeBSD
+## build on Linux/OS X/FreeBSD
 
+clone the project 
+```	
+git clone https://github.com/0x7a657573/zroxy.git
+cd zroxy
 ```
-	# clone the project 
-	git clone https://github.com/0x7a657573/zroxy.git
-	cd zroxy
-	
-	# make build dir
-	mkdir build
-	cd build
-	
-	# config project
-	cmake ..
-	
-	# build
-	make
+make build dir
+```
+mkdir build
+cd build
+```
+config project
+``` 
+cmake ..
+```
+build
+``` 
+make
+```
+# Static Build
+I use glibc only for zroxy, but glibc use other library that can't link staticly, like `libnss`; this library used for resolve hostname to ip, and we need it. for solve this problem we can use [musl libc](https://musl.libc.org/), **musl** is an implementation of the C standard library built on top of the Linux system call API, including interfaces defined in the base language standard, POSIX, and widely agreed-upon extensions.
+## install musl tools for debian
+```
+apt install musl-tools cmake git
+```
+## static build on Linux/OS X/FreeBSD
+clone the project 
+```	
+git clone https://github.com/0x7a657573/zroxy.git
+cd zroxy
+```
+make build dir
+```
+mkdir build
+cd build
+```
+config project and use `musl-gcc` for static linking
+``` 
+export CC="musl-gcc -static -Os"
+cmake ..
+```
+build
+``` 
+make
 ```
