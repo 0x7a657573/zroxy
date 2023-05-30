@@ -46,8 +46,8 @@ Usage: zroxy [OPTION...]
 
 	-c, 'config'	path to config		path to config. -c /etc/zroxy.conf
 	-p, 'port'	sni port		sni port that listens.
-								<bind ip>:<local port>@<remote port>
-						 		-p 127.0.0.1:8080@80,4433@433,853...
+						<bind ip>:<local port>@<remote port>
+						-p 127.0.0.1:8080@80,4433@433,853...
 	-s, 'socks'	socks proxy		set proxy for up stream. -s 127.0.0.1:9050
 	-m, 'monitor'	monitor port		monitor port that listens. -m 1234
 	-w, 'white'	white list		white list for host -w /etc/withlist.txt
