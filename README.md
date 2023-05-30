@@ -60,7 +60,13 @@ Usage: zroxy [OPTION...]
 ```
 
 #  Build
-for build zroxy you need `CMake` tools. please check installed CMake on your device.
+for build you need `CMake` and `gcc` tools. please check install on your device or install they.
+
+## install compile tools for debian
+```
+	# apt install cmake build-essential git
+```
+
 ## Linux/OS X/FreeBSD
 
 ```
