@@ -10,14 +10,15 @@
 #include <stdlib.h>
 #include "version.h"
 #include <stdbool.h>
-#include <argp.h>
+//#include <argp.h>
 #include <log/log.h>
 #include <netdb.h>
+#include <getopt.h>
+#include <ctype.h>
 
+static char doc[] = "zroxy v"version "\n\tsimple sni and dns proxy.";
+static int parse_opt(int key, char *arg, void *userprm);
 
-static char doc[] = "zroxy v"version "\nsimple sni and dns proxy.";
-
-static error_t parse_opt(int key, char *arg, struct argp_state *state);
 void Parse_Ports(zroxy_t *ptr,char *str);
 void Parse_Socks(zroxy_t *ptr,char *str);
 void Parse_Monit(zroxy_t *ptr,char *str);
@@ -29,22 +30,50 @@ bool Parse_config(zroxy_t *ptr,char *str);
 void Parse_Snip(zroxy_t *ptr,char *str);
 void Parse_DNStimeout(zroxy_t *ptr,char *str);
 
-static struct argp_option options[] =
+typedef struct 
 {
-	{ "config", 'c' , "path to config" , 0, "path to config. -c /etc/zroxy.conf"},
-    { "port", 'p', "sni port", 0, "sni port that listens.\n<bind ip>:<local port>@<remote port>\n -p 127.0.0.1:8080@80,4433@433,853..."},
-	{ "socks", 's', "socks proxy", 0, "set proxy for up stream. -s 127.0.0.1:9050"},
-	{ "monitor", 'm', "monitor port", 0, "monitor port that listens. -m 1234"},
-	{ "white", 'w' , "white list" , 0, "white list for host -w /etc/withlist.txt"},
-	{ "ldns", 'd' , "local DNS server" , 0, "dns server that listens. -d 0.0.0.0:53"},
-	{ "dns", 'u' , "upstream DNS providers" , 0, "upstream DNS providers. -u 8.8.8.8"},
-	{ "dsocks", 'x' , "DNS upstream socks" , 0, "DNS upstream socks. -x 127.0.0.1:9050"},
-	{ "dtimeout", 't' , "DNS upstream timeout in sec" , 0, "DNS upstream timeout. -t 5"},
-	{ "snip", 'i' , "SNI IP for DNS server" , 0, "SNI IP for DNS server. -i 127.0.0.1"},
+	const char *name;
+	char 		key;
+	const char  *arg;
+	int			require;
+	const char *doc;
+}arg_option;
+
+
+// TODO
+static arg_option options[] =
+{
+	{ "config", 'c' , "path to config" , required_argument, "path to config. -c /etc/zroxy.conf"},
+    { "port", 'p', "sni port", required_argument, "sni port that listens.\n\t\t\t\t\t\t<bind ip>:<local port>@<remote port>\n\t\t\t\t\t\t -p 127.0.0.1:8080@80,4433@433,853..."},
+	{ "socks", 's', "socks proxy", required_argument, "set proxy for up stream. -s 127.0.0.1:9050"},
+	{ "monitor", 'm', "monitor port", required_argument, "monitor port that listens. -m 1234"},
+	{ "white", 'w' , "white list" , required_argument, "white list for host -w /etc/withlist.txt"},
+	{ "ldns", 'd' , "local DNS server" , required_argument, "dns server that listens. -d 0.0.0.0:53"},
+	{ "dns", 'u' , "upstream DNS providers" , required_argument, "upstream DNS providers. -u 8.8.8.8"},
+	{ "dsocks", 'x' , "DNS upstream socks" , required_argument, "DNS upstream socks. -x 127.0.0.1:9050"},
+	{ "dtimeout", 't' , "DNS timeout in sec" , required_argument, "DNS upstream timeout. -t 5"},
+	{ "snip", 'i' , "SNI IP for DNS server" , required_argument, "SNI IP for DNS server. -i 127.0.0.1"},
     { 0 }
 };
 
-static struct argp argp = { options, parse_opt, NULL, doc, 0, 0, 0 };
+void print_usage(void)
+{
+	
+	printf("\r\nUsage: zroxy [OPTION...]\r\n");
+	printf("\t%s\r\n\r\n",doc);
+
+	int arg_number = sizeof(options)/sizeof(arg_option);
+	for(int i=0;i<arg_number-1;i++)
+	{
+		printf("\t-%c, '%s'\t%s\t\t%s\r\n",
+			options[i].key,
+			options[i].name,
+			options[i].arg,
+			options[i].doc
+		);
+	}
+	printf("\r\n");
+}
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
 {
@@ -54,14 +83,55 @@ bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
 	{
 		return Parse_config(pgp,DEF_CONFIG_PATH);
 	}
-	
-	argp_parse(&argp, argc, (char **)argv, 0, 0, pgp);
+
+	/*map arg_option to option*/
+	int arg_number = sizeof(options)/sizeof(arg_option);
+	struct option x_options[arg_number];
+	bzero(x_options,sizeof(x_options));
+	for(int i=0;i<arg_number;i++)
+	{
+		x_options[i].name = options[i].name;
+		x_options[i].val = options[i].key;
+		x_options[i].has_arg = options[i].require;
+		x_options[i].flag = NULL;
+	}	
+
+	//make opt string
+	char optstring[128] = {0};
+	uint32_t index = 0;
+	for(struct option *op=x_options;op->name!=NULL;op++)
+	{
+		optstring[index++]=op->val;
+		if(op->has_arg==required_argument)
+			optstring[index++]=':';
+		else if(op->has_arg==optional_argument)
+			optstring[index++]=';';
+
+		/*check Overflow*/
+		if(index>=sizeof(optstring)-1)
+			break;
+	}	
+
+	int option_index = 0;
+	while(1)
+	{
+		int key = getopt_long(argc, (char **)argv, optstring, x_options, &option_index);
+		if (key == -1)
+            break;
+		
+		if(parse_opt(key, optarg, pgp)!=0)
+		{
+			log_error("error invalid value in config: %s",key);
+			return false;
+		}
+	}
+
     return true;
 }
 
-static error_t parse_opt(int key, char *arg, struct argp_state *state)
+static int parse_opt(int key, char *arg, void *userprm)
 {
-	zroxy_t *setting = state->input;
+	zroxy_t *setting = (zroxy_t*)userprm;
 
 	/*remove space form arg*/
 	if(arg)
@@ -79,8 +149,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		case 'x': Parse_DnsSocks(setting,arg); break;
 		case 'i': Parse_Snip(setting,arg); break;
 		case 't': Parse_DNStimeout(setting,arg); break;
-		case ARGP_KEY_ARG: return 0;
-		default: return ARGP_ERR_UNKNOWN;
+		
+		default: return -1;
     }
     return 0;
 }
@@ -166,7 +236,7 @@ bool validate_ip(char *ip)
 
 int config_find_key(char *key)
 {
-	for(struct argp_option *ptr=options;ptr->name!=NULL;ptr++)
+	for(arg_option *ptr=options;ptr->name!=NULL;ptr++)
 	{
 		if(strcmp(ptr->name,key)==0)
 			return ptr->key;
@@ -185,7 +255,6 @@ bool Parse_config(zroxy_t *ptr,char *str)
 	}
 
 	/*read and load config from file*/
-	struct argp_state state = {.input = ptr};
 	bool ret_status = true;
 	size_t len = 0;
 	char *line = NULL;
@@ -209,7 +278,7 @@ bool Parse_config(zroxy_t *ptr,char *str)
 			break;
 		}
 
-		if(parse_opt(ckey, fix_val, &state)!=0)
+		if(parse_opt(ckey, fix_val, ptr)!=0)
 		{
 			log_error("error invalid value in config: %s",fix_val);
 			ret_status = false;
@@ -443,7 +512,6 @@ void Free_PortList(zroxy_t *ptr)
 		p=next;
 	}
 }
-
 
 void Parse_DnsSocks(zroxy_t *ptr,char *str)
 {

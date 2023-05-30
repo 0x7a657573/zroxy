@@ -24,6 +24,7 @@ typedef struct
 }zroxy_t;
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv);
+void print_usage(void);
 void Free_PortList(zroxy_t *ptr);
 
 

@@ -38,11 +38,10 @@ zroxy_t prg_setting = {0};
  * */
 int main(int argc, const char **argv)
 {
-
 	Log_init();
 	if(arg_Init(&prg_setting,argc,argv)==false)
 	{
-		log_error("use --help for more");
+		print_usage();
 		return 1;
 	}
 	
