@@ -1,6 +1,6 @@
 ## Add zroxy Package to OpenWRT
 
-```warning: zroxy is a simple sni proxy and maybe it's not optimized to use in your ruter!```
+```warning: zroxy is a simple sni proxy and maybe it's not optimized to use in your router!```
 
 for use zroxy in your router, you need add zroxy to openwrt package and then cross-compile it for your router articture.
 

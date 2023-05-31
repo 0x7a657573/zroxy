@@ -113,3 +113,6 @@ build
 ``` 
 make
 ```
+
+# openwrt Build
+## read [`zroxy in openwrt`](openwrt/README.md) document.
