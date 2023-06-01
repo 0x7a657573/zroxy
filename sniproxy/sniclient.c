@@ -74,22 +74,20 @@ void *SniClientHandler(void *arg)
 			/*Check host validate*/
 			if(client->SniConfig.wlist && filter_IsWhite(client->SniConfig.wlist,HostName)==false)
 			{
-				log_info("filter tid:%i Host %s ",client->connid,HostName);
+				log_info("SNI filter Host { %s }",HostName);
 				break;
 			}
 
-			log_info(" Open tid:%i Host %s ",client->connid,HostName);
 			if(isTrueIpAddress(HostName))
 			{
-				log_info("we can't support IP address");
+				log_info("SNI we can't support IP address");
 				break;
 			}
 
+			log_info("SNI start Host { %s } ",HostName);
 			int sockssocket = 0;
 			if(socks)	/*Set Connect to socks*/
 			{
-				//log_info("socks host %s:%i",socks->host,socks->port);
-				//log_info("host %s:%i",HostName,port);
 				if(!socks5_connect(&sockssocket,socks,HostName,xport.remote_port,false))
 					break;
 			}
@@ -114,7 +112,7 @@ void *SniClientHandler(void *arg)
 				FD_SET(client->connid,&rfds);
 				if (select(FD_SETSIZE, &rfds, NULL, NULL, &tv) < 0)
 				{
-					log_error("Err in select");
+					log_error("SNI error in select");
 					break;
 				}
 
@@ -135,7 +133,7 @@ void *SniClientHandler(void *arg)
 				else
 				{
 					/*timeout wait for read socket*/
-					log_info("TimeOut tid:%i Host %s",client->connid,HostName);
+					log_info("SNI timeout Host { %s }",HostName);
 					break;
 				}
 			}
@@ -145,12 +143,13 @@ void *SniClientHandler(void *arg)
 		}
 	}
 
+	log_info("SNI end Host{ %s } txrx(%i/%i)",HostName,TotalRx,TotalTx);
+
 	if(client->SniConfig.sta)	/*Update statistics*/
 	{
 		state_RxTxClose(client->SniConfig.sta,TotalRx,TotalTx);
 	}
 
-	log_info("Close tid:%i Host %s Tx:%i Rx:%i",client->connid,HostName,TotalRx,TotalTx);
 	/* close socket and clean up */
 	close(client->connid);
 	free(client);
