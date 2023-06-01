@@ -254,17 +254,11 @@ void *DNS_HandleIncomingRequset(void *ptr)
 				{
 					// send the reply back to the client
 					sendto(dns->local_sock, buffer, len, 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
-					log_info("DNS local replay");
 
 					uint64_t End_Time = timeInMilliseconds() - start_time;
 					double time_taken = ((double)End_Time)/(1000); // convert to sec
-					log_info("%s in %0.3fs",domain_resolve,time_taken);
+					log_info("%s in %0.3fs Local replay",domain_resolve,time_taken);
 
-					//Update statistics
-					if(dns->Stat)
-					{
-						state_RxTxClose(dns->Stat,len,msg->len);
-					}
 					free_msg(&dns_msg);
 					break;
 				}
