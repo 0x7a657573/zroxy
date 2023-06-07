@@ -398,7 +398,7 @@ void Parse_DnsUpstream(zroxy_t *ptr,char *str)
 void Parse_Socks(zroxy_t *ptr,char *str)
 {
 	ptr->socks = (sockshost_t*)malloc(sizeof(sockshost_t));
-	ptr->socks->port = 9050;
+	ptr->socks->port = 1080;
 	
 	char *Userpass = strchr(str,'@'); 
 	/*we have user passWord*/
