@@ -50,13 +50,13 @@ void filter_Reload(filter_t *self)
 	    	break;
 	    }
 
-	    memset(self->item,0,sizeof(item_t));
+	    memset(NewList,0,sizeof(item_t));
 
 	    char *pos;	/*remove new line*/
 	    if ((pos=strchr(line, '\n')) != NULL)
 	        *pos = '\0';
 
-	    strcpy(self->item->Rec,line);
+	    strcpy(NewList->Rec,line);
 
 	    NewList->Next = Pvitem;
 	    Pvitem = NewList;
