@@ -187,7 +187,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 
 	 if(Replay.rep!=0)
 	 {
-		log_error("[!] Error Success Command");
+		log_error("[!] Error Success Command: %d",Replay.rep);
 		close(*sockfd);
 		return false;
 	 }
