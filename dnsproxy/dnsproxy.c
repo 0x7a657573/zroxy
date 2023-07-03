@@ -205,6 +205,8 @@ const char *DNS_GetType(uint16_t type)
   	case TXT_Resource_RecordType: return "TXT";
   	case AAAA_Resource_RecordType: return "AAAA";
   	case SRV_Resource_RecordType: return "SRV";
+	case HTTPS_Resource_RecordType: return "HTTPS";
+	case SVCB_Resource_RecordType: return "SVCB";
 	default:	return "unknow";
   }
   return "";
