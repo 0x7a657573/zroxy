@@ -40,6 +40,7 @@ enum
 };
 
 /* Resource Record Types */
+/*https://en.wikipedia.org/wiki/List_of_DNS_record_types*/
 enum 
 {
   A_Resource_RecordType = 1,
@@ -50,7 +51,9 @@ enum
   MX_Resource_RecordType = 15,
   TXT_Resource_RecordType = 16,
   AAAA_Resource_RecordType = 28,
-  SRV_Resource_RecordType = 33
+  SRV_Resource_RecordType = 33,
+  HTTPS_Resource_RecordType = 65,
+  SVCB_Resource_RecordType = 64
 };
 
 /* Operation Code */
