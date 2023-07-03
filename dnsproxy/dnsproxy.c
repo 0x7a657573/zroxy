@@ -251,6 +251,9 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			{
 				if(q->qType != A_Resource_RecordType)
 				{
+					uint64_t End_Time = timeInMilliseconds() - start_time;
+					double time_taken = ((double)End_Time)/(1000); // convert to sec
+					log_info("%s in %0.3fs Local Blocked",domain_resolve,time_taken);
 					free_msg(&dns_msg);
 					break;
 				}
