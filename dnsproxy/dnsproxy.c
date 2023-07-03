@@ -246,9 +246,15 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			snprintf(domain_resolve,1023,"resolve { (%s) qName '%s'} ",DNS_GetType(q->qType),q->qName);
 
 			/*try make replay*/
-			if(dns->whitelist && q->qType == A_Resource_RecordType &&
+			if(dns->whitelist && /*q->qType == A_Resource_RecordType &&*/
 				filter_IsWhite(dns->whitelist,q->qName))
 			{
+				if(q->qType != A_Resource_RecordType)
+				{
+					free_msg(&dns_msg);
+					break;
+				}
+
 				uint8_t buffer[DNS_MSG_SIZE];
 				int len = dns_resolve_query(dns,&dns_msg,buffer);
 				/*if packet fill send to network*/
@@ -262,8 +268,9 @@ void *DNS_HandleIncomingRequset(void *ptr)
 					log_info("%s in %0.3fs Local replay",domain_resolve,time_taken);
 
 					free_msg(&dns_msg);
-					break;
 				}
+
+				break;
 			}
 		}
 		free_msg(&dns_msg);
