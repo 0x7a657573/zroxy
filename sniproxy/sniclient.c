@@ -39,7 +39,7 @@ void *SniClientHandler(void *arg)
 	{
 
 		FD_ZERO(&rfds);
-		tv.tv_sec = 30;
+		tv.tv_sec = 5;
 		tv.tv_usec = 0;
 		FD_SET(client->connid,&rfds);
 		if (select(FD_SETSIZE, &rfds, NULL, NULL, &tv) < 0)	/*wait for socket data ready*/
