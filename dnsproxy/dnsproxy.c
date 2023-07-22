@@ -156,17 +156,6 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 	struct ResourceRecord *rr = malloc(sizeof(struct ResourceRecord));
 	bzero(rr,sizeof(struct ResourceRecord));
 
-	rr->name = strdup(msg->questions->qName);
-	rr->type = msg->questions->qType;
-	rr->class = msg->questions->qClass;
-	rr->ttl = 60*60; // in seconds; 0 means no caching
-
-	rr->rd_length = 4;
-	rr->rd_data.a_record.addr[0] = dns->sni_ip[0];
-    rr->rd_data.a_record.addr[1] = dns->sni_ip[1];
-    rr->rd_data.a_record.addr[2] = dns->sni_ip[2];
-    rr->rd_data.a_record.addr[3] = dns->sni_ip[3];
-
 	// leave most values intact for response
 	msg->qr = 1; // this is a response
 	msg->aa = 1; // this server is authoritative
@@ -178,11 +167,54 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 	msg->nsCount = 0;
 	msg->arCount = 0;
 
-	msg->anCount++;
+	rr->name = strdup(msg->questions->qName);
+	rr->type = msg->questions->qType;
+	rr->class = msg->questions->qClass;
+	rr->ttl = 60*60; // in seconds; 0 means no caching
 
-	// prepend resource record to answers list
-    msg->answers = rr;
-    
+	// We only can only answer two question types so far
+    // and the answer (resource records) will be all put
+    // into the answers list.
+    switch (msg->questions->qType)
+	{
+		case A_Resource_RecordType:
+			rr->rd_length = 4;
+			rr->rd_data.a_record.addr[0] = dns->sni_ip[0];
+			rr->rd_data.a_record.addr[1] = dns->sni_ip[1];
+			rr->rd_data.a_record.addr[2] = dns->sni_ip[2];
+			rr->rd_data.a_record.addr[3] = dns->sni_ip[3];
+			msg->anCount++;
+			// prepend resource record to answers list
+    		msg->answers = rr;
+		break;
+		case AAAA_Resource_RecordType:
+			rr->rd_length = 16;
+			rr->rd_data.a_record.addr[0] = 0;
+			rr->rd_data.a_record.addr[1] = 0;
+			rr->rd_data.a_record.addr[2] = 0;
+			rr->rd_data.a_record.addr[3] = 0;
+			rr->rd_data.a_record.addr[4] = 0;
+			rr->rd_data.a_record.addr[5] = 0;
+			rr->rd_data.a_record.addr[6] = 0;
+			rr->rd_data.a_record.addr[7] = 0;
+			rr->rd_data.a_record.addr[8] = 0;
+			rr->rd_data.a_record.addr[9] = 0;
+			rr->rd_data.a_record.addr[10] = 0;
+			rr->rd_data.a_record.addr[11] = 0;
+			rr->rd_data.a_record.addr[12] = 0;
+			rr->rd_data.a_record.addr[13] = 0;
+			rr->rd_data.a_record.addr[14] = 0;
+			rr->rd_data.a_record.addr[15] = 0;
+			msg->anCount++;
+			// prepend resource record to answers list
+    		msg->answers = rr;
+		break;
+		default:
+			free(rr);
+			msg->rcode = NotImplemented_ResponseType;
+		break;
+	}
+
 	uint8_t *p = buf;
 	if (!dns_encode_msg(msg, &p)) 
 	{
@@ -249,15 +281,6 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			if(dns->whitelist && /*q->qType == A_Resource_RecordType &&*/
 				filter_IsWhite(dns->whitelist,q->qName))
 			{
-				if(q->qType != A_Resource_RecordType)
-				{
-					uint64_t End_Time = timeInMilliseconds() - start_time;
-					double time_taken = ((double)End_Time)/(1000); // convert to sec
-					log_info("%s in %0.3fs Local Blocked",domain_resolve,time_taken);
-					free_msg(&dns_msg);
-					break;
-				}
-
 				uint8_t buffer[DNS_MSG_SIZE];
 				int len = dns_resolve_query(dns,&dns_msg,buffer);
 				/*if packet fill send to network*/
