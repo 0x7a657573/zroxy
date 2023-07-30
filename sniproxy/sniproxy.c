@@ -17,6 +17,7 @@
 #include "sniclient.h"
 #include "net.h"
 #include <arpa/inet.h>
+#include <errno.h>
 
 void *SniProxy_HandleIncomingConnection(void *vargp);
 
@@ -63,7 +64,7 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 		if (client->connid < 0)
 		{
 			free(client);
-			log_error("server accept failed");
+			log_error("server accept() %i: %s",errno,strerror(errno));
 			continue;
 		}
 
