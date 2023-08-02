@@ -101,7 +101,12 @@ void *SniClientHandler(void *arg)
 			FD_ZERO(&rfds);
 
 			int n;
-			if(write(sockssocket,buffer,Windex)<Windex) break;
+			if(write(sockssocket,buffer,Windex)<Windex)
+			{
+				/*try close upstream socket*/
+				close(sockssocket);
+				break;
+			}
 			TotalTx += Windex;
 
 			while(1)
@@ -137,7 +142,8 @@ void *SniClientHandler(void *arg)
 					break;
 				}
 			}
-
+			
+			/*try close upstream socket*/
 			close(sockssocket);
 			break;
 		}
