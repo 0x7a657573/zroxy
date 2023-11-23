@@ -3,6 +3,8 @@
 # $ cmake --version
 cmake_minimum_required(VERSION 3.5)
 
+
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 # set name of Project
 set(EXECUTABLE_NAME zroxy)
 
@@ -34,9 +36,14 @@ set(SOURCES
     fifo/fifo.c
 )
 
+
+find_package(Threads REQUIRED)
+find_package(Libev 4.00 REQUIRED)
 # Add an executable
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
 
+
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE Threads::Threads ${LIBEV_LIBRARIES})
 
 # Set the directories that should be included in the build command for this target
 # when running g++ these will be included as -I/directory/path/
@@ -49,10 +56,6 @@ target_include_directories(${EXECUTABLE_NAME}
         ${PROJECT_SOURCE_DIR}/network
         ${PROJECT_SOURCE_DIR}/network/socks
         ${PROJECT_SOURCE_DIR}/fifo
-)
-
-TARGET_LINK_LIBRARIES(${EXECUTABLE_NAME}
-        pthread
 )
 
 INSTALL(TARGETS ${EXECUTABLE_NAME} RUNTIME DESTINATION bin)
