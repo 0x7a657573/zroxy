@@ -15,7 +15,7 @@
 #include <ev.h>
 
 #define MAX_SNI_PACKET	4096
-#define SNI_BUFFER_SIZE	2048
+#define SNI_BUFFER_SIZE	8192
 typedef struct
 {
 	char	 bindip[_MaxIPAddress_];

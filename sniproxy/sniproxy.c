@@ -161,7 +161,12 @@ static void sni_origin_read_cb(struct ev_loop *loop, struct ev_io *watcher, int 
 	xptr->total_rx += read;
 	sni_ctx_t *user = &ptr->user;
 	// Send message bach to the origin server
-	send(user->evio.fd, buffer, read, 0);
+	if(send(user->evio.fd, buffer, read, 0)!=read)
+	{
+		log_error("Can not write to socket.....");
+		close_server_client(loop,ptr);
+	}
+	
 }
 
 static void sni_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
@@ -270,5 +275,9 @@ static void sni_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents
 
 	sni_ctx_t *server = &ptr->server;
 	// Send message bach to the origin server
-	send(server->evio.fd, buffer, read, 0);
+	if(send(server->evio.fd, buffer, read, 0)!=read)
+	{
+		log_error("Can not write to socket...");
+		close_server_client(loop,ptr);
+	}
 }
