@@ -271,6 +271,10 @@ static void sni_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents
 			}
 			return;
 		}
+		else
+		{
+			log_error("SNI NotFound @0x%X buffer len %d",(uintptr_t)ptr,client->w_index);
+		}
 	}
 
 	sni_ctx_t *server = &ptr->server;
