@@ -57,6 +57,7 @@ static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
 	sni_ctx_t *user = &ptr->user;
 	sni_ctx_t *server = &ptr->server;
 	
+	log_info("end Host 0x%X: txrx(%i/%i)",(uintptr_t)ptr,user->total_rx,server->total_rx);
 	if(sni_data->is_sni_mark)
 	{
 		log_info("SNI end Host 0x%X:{ %s } txrx(%i/%i)",(uintptr_t)ptr,sni_data->hostname,user->total_rx,server->total_rx);
@@ -84,7 +85,7 @@ static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
 		ev_io_stop(loop,&user->evio);
 		close(socket);
 	}
-	
+
 	bzero(ptr,sizeof(server_t));
 	free(ptr);
 }
