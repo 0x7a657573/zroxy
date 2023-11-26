@@ -24,6 +24,11 @@
 zroxy_t prg_setting = {0};
 
 
+void libev_errorhandler(const char *msg)
+{
+	log_debug("xLIBEV %s",msg);
+}
+
 /*
  * for test dns server
  * dig @127.0.0.1 google.com -p5656
@@ -68,7 +73,7 @@ int main(int argc, const char **argv)
 		log_error("cannot initialize libev. check LIBEV_FLAGS?");
 		exit(EXIT_FAILURE);
 	}
-        
+    ev_set_syserr_cb(libev_errorhandler);    
 
 	/*check for dns server*/
 	if(prg_setting.dnsserver)
@@ -105,11 +110,9 @@ int main(int argc, const char **argv)
 	Free_PortList(&prg_setting); /*free Port List*/
 
 	// Start infinite loop
-	while(1)
-	{
-		ev_loop(evLoop, 0);
-	}
+	ev_loop(evLoop, 0);
 
+	log_info("Exit zroxy");
 	return EXIT_SUCCESS;
 }
 
