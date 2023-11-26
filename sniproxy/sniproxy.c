@@ -84,7 +84,8 @@ static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
 		ev_io_stop(loop,&user->evio);
 		close(socket);
 	}
-
+	
+	bzero(ptr,sizeof(server_t));
 	free(ptr);
 }
 

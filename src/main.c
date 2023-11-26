@@ -109,5 +109,7 @@ int main(int argc, const char **argv)
 	{
 		ev_loop(evLoop, 0);
 	}
+
+	return EXIT_SUCCESS;
 }
 
