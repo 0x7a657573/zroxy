@@ -8,7 +8,12 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.2.3"
+#define version	 "1.3.0"
+/*
+* sni : use libev with single thread
+*/
+
+//#define version	 "1.2.3"
 /*
 * dns : add timeout
 */
