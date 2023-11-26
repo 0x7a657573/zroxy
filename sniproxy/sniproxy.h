@@ -12,7 +12,10 @@
 #include <statistics.h>
 #include <filter/filter.h>
 #include <socks.h>
+#include <ev.h>
 
+#define MAX_SNI_PACKET	4096
+#define SNI_BUFFER_SIZE	2048
 typedef struct
 {
 	char	 bindip[_MaxIPAddress_];
@@ -31,16 +34,33 @@ typedef struct
 	char DNSServer[20];
 }SniServer_t;
 
+typedef struct 
+{
+	struct ev_io	evio;
+	uint32_t		total_rx;
+	void			*cLink;
+}sni_ctx_t;
+
+
 typedef struct
 {
-	SniServer_t SniConfig;
-	int			sockfd;
+	char 	 hostname[_MaxHostName_];
+	uint8_t  sni_packet[MAX_SNI_PACKET];
+	uint32_t w_index;
+	bool	 is_sni_mark;
+	int		 sockfd;
+}sni_link_t;
+
+typedef struct
+{
+	struct ev_io	evio;
+	sni_ctx_t		user;
+	sni_ctx_t		server;
+	sni_link_t		sni_data;
+	SniServer_t 	sni_config;
 }server_t;
 
 
-
-bool SniProxy_Start(SniServer_t *Sni);
-
-
+bool SniProxy_Start(struct ev_loop *eloop,SniServer_t *Sni);
 
 #endif /* SNIPROXY_H_ */

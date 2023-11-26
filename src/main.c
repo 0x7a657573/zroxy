@@ -42,7 +42,7 @@ int main(int argc, const char **argv)
 	if(arg_Init(&prg_setting,argc,argv)==false)
 	{
 		print_usage();
-		return 1;
+		exit(EXIT_FAILURE);
 	}
 	
 	mon_t *monitor = NULL;
@@ -62,6 +62,13 @@ int main(int argc, const char **argv)
 		free(prg_setting.WhitePath);
 	}
 
+	struct ev_loop *evLoop = NULL;
+	if (! (evLoop = ev_default_loop(EVFLAG_AUTO)))
+	{
+		log_error("cannot initialize libev. check LIBEV_FLAGS?");
+		exit(EXIT_FAILURE);
+	}
+        
 
 	/*check for dns server*/
 	if(prg_setting.dnsserver)
@@ -91,14 +98,16 @@ int main(int argc, const char **argv)
 	while(p)
 	{
 		Xconf.Port = *p;
-		SniProxy_Start(&Xconf);
+		SniProxy_Start(evLoop,&Xconf);
 
 		p=p->next;
 	}
 	Free_PortList(&prg_setting); /*free Port List*/
 
-	//log_trace("exit from main thread");
-	pthread_exit(NULL);		/* terminate the thread */
-	//return 0;
+	// Start infinite loop
+	while(1)
+	{
+		ev_loop(evLoop, 0);
+	}
 }
 
