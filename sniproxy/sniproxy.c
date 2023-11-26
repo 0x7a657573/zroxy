@@ -84,7 +84,7 @@ static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
 		ev_io_stop(loop,&user->evio);
 		close(socket);
 	}
-	
+
 	free(ptr);
 }
 
@@ -118,6 +118,8 @@ static void sni_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int reven
 		return;
 	}
 
+	SniServer_t *config = &ptr->sni_config;
+	state_IncConnection(config->sta);
 	// Initialize and start watcher to read client requests
 	w_client->user.cLink = w_client;	/*copy ptr of connection info*/
 	ev_io_init(&w_client->user.evio, sni_read_cb, client_sd, EV_READ);
@@ -143,7 +145,8 @@ static void sni_origin_read_cb(struct ev_loop *loop, struct ev_io *watcher, int 
 
 	if(read < 0)
 	{
-		log_error("read error from socket");
+		log_error("read error from socket(%d)",read);
+		close_server_client(loop,ptr);
 		return;
 	}
 
@@ -178,7 +181,8 @@ static void sni_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents
 
 	if(read < 0)
 	{
-		log_error("read error from socket");
+		log_error("read error from socket(%d)",read);
+		close_server_client(loop,ptr);
 		return;
 	}
 
