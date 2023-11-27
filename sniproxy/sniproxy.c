@@ -57,7 +57,7 @@ static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
 	sni_ctx_t *user = &ptr->user;
 	sni_ctx_t *server = &ptr->server;
 	
-	log_info("end Host 0x%X: txrx(%i/%i)",(uintptr_t)ptr,user->total_rx,server->total_rx);
+	
 	if(sni_data->is_sni_mark)
 	{
 		log_info("SNI end Host 0x%X:{ %s } txrx(%i/%i)",(uintptr_t)ptr,sni_data->hostname,user->total_rx,server->total_rx);
@@ -66,24 +66,28 @@ static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
 		if(config->sta)
 			state_RxTxClose(config->sta,server->total_rx,user->total_rx);
 	}
+	else
+	{
+		log_info("XXXXXXXXXXXXXXX end 0x%X: c/s(%i/%i)",(uintptr_t)ptr,user->total_rx,server->total_rx);
+	}
 
 	// close origin socket
 	if(server->cLink)
 	{
 		int socket = server->evio.fd;
-		//log_info("server side close socket %d",socket);
 		// Stop and free watchet if client socket is closing
-		ev_io_stop(loop,&server->evio);
 		close(socket);
+		ev_io_stop(loop,&server->evio);
+		
 	}
 	
 	if(user->cLink)
 	{
 		int socket = user->evio.fd;
-		//log_info("user side close socket %d",socket);
 		// Stop and free watchet if client socket is closing
-		ev_io_stop(loop,&user->evio);
 		close(socket);
+		ev_io_stop(loop,&user->evio);
+		
 	}
 
 	bzero(ptr,sizeof(server_t));
