@@ -30,6 +30,7 @@ typedef void (*poll_calback)(xpoll_t *poll,int fd,void *user_ptr);
 
 typedef struct 
 {
+    uint32_t     magic;
     int          fd;
     poll_calback cb;
     void        *data;

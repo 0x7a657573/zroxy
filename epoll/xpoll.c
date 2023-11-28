@@ -19,6 +19,9 @@
 #include <stdlib.h>
 #include <unistd.h> 
 #include <string.h>
+#include <log/log.h>
+
+#define magic_x 0x7a657573
 
 xpoll_t *xpoll_create(void)
 {
@@ -67,6 +70,7 @@ xevent_t *xpoll_start_watch(xpoll_t *poll,int fd,poll_calback cb,void *userdata,
     memset(usr_ptr,0,sizeof(usr_ptr));
     
     /*set up user data*/
+    usr_ptr->magic = magic_x;
     usr_ptr->fd = fd;
     usr_ptr->cb = cb;
     usr_ptr->data = userdata;
@@ -94,6 +98,7 @@ bool xpoll_stop_watch(xpoll_t *poll,xevent_t *ev,int fd)
     {
         return false;
     }
+    memset(ev->data.ptr,0,sizeof(xuser_t));
     free(ev->data.ptr);
     free(ev);
     return true;
@@ -111,6 +116,11 @@ void xpoll_run(xpoll_t *poll)
         if(ev->data.ptr)
         {
             xuser_t *usr = (xuser_t*)ev->data.ptr;
+            if(usr->magic!=magic_x)
+            {
+                log_error("########################-------------------> %d",ev->data.ptr);
+                continue;
+            }
             usr->cb(poll,usr->fd,usr->data);
         }
     }
