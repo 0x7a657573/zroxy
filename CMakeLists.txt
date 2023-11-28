@@ -34,16 +34,16 @@ set(SOURCES
     dnsproxy/dnsproxy.c
     dnsproxy/dns.c
     fifo/fifo.c
+    epoll/xpoll.c
 )
 
 
 find_package(Threads REQUIRED)
-find_package(Libev 4.00 REQUIRED)
 # Add an executable
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
 
 
-target_link_libraries(${EXECUTABLE_NAME} PRIVATE Threads::Threads ${LIBEV_LIBRARIES})
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE Threads::Threads)
 
 # Set the directories that should be included in the build command for this target
 # when running g++ these will be included as -I/directory/path/
@@ -56,6 +56,7 @@ target_include_directories(${EXECUTABLE_NAME}
         ${PROJECT_SOURCE_DIR}/network
         ${PROJECT_SOURCE_DIR}/network/socks
         ${PROJECT_SOURCE_DIR}/fifo
+        ${PROJECT_SOURCE_DIR}/epoll
 )
 
 INSTALL(TARGETS ${EXECUTABLE_NAME} RUNTIME DESTINATION bin)
