@@ -12,7 +12,7 @@
 #include <statistics.h>
 #include <filter/filter.h>
 #include <socks.h>
-#include <ev.h>
+#include <xpoll.h>
 
 #define MAX_SNI_PACKET	4096
 #define SNI_BUFFER_SIZE	8192
@@ -36,9 +36,9 @@ typedef struct
 
 typedef struct 
 {
-	struct ev_io	evio;
+	int				fd;
 	uint32_t		total_rx;
-	void			*cLink;
+	xevent_t		*ev;
 }sni_ctx_t;
 
 
@@ -53,7 +53,6 @@ typedef struct
 
 typedef struct
 {
-	struct ev_io	evio;
 	sni_ctx_t		user;
 	sni_ctx_t		server;
 	sni_link_t		sni_data;
@@ -61,6 +60,6 @@ typedef struct
 }server_t;
 
 
-bool SniProxy_Start(struct ev_loop *eloop,SniServer_t *Sni);
+bool SniProxy_Start(xpoll_t *eloop,SniServer_t *Sni);
 
 #endif /* SNIPROXY_H_ */

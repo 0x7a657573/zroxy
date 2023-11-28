@@ -20,14 +20,9 @@
 #include "args.h"
 #include <monitor.h>
 #include "filter/filter.h"
+#include <xpoll.h>
 
 zroxy_t prg_setting = {0};
-
-
-void libev_errorhandler(const char *msg)
-{
-	log_debug("xLIBEV %s",msg);
-}
 
 /*
  * for test dns server
@@ -67,13 +62,12 @@ int main(int argc, const char **argv)
 		free(prg_setting.WhitePath);
 	}
 
-	struct ev_loop *evLoop = NULL;
-	if (! (evLoop = ev_default_loop(EVFLAG_AUTO)))
+	xpoll_t *e_poll = xpoll_create();
+	if(!e_poll)
 	{
-		log_error("cannot initialize libev. check LIBEV_FLAGS?");
+		log_error("cannot initialize epoll.");
 		exit(EXIT_FAILURE);
 	}
-    ev_set_syserr_cb(libev_errorhandler);    
 
 	/*check for dns server*/
 	if(prg_setting.dnsserver)
@@ -103,14 +97,18 @@ int main(int argc, const char **argv)
 	while(p)
 	{
 		Xconf.Port = *p;
-		SniProxy_Start(evLoop,&Xconf);
+		SniProxy_Start(e_poll,&Xconf);
 
 		p=p->next;
 	}
 	Free_PortList(&prg_setting); /*free Port List*/
 
 	// Start infinite loop
-	ev_loop(evLoop, 0);
+	while (1)
+	{
+		xpoll_run(e_poll);
+	}
+	
 
 	log_info("Exit zroxy");
 	return EXIT_SUCCESS;

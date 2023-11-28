@@ -18,14 +18,12 @@
 #include "net.h"
 #include <arpa/inet.h>
 #include <errno.h>
-#include <ev.h>
+#include <xpoll.h>
 
-static void sni_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
-static void sni_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
+static void sni_accept_cb(xpoll_t *poll,int fd,void *user_ptr);
+static void sni_read_cb(xpoll_t *poll,int fd,void *user_ptr);
 
-void *SniProxy_HandleIncomingConnection(void *vargp);
-
-bool SniProxy_Start(struct ev_loop *eloop,SniServer_t *Sni)
+bool SniProxy_Start(xpoll_t *eloop,SniServer_t *Sni)
 {
 	int sockfd;
 	in_addr_t host_ip = inet_addr(Sni->Port.bindip);
@@ -36,21 +34,20 @@ bool SniProxy_Start(struct ev_loop *eloop,SniServer_t *Sni)
 	}
 
 	log_info("socket listen on %s:%d",Sni->Port.bindip,Sni->Port.local_port);
-
-	
-	server_t *ptr = malloc(sizeof(server_t));
-	bzero(ptr,sizeof(server_t));
-
-	ptr->sni_config = *Sni;
-
+	SniServer_t *xsni = (SniServer_t*)malloc(sizeof(SniServer_t));
+	if(!xsni)
+	{
+		log_error("can not make clone sni config");
+		return false;
+	}
+	*xsni = *Sni;
 	// Initialize and start a watcher to accepts client requests
-	ev_io_init(&ptr->evio, sni_accept_cb, sockfd, EV_READ);
-	ev_io_start(eloop, &ptr->evio);
+	xevent_t *e = xpoll_start_watch(eloop,sockfd,sni_accept_cb ,(void*)xsni,xEPOLLIN | xEPOLLET);
 
 	return true;
 }
 
-static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
+static inline void close_server_client(xpoll_t *poll,server_t *ptr)
 {
 	SniServer_t *config = &ptr->sni_config;
 	sni_link_t	*sni_data = &ptr->sni_data;
@@ -72,220 +69,204 @@ static inline void close_server_client(struct ev_loop *loop,server_t *ptr)
 	}
 
 	// close origin socket
-	if(server->cLink)
+	if(server->ev)
 	{
-		int socket = server->evio.fd;
+		int socket = server->fd;
 		// Stop and free watchet if client socket is closing
+		if(xpoll_stop_watch(poll,server->ev,socket)==false)
+		{
+			log_error("server xpoll can not stop socket %d",socket);
+		}
 		close(socket);
-		ev_io_stop(loop,&server->evio);
-		
 	}
 	
-	if(user->cLink)
+	if(user->ev)
 	{
-		int socket = user->evio.fd;
+		int socket = user->fd;
 		// Stop and free watchet if client socket is closing
+		if(xpoll_stop_watch(poll,user->ev,socket)==false)
+		{
+			log_error("user xpoll can not stop socket %d",socket);
+		}
 		close(socket);
-		ev_io_stop(loop,&user->evio);
-		
 	}
 
-	bzero(ptr,sizeof(server_t));
+	memset(ptr,0,sizeof(server_t));
 	free(ptr);
 }
 
 /* Accept client requests */
-static void sni_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
+static void sni_accept_cb(xpoll_t *poll,int fd,void *user_ptr)
 {
-	server_t *ptr = (server_t*)watcher;
+	SniServer_t *sni_config = (SniServer_t*)user_ptr;
 
 	struct sockaddr_in client_addr;
 	socklen_t client_len = sizeof(client_addr);
 	
-	server_t *w_client = (server_t*) malloc (sizeof(server_t));
-	bzero(w_client,sizeof(server_t));
-
-	/*copy server data*/
-	w_client->sni_config =  ptr->sni_config;
-	w_client->evio	=	ptr->evio;
-	
-
-	if(EV_ERROR & revents)
-	{
-		log_error("got invalid event");
-		return;
-	}
-
 	// Accept client request
-	int client_sd = accept(watcher->fd, (struct sockaddr *)&client_addr, &client_len);
+	int client_sd = accept(fd, (struct sockaddr *)&client_addr, &client_len);
 	if (client_sd < 0)
 	{
-		log_error("accept error");
+		log_error("accept error %d",client_sd);
 		return;
 	}
 
-	SniServer_t *config = &ptr->sni_config;
-	state_IncConnection(config->sta);
+	server_t *ptr = malloc(sizeof(server_t));
+	memset(ptr,0,sizeof(server_t));
+	ptr->sni_config = *sni_config;
+	
+	state_IncConnection(sni_config->sta);
+	
 	// Initialize and start watcher to read client requests
-	w_client->user.cLink = w_client;	/*copy ptr of connection info*/
-	ev_io_init(&w_client->user.evio, sni_read_cb, client_sd, EV_READ);
-	ev_io_start(loop, &w_client->user.evio);
+	ptr->user.total_rx = 0;
+	ptr->user.fd = client_sd;
+	ptr->user.ev = xpoll_start_watch(poll,client_sd,sni_read_cb ,(void*)ptr, xEPOLLIN | xEPOLLET);
+	if(!ptr->user.ev)
+	{
+		log_error("xpoll: can not make read event poll");
+	}
+
+	// Convert the binary IPv4 address to a string
+	char ip[INET_ADDRSTRLEN]; // Buffer for the IP address
+    if (inet_ntop(AF_INET, &(client_addr.sin_addr), ip, INET_ADDRSTRLEN) != NULL) 
+	{
+        log_info("SNI incoming connection 0x%X from %s:%d", (uintptr_t)ptr, ip,ntohs(client_addr.sin_port));
+    }
 }
 
-static void sni_origin_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
+static void sni_origin_read_cb(xpoll_t *poll,int fd,void *user_ptr)
 {
-	sni_ctx_t *xptr = (sni_ctx_t*)watcher;
-	server_t *ptr = (server_t*)xptr->cLink;
+	server_t *ptr = (server_t*)user_ptr;
+	sni_ctx_t *server = &ptr->server;
 
 	char buffer[SNI_BUFFER_SIZE];
 	ssize_t read;
 	
-	if(EV_ERROR & revents)
-	{
-		log_error("got invalid event");
-		return;
-	}
-
 	// Receive message from server socket
-	read = recv(watcher->fd, buffer, SNI_BUFFER_SIZE, 0);
+	read = recv(fd, buffer, SNI_BUFFER_SIZE, 0);
 
-	if(read < 0)
+	if(read <= 0)
 	{
-		log_error("read error from socket(%d)",read);
-		close_server_client(loop,ptr);
+		close_server_client(poll,ptr);
 		return;
 	}
 
-	if(read == 0)
-	{
-		// Stop and free watchet if client socket is closing
-		close_server_client(loop,ptr);
-		return;
-	}
-	xptr->total_rx += read;
+	server->total_rx += read;
 	sni_ctx_t *user = &ptr->user;
 	// Send message bach to the origin server
-	if(send(user->evio.fd, buffer, read, 0)!=read)
+	if(send(user->fd, buffer, read, 0)!=read)
 	{
 		log_error("Can not write to socket.....");
-		close_server_client(loop,ptr);
+		close_server_client(poll,ptr);
 	}
-	
 }
 
-static void sni_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
+static void sni_read_cb(xpoll_t *poll,int fd,void *user_ptr)
 {
-	sni_ctx_t *xptr = (sni_ctx_t*)watcher;
-	server_t *ptr = (server_t*)xptr->cLink;
+	server_t *ptr = (server_t*)user_ptr;
+	sni_ctx_t *user = &ptr->user;
 
-	char buffer[SNI_BUFFER_SIZE];
+	char buffer[SNI_BUFFER_SIZE]={0};
 	ssize_t read;
+// 	// Receive message from client socket
+	read = recv(fd, buffer, SNI_BUFFER_SIZE, 0);
 
-	if(EV_ERROR & revents)
+	if(read <= 0)
 	{
-		log_error("got invalid event");
+		close_server_client(poll,ptr);
 		return;
 	}
 
-	// Receive message from client socket
-	read = recv(watcher->fd, buffer, SNI_BUFFER_SIZE, 0);
+	user->total_rx += read;
 
-	if(read < 0)
-	{
-		log_error("read error from socket(%d)",read);
-		close_server_client(loop,ptr);
-		return;
-	}
-
-	if(read == 0)
-	{
-		close_server_client(loop,ptr);
-		return;
-	}
-	xptr->total_rx += read;
-
-	sni_link_t *client = &ptr->sni_data;
+	sni_link_t *sni_data = &ptr->sni_data;
 	SniServer_t *config = &ptr->sni_config;
 	/*is found sni ?*/
-	if(client->is_sni_mark!=true)
+	if(sni_data->is_sni_mark!=true)
 	{	
 		/*check buffer overflow*/
-		if(read+client->w_index >= MAX_SNI_PACKET)
+		if(read+sni_data->w_index >= MAX_SNI_PACKET)
 		{
 			log_error("sni packet Buffer OverFlow!");
-			close_server_client(loop,ptr);
+			close_server_client(poll,ptr);
 			return;
 		}
 
 		//copy data to buffer
-		memcpy(&client->sni_packet[client->w_index],buffer,read);
-		client->w_index += read;
+		memcpy(sni_data->sni_packet+sni_data->w_index,buffer,read);
+		sni_data->w_index += read;
 
-		if(net_GetHost(client->sni_packet,client->w_index,client->hostname,_MaxHostName_))
+		if(net_GetHost(sni_data->sni_packet,sni_data->w_index,sni_data->hostname,_MaxHostName_))
 		{
 			/*Check host validate*/
-			if(config->wlist && filter_IsWhite(config->wlist,client->hostname)==false)
+			if(config->wlist && filter_IsWhite(config->wlist,sni_data->hostname)==false)
 			{
-				log_info("SNI filter Host { %s }",client->hostname);
-				close_server_client(loop,ptr);
+				log_info("SNI filter Host { %s }",sni_data->hostname);
+				close_server_client(poll,ptr);
 				return;
 			}
 
-			if(isTrueIpAddress(client->hostname))
+			if(isTrueIpAddress(sni_data->hostname))
 			{
 				log_info("SNI we can't support IP address");
-				close_server_client(loop,ptr);
+				close_server_client(poll,ptr);
 				return;
 			}
 
-			log_info("SNI start Host 0x%X:{ %s }",(uintptr_t)ptr,client->hostname);
-			client->is_sni_mark = true;
+			log_info("SNI start Host 0x%X:{ %s }",(uintptr_t)ptr,sni_data->hostname);
+			sni_data->is_sni_mark = true;
 
 			sockshost_t *socks = config->Socks;
 			lport_t 	xport = config->Port;
-			int socket = 0;
+			int server_socket = 0;
 			if(socks)	/*Set Connect to socks*/
 			{
-				if(!socks5_connect(&socket,socks,client->hostname,xport.remote_port,false))
+				if(!socks5_connect(&server_socket,socks,sni_data->hostname,xport.remote_port,false))
 				{
-					close_server_client(loop,ptr);
+					close_server_client(poll,ptr);
 					return;
 				}
 			}
 			else	/*connect directly*/
 			{
-				if(!net_connect(&socket,client->hostname,xport.remote_port))
+				if(!net_connect(&server_socket,sni_data->hostname,xport.remote_port))
 				{
-					close_server_client(loop,ptr);
+					close_server_client(poll,ptr);
 					return;
 				}
 			}
 			
 			sni_ctx_t *server = &ptr->server;
-			server->cLink = ptr;
 			// Initialize and start watcher to read client requests
-			ev_io_init(&server->evio, sni_origin_read_cb, socket, EV_READ);
-			ev_io_start(loop, &server->evio);
+			server->fd = server_socket;
+			server->total_rx = 0;
+			server->ev = xpoll_start_watch(poll,server_socket,sni_origin_read_cb ,(void*)ptr, xEPOLLIN | xEPOLLET);
+			if(!server->ev)
+			{
+				log_error("xpoll: can not make read event poll");
+				close_server_client(poll,ptr);
+				return;
+			}
 
 			/*Send sni packet to origin server*/
-			if(send(socket,client->sni_packet,client->w_index,0)!=client->w_index)
+			if(send(server_socket,sni_data->sni_packet,sni_data->w_index,0)!=sni_data->w_index)
 			{
-				close_server_client(loop,ptr);
+				close_server_client(poll,ptr);
 				return;
 			}
 			return;
 		}
 		else
 		{
-			log_error("SNI NotFound @0x%X buffer len %d",(uintptr_t)ptr,client->w_index);
+			log_error("SNI NotFound @0x%X buffer len %d",(uintptr_t)ptr,sni_data->w_index);
 		}
 	}
 
 	sni_ctx_t *server = &ptr->server;
 	// Send message bach to the origin server
-	if(send(server->evio.fd, buffer, read, 0)!=read)
+	if(send(server->fd, buffer, read, 0)!=read)
 	{
 		log_error("Can not write to socket...");
-		close_server_client(loop,ptr);
+		close_server_client(poll,ptr);
 	}
 }
