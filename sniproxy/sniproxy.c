@@ -154,7 +154,7 @@ static void sni_origin_read_cb(xpoll_t *poll,int fd,void *user_ptr)
 	server->total_rx += read;
 	sni_ctx_t *user = &ptr->user;
 	// Send message bach to the origin server
-	if(send(user->fd, buffer, read, 0)!=read)
+	if(send(user->fd, buffer, read, MSG_NOSIGNAL)!=read)
 	{
 		log_error("Can not write to socket.....");
 		close_server_client(poll,ptr);
@@ -249,7 +249,7 @@ static void sni_read_cb(xpoll_t *poll,int fd,void *user_ptr)
 			}
 
 			/*Send sni packet to origin server*/
-			if(send(server_socket,sni_data->sni_packet,sni_data->w_index,0)!=sni_data->w_index)
+			if(send(server_socket,sni_data->sni_packet,sni_data->w_index,MSG_NOSIGNAL)!=sni_data->w_index)
 			{
 				close_server_client(poll,ptr);
 				return;
@@ -264,7 +264,7 @@ static void sni_read_cb(xpoll_t *poll,int fd,void *user_ptr)
 
 	sni_ctx_t *server = &ptr->server;
 	// Send message bach to the origin server
-	if(send(server->fd, buffer, read, 0)!=read)
+	if(send(server->fd, buffer, read, MSG_NOSIGNAL)!=read)
 	{
 		log_error("Can not write to socket...");
 		close_server_client(poll,ptr);
