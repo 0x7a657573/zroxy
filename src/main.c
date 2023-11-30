@@ -21,8 +21,19 @@
 #include <monitor.h>
 #include "filter/filter.h"
 #include <xpoll.h>
+#include <signal.h>
 
 zroxy_t prg_setting = {0};
+
+/*ignore the SIGPIPE signal.*/
+static void ignore_sigign(void)
+{
+	struct sigaction sa;
+	sa.sa_handler = SIG_IGN;
+	sa.sa_flags = 0;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGPIPE, &sa, 0);
+}
 
 /*
  * for test dns server
@@ -38,7 +49,9 @@ zroxy_t prg_setting = {0};
  * */
 int main(int argc, const char **argv)
 {
-	Log_init();
+	// ignore SIGPIPE
+	ignore_sigign();
+
 	if(arg_Init(&prg_setting,argc,argv)==false)
 	{
 		print_usage();
@@ -46,21 +59,21 @@ int main(int argc, const char **argv)
 	}
 	
 	mon_t *monitor = NULL;
-	/*check Monitor*/
-	if(prg_setting.monitorPort)
-	{
-		log_info("enable monitor on port %i",*prg_setting.monitorPort);
-		monitor = monitor_Init(prg_setting.monitorPort);
-	}
+	// /*check Monitor*/
+	// if(prg_setting.monitorPort)
+	// {
+	// 	log_info("enable monitor on port %i",*prg_setting.monitorPort);
+	// 	monitor = monitor_Init(prg_setting.monitorPort);
+	// }
 
 	/*chack white list*/
 	filter_t *whitelist = NULL;
-	if(prg_setting.WhitePath)
-	{
-		log_info("load white list from %s",prg_setting.WhitePath);
-		whitelist = filter_init(prg_setting.WhitePath);
-		free(prg_setting.WhitePath);
-	}
+	// if(prg_setting.WhitePath)
+	// {
+	// 	log_info("load white list from %s",prg_setting.WhitePath);
+	// 	whitelist = filter_init(prg_setting.WhitePath);
+	// 	free(prg_setting.WhitePath);
+	// }
 
 	xpoll_t *e_poll = xpoll_create();
 	if(!e_poll)
@@ -69,17 +82,17 @@ int main(int argc, const char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	/*check for dns server*/
-	if(prg_setting.dnsserver)
-	{
-		if(monitor)
-			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
+	// /*check for dns server*/
+	// if(prg_setting.dnsserver)
+	// {
+	// 	if(monitor)
+	// 		prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
 		
-		prg_setting.dnsserver->whitelist = whitelist;
+	// 	prg_setting.dnsserver->whitelist = whitelist;
 
-		log_info("start dns server ...");
-		dnsserver_init(prg_setting.dnsserver);
-	}
+	// 	log_info("start dns server ...");
+	// 	dnsserver_init(prg_setting.dnsserver);
+	// }
 
 	lport_t *p=prg_setting.ports;
 	statistics_t *SniStat = NULL;
