@@ -84,7 +84,7 @@ void *SniClientHandler(void *arg)
 				break;
 			}
 
-			log_info("SNI start Host { %s } ",HostName);
+			//log_info("SNI start Host { %s } ",HostName);
 			int sockssocket = 0;
 			if(socks)	/*Set Connect to socks*/
 			{
@@ -149,7 +149,7 @@ void *SniClientHandler(void *arg)
 		}
 	}
 
-	log_info("SNI end Host{ %s } txrx(%i/%i)",HostName,TotalRx,TotalTx);
+	//log_info("SNI end Host{ %s } txrx(%i/%i)",HostName,TotalRx,TotalTx);
 
 	if(client->SniConfig.sta)	/*Update statistics*/
 	{
