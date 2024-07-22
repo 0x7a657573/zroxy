@@ -98,7 +98,11 @@ int main(int argc, const char **argv)
 	Free_PortList(&prg_setting); /*free Port List*/
 
 	//log_trace("exit from main thread");
-	pthread_exit(NULL);		/* terminate the thread */
+	//pthread_exit(NULL);		/* terminate the thread */
+	while(1)
+	{
+		sleep(1);
+	}
 	//return 0;
 }
 
