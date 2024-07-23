@@ -5,7 +5,7 @@
  *      Author: zeus
  */
 #include "statistics.h"
-#include <log/log.h>
+#include <log.h>
 #include <stdlib.h>
 #include <string.h>
 

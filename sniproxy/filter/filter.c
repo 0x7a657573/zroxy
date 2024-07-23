@@ -5,7 +5,7 @@
  *      Author: zeus
  */
 #include "filter.h"
-#include <log/log.h>
+#include <log.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/inotify.h>

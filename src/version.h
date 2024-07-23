@@ -8,7 +8,14 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.2.3"
+#define version	 "1.2.4"
+/*
+* main : fix zombie thread issue
+* SNI : improve Requests per second from 3k to 5k
+* 
+*/
+
+//#define version	 "1.2.3"
 /*
 * dns : add timeout
 */

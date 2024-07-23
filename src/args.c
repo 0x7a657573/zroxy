@@ -11,7 +11,7 @@
 #include "version.h"
 #include <stdbool.h>
 //#include <argp.h>
-#include <log/log.h>
+#include <log.h>
 #include <netdb.h>
 #include <getopt.h>
 #include <ctype.h>
@@ -29,6 +29,7 @@ void Parse_DnsSocks(zroxy_t *ptr,char *str);
 bool Parse_config(zroxy_t *ptr,char *str);
 void Parse_Snip(zroxy_t *ptr,char *str);
 void Parse_DNStimeout(zroxy_t *ptr,char *str);
+void Parse_loglevel(zroxy_t *ptr,char *str);
 
 typedef struct 
 {
@@ -52,6 +53,7 @@ static arg_option options[] =
 	{ "dsocks", 'x' , "DNS upstream socks" , required_argument, "DNS upstream socks. -x 127.0.0.1:9050"},
 	{ "dtimeout", 't' , "DNS timeout in sec" , required_argument, "DNS upstream timeout. -t 5"},
 	{ "snip", 'i' , "SNI IP for DNS server" , required_argument, "SNI IP for DNS server. -i 127.0.0.1"},
+	{ "log", 'l' , "set log level" , required_argument, "set log level between 0 to 5. -l 2"},
 	{ "help", 'h' , "Give this help list" , no_argument, ""},
     { 0 }
 };
@@ -149,6 +151,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'x': Parse_DnsSocks(setting,arg); break;
 		case 'i': Parse_Snip(setting,arg); break;
 		case 't': Parse_DNStimeout(setting,arg); break;
+		case 'l': Parse_loglevel(setting,arg); break;
 		case 'h': print_usage(); exit(0);
 		default: return -1;
     }
@@ -568,4 +571,10 @@ void Parse_DnsSocks(zroxy_t *ptr,char *str)
 			socks->host = strdup(str);
 		}
 	}
+}
+
+void Parse_loglevel(zroxy_t *ptr,char *str)
+{
+	int log_level = atol(str);
+	log_set_level(log_level);
 }

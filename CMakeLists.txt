@@ -21,8 +21,8 @@ set(SOURCES
     
     sniproxy/sniproxy.c
     sniproxy/sniclient.c
-    sniproxy/log/loglock.c
-    sniproxy/log/log.c
+    log/loglock.c
+    log/log.c
     network/net.c
     network/socks/socks.c
     sniproxy/filter/filter.c
@@ -43,6 +43,7 @@ add_executable(${EXECUTABLE_NAME} ${SOURCES})
 target_include_directories(${EXECUTABLE_NAME}
     PRIVATE 
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/log
         ${PROJECT_SOURCE_DIR}/sniproxy
         ${PROJECT_SOURCE_DIR}/dnsproxy
         ${PROJECT_SOURCE_DIR}/statistics

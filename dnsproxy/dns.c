@@ -21,7 +21,7 @@
 #include <config.h>
 #include <string.h>
 #include "dns.h"
-#include <log/log.h>
+#include <log.h>
 #include <arpa/inet.h>
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
