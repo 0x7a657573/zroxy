@@ -12,7 +12,7 @@
 #include <sys/socket.h> /*Lib Socket*/
 #include <unistd.h>  	/*Header file for sleep(). man 3 sleep for details.*/
 #include <pthread.h>
-#include <log/log.h>
+#include <log.h>
 #include <sniproxy.h>
 #include "version.h"
 #include <netdb.h>		/* getaddrinfo, getnameinfo */ /*https://rosettacode.org/wiki/DNS_query#C*/

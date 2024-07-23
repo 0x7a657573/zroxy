@@ -9,7 +9,7 @@
 #define NET_H_
 #include <stdbool.h>
 #include <stdint.h>
-#include <log/log.h>
+#include <log.h>
 #include <netinet/in.h>
 #include <sys/socket.h> /*Lib Socket*/
 #include <sys/types.h>

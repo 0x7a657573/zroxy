@@ -13,7 +13,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "monitor.h"
-#include "log/log.h"
+#include <log.h>
 #include "net.h"
 #include <inttypes.h>
 

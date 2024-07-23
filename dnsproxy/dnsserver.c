@@ -6,7 +6,7 @@
  */
 #include "../dnsproxy/dnsserver.h"
 
-#include <log/log.h>
+#include <log.h>
 #include <unistd.h>  	/*Header file for sleep(). man 3 sleep for details.*/
 #include <pthread.h>	/* http://www.csc.villanova.edu/~mdamian/threads/posixthreads.html */
 #include <stdlib.h>
