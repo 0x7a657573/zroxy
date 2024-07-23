@@ -104,14 +104,14 @@ void *Minitor_HandelConnection(void *arg)
 
 		if(!FD_ISSET( client->connid, &rfds ))
 		{
-			log_info("TimeOut tid:%i",client->connid);
+			log_trace("TimeOut tid:%i",client->connid);
 			break;
 		}
 
 		int newData = read(client->connid, &buffer[Windex], sizeof(buffer) - Windex);/* read length of message */
 		if (newData <= 0)
 		{
-			log_info("client %i disconnect %i",client->connid,newData);
+			log_trace("client %i disconnect %i",client->connid,newData);
 			break;
 		}
 		Windex+=newData;
@@ -120,14 +120,13 @@ void *Minitor_HandelConnection(void *arg)
 		break;
 	}
 
-	log_info("Monitor tid:%i Prosess",client->connid);
+	log_trace("Monitor tid:%i Prosess",client->connid);
 	close(client->connid);
 	free(client);
 	pthread_exit(0);
 	return NULL;
 }
 
-/*https://www.tutorialspoint.com/http/http_message_examples.htm*/
 void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *stat)
 {
 	char message[2048] = {0};
