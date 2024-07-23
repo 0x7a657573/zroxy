@@ -274,7 +274,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 		{
 			struct Question *q;
 			q = dns_msg.questions;
-			//snprintf(domain_resolve,1023,"resolve { (%s) qName '%s'} ",DNS_GetType(q->qType),q->qName);
+			snprintf(domain_resolve,1023,"resolve { (%s) qName '%s'} ",DNS_GetType(q->qType),q->qName);
 
 			/*try make replay*/
 			if(dns->whitelist && /*q->qType == A_Resource_RecordType &&*/
@@ -290,7 +290,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 
 					uint64_t End_Time = timeInMilliseconds() - start_time;
 					double time_taken = ((double)End_Time)/(1000); // convert to sec
-					//log_info("%s in %0.3fs Local replay",domain_resolve,time_taken);
+					log_trace("%s in %0.3fs Local replay",domain_resolve,time_taken);
 
 					free_msg(&dns_msg);
 				}
