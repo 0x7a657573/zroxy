@@ -11,8 +11,8 @@
 #define version	 "1.2.4"
 /*
 * main : fix zombie thread issue
-* SNI : improve Requests per second from 3k to 5k
-* 
+* sni : improve Requests per second from 3k to 5k
+* dns : improve Requests per second from 16k to 52k
 */
 
 //#define version	 "1.2.3"
