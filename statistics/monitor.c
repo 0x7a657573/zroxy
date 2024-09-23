@@ -16,6 +16,7 @@
 #include <log.h>
 #include "net.h"
 #include <inttypes.h>
+#include <version.h>
 
 void *Monitor_HandleConnection(void *vargp);
 void Conv_Time(time_t Up,UpTime_t *tm);
@@ -131,6 +132,8 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *stat)
 {
 	char message[2048] = {0};
 	char *ptr = message;
+
+	ptr += sprintf(ptr,"<h1>Zroxy v%s</h1> </br>",version);
 
 	statistics_t *sta = stat;
 	while(sta)

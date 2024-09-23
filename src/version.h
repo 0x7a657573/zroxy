@@ -11,6 +11,7 @@
 #define version	 "1.2.5"
 /*
 * sni : add socket timeout
+* monitor : add zroxy verion
 */
 
 //#define version	 "1.2.4"
