@@ -80,7 +80,7 @@ int main(int argc, const char **argv)
 	if(monitor)
 		SniStat = monitor_AddNewStat(monitor,"SNI Server");
 
-	SniServer_t Xconf = { /*.Port = {0},*/ .Socks = NULL ,.sta = SniStat ,.wlist = whitelist };
+	SniServer_t Xconf = { /*.Port = {0},*/ .Socks = NULL ,.sta = SniStat ,.wlist = whitelist, .snitimeout = prg_setting.snitimeout };
 	/*if Set Socks proxy*/
 	if(prg_setting.socks)
 	{

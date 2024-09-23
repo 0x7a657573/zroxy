@@ -29,6 +29,7 @@ typedef struct
 	filter_t	 *wlist;
 	bool UserInternalDNS;
 	char DNSServer[20];
+	int			 snitimeout;
 }SniServer_t;
 
 typedef struct

@@ -26,6 +26,7 @@ void *SniClientHandler(void *arg)
 	sniclient_t *client = (sniclient_t*)arg;
 	sockshost_t *socks = client->SniConfig.Socks;
 	lport_t 	xport = client->SniConfig.Port;
+	int			timeout = client->SniConfig.snitimeout;
 
 	//log_info("client thread %i",client->connid);
 	uint8_t buffer[0x2000]; /*8Kb memory tmp*/
@@ -111,7 +112,7 @@ void *SniClientHandler(void *arg)
 
 			while(1)
 			{
-				tv.tv_sec  = 300;
+				tv.tv_sec  = timeout;
 				tv.tv_usec = 0;
 				FD_SET(sockssocket,&rfds);
 				FD_SET(client->connid,&rfds);

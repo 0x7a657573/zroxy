@@ -8,7 +8,12 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.2.4"
+#define version	 "1.2.5"
+/*
+* sni : add socket timeout
+*/
+
+//#define version	 "1.2.4"
 /*
 * main : fix zombie thread issue
 * sni : improve Requests per second from 3k to 5k

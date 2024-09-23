@@ -30,6 +30,7 @@ bool Parse_config(zroxy_t *ptr,char *str);
 void Parse_Snip(zroxy_t *ptr,char *str);
 void Parse_DNStimeout(zroxy_t *ptr,char *str);
 void Parse_loglevel(zroxy_t *ptr,char *str);
+void Parse_snitimeout(zroxy_t *ptr,char *str);
 
 typedef struct 
 {
@@ -47,6 +48,7 @@ static arg_option options[] =
     { "port", 'p', "sni port", required_argument, "sni port that listens.\n\t\t\t\t\t\t<bind ip>:<local port>@<remote port>\n\t\t\t\t\t\t -p 127.0.0.1:8080@80,4433@433,853..."},
 	{ "socks", 's', "socks proxy", required_argument, "set proxy for up stream. -s 127.0.0.1:9050"},
 	{ "monitor", 'm', "monitor port", required_argument, "monitor port that listens. -m 1234"},
+	{ "snitimeout", 'o', "set sni timeout", required_argument, "set sni timeout in sec. -o 30"},
 	{ "white", 'w' , "white list" , required_argument, "white list for host -w /etc/withlist.txt"},
 	{ "ldns", 'd' , "local DNS server" , required_argument, "dns server that listens. -d 0.0.0.0:53"},
 	{ "dns", 'u' , "upstream DNS providers" , required_argument, "upstream DNS providers. -u 8.8.8.8"},
@@ -79,6 +81,7 @@ void print_usage(void)
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
 {
+	pgp->snitimeout = 30;
 	pgp->ports = NULL;
 	/*ran without parameter*/
 	if(argc==1) 
@@ -152,6 +155,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'i': Parse_Snip(setting,arg); break;
 		case 't': Parse_DNStimeout(setting,arg); break;
 		case 'l': Parse_loglevel(setting,arg); break;
+		case 'o': Parse_snitimeout(setting,arg); break;
 		case 'h': print_usage(); exit(0);
 		default: return -1;
     }
@@ -577,4 +581,10 @@ void Parse_loglevel(zroxy_t *ptr,char *str)
 {
 	int log_level = atol(str);
 	log_set_level(log_level);
+}
+
+void Parse_snitimeout(zroxy_t *ptr,char *str)
+{
+	int timeout = atol(str);
+	ptr->snitimeout = timeout;
 }
