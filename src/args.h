@@ -21,6 +21,7 @@ typedef struct
 	uint16_t	*monitorPort;
 	char 		*WhitePath;
 	dnshost_t	*dnsserver;
+	int			snitimeout;
 }zroxy_t;
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv);
