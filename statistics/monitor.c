@@ -17,10 +17,13 @@
 #include "net.h"
 #include <inttypes.h>
 #include <version.h>
+#include <dirent.h>
 
 void *Monitor_HandleConnection(void *vargp);
 void Conv_Time(time_t Up,UpTime_t *tm);
 char *Print_humanSize(char *ptr,uint64_t bytes);
+int count_open_files(void);
+void read_memory_usage(void);
 
 mon_t *monitor_Init(uint16_t *Port)
 {
@@ -133,7 +136,11 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *stat)
 	char message[2048] = {0};
 	char *ptr = message;
 
-	ptr += sprintf(ptr,"<h1>Zroxy v%s</h1> </br>",version);
+	ptr += sprintf(ptr,"{\n\"ZroxyVersion\" : \"%s\",\n",version);
+	ptr += sprintf(ptr,"\"CountOfOpenFile\" : %i,\n",count_open_files());
+	
+	// return;
+	// read_memory_usage();
 
 	statistics_t *sta = stat;
 	while(sta)
@@ -144,31 +151,23 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *stat)
 		time_t CurrentTime;
 		time ( &CurrentTime );
 		time_t LiveTime = CurrentTime - stdata.StartTime;
-		UpTime_t lt;
-		Conv_Time(LiveTime,&lt);
 
-		ptr += sprintf(ptr,"<h1>%s</h1> </br>",sta->name);
-		ptr += sprintf(ptr,"Up Time: %i days, %i:%i:%i </br>", lt.tm_yday,lt.tm_hour,lt.tm_min,lt.tm_sec);
-		ptr += sprintf(ptr,"Max Connection : %i</br>",stdata.MaxConnection);
-		ptr += sprintf(ptr,"Active Connection : %i</br>",stdata.ActiveConnection);
-		ptr += sprintf(ptr,"Total Connection : %i</br>",stdata.TotalConnection);
-
-		ptr += sprintf(ptr,"Total Rx : ");
-		ptr = Print_humanSize(ptr,stdata.TotalRx);
-		ptr += sprintf(ptr,"</br>");
-		ptr += sprintf(ptr,"Total Tx : ");
-		ptr = Print_humanSize(ptr,stdata.TotalTx);
-		ptr += sprintf(ptr,"</br></br>");
+		ptr += sprintf(ptr,"\"%s\" : {\n",sta->name);
+		ptr += sprintf(ptr,"\"UpTime\" : %d ,\n",LiveTime);
+		ptr += sprintf(ptr,"\"MaxConnection\" : %i ,\n",stdata.MaxConnection);
+		ptr += sprintf(ptr,"\"ActiveConnection\" : %i ,\n",stdata.ActiveConnection);
+		ptr += sprintf(ptr,"\"TotalConnection\" : %i ,\n",stdata.TotalConnection);
+		ptr += sprintf(ptr,"\"TotalRx\" : %d ,\n",stdata.TotalRx);
+		ptr += sprintf(ptr,"\"TotalTx\" : %d",stdata.TotalTx);
+		ptr += sprintf(ptr,"\n},\n");
 
 		sta = (statistics_t*)sta->next;
 	}
 
-
-
-
+	ptr += sprintf(ptr-2,"\n}");
 
 	char httpMessage[8000];
-	int slen = sprintf(httpMessage,"HTTP/1.1 200 OK\nContent-Type: text/html; charset=UTF-8\nContent-Length: %i\nConnection: Closed\n\n%s",(int)(ptr-message),message);
+	int slen = sprintf(httpMessage,"HTTP/1.1 200 OK\nContent-Type: application/json; charset=UTF-8\nContent-Length: %i\nConnection: Closed\n\n%s",(int)(ptr-message),message);
 	write(fd,httpMessage,slen);	/*echo*/
 }
 
@@ -202,4 +201,55 @@ char *Print_humanSize(char *ptr,uint64_t bytes)
 
 	ptr += sprintf(ptr, "%.02lf %s", dblBytes, suffix[i]);
 	return ptr;
+}
+
+
+int count_open_files(void)
+{
+    struct dirent *entry;
+    int count = 0;
+    DIR *dp = opendir("/proc/self/fd");
+    
+    if (dp == NULL) 
+	{
+        perror("opendir");
+        return -1;
+    }
+
+    // The number of files in the directory '/proc/self/fd'
+    while ((entry = readdir(dp)) != NULL) 
+	{
+        count++;
+    }
+
+    closedir(dp);
+    
+	// because "." and ".." are also in the directory, we need to reduce by 2
+    return count - 2;
+}
+
+void read_memory_usage(void) 
+{
+    FILE *status_file;
+
+    // باز کردن فایل
+    status_file = fopen("/proc/self/status", "r");
+    if (!status_file) 
+	{
+        perror("fopen");
+        return;
+    }
+
+	char line[256];
+    // خواندن هر خط از فایل و پیدا کردن VmRSS و VmSize
+    while (fgets(line, sizeof(line), status_file)) 
+	{
+        if (strncmp(line, "VmRSS:", 6) == 0 || strncmp(line, "VmSize:", 7) == 0) 
+		{
+            printf("%s", line);  // چاپ مقدار حافظه مصرف شده
+        }
+		//printf("%s", line);
+    }
+
+    fclose(status_file);
 }

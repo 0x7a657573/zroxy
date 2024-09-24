@@ -8,7 +8,13 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.2.5"
+#define version	 "1.2.6"
+/*
+* monitor : change report to json format
+* monitor : add open file to report
+*/
+
+//#define version	 "1.2.5"
 /*
 * sni : add socket timeout
 * monitor : add zroxy verion

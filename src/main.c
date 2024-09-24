@@ -34,7 +34,7 @@ zroxy_t prg_setting = {0};
  * for Non Block IO:
  * https://www.gnu.org/software/libc/manual/html_node/Waiting-for-I_002fO.html
  * https://www.gnu.org/software/libc/manual/html_node/Server-Example.html
- * https://www.tenouk.com/Module41.html
+ * http://www.kegel.com/c10k.html
  * */
 int main(int argc, const char **argv)
 {
@@ -67,7 +67,7 @@ int main(int argc, const char **argv)
 	if(prg_setting.dnsserver)
 	{
 		if(monitor)
-			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS Server");
+			prg_setting.dnsserver->Stat = monitor_AddNewStat(monitor,"DNS_Server");
 		
 		prg_setting.dnsserver->whitelist = whitelist;
 
@@ -78,7 +78,7 @@ int main(int argc, const char **argv)
 	lport_t *p=prg_setting.ports;
 	statistics_t *SniStat = NULL;
 	if(monitor)
-		SniStat = monitor_AddNewStat(monitor,"SNI Server");
+		SniStat = monitor_AddNewStat(monitor,"SNI_Server");
 
 	SniServer_t Xconf = { /*.Port = {0},*/ .Socks = NULL ,.sta = SniStat ,.wlist = whitelist, .snitimeout = prg_setting.snitimeout };
 	/*if Set Socks proxy*/
