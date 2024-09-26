@@ -205,7 +205,7 @@ filter_t *filter_init(char *filename)
 		pthread_create(&thread_id, NULL, filter_Handlefilewatcher, (void*)self);
 	}
 #elif __FreeBSD__
-	#warning "BSD now don't support file watcher"
+	log_info("Now BSD version of zroxy don't support file watcher")
 #endif
 
 	return self;

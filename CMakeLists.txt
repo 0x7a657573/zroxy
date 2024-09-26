@@ -15,7 +15,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_definitions(-D__linux__)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     message(STATUS "Configuring for FreeBSD")
-    add_definitions(-D__FreeBSD__)
+#    add_definitions(-D__FreeBSD__)
 endif()
 
 # check for pthread library
