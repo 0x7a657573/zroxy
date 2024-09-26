@@ -8,7 +8,13 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.2.6"
+#define version	 "1.2.7"
+/*
+* sni : fix bug in bsd
+* monitor: fix bug of print long long data  
+*/
+
+//#define version	 "1.2.6"
 /*
 * monitor : change report to json format
 * monitor : add open file to report

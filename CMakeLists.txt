@@ -9,7 +9,14 @@ set(EXECUTABLE_NAME zroxy)
 # Set the project name
 project (${EXECUTABLE_NAME} C)
 
-
+# Platform-specific configurations
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(STATUS "Configuring for Linux")
+    add_definitions(-D__linux__)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    message(STATUS "Configuring for FreeBSD")
+    add_definitions(-D__FreeBSD__)
+endif()
 
 # check for pthread library
 find_package(Threads REQUIRED)
