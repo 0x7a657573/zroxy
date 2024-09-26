@@ -270,7 +270,7 @@ void *DNS_HandleIncomingRequset(void *ptr)
 	{
 		/*Check and Print DNS Question*/
 		struct Message dns_msg = {0};
-		if(dns_decode_msg(&dns_msg, &msg->message[2], msg->len))
+		if(dns_decode_msg(&dns_msg,(const uint8_t *) &msg->message[2], msg->len))
 		{
 			struct Question *q;
 			q = dns_msg.questions;
