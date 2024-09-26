@@ -167,7 +167,7 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *stat)
 	ptr += sprintf(ptr-2,"\n}");
 
 	char httpMessage[8000];
-	int slen = sprintf(httpMessage,"HTTP/1.1 200 OK\nContent-Type: application/json; charset=UTF-8\nContent-Length: %i\nConnection: Closed\n\n%s",(int)(ptr-message),message);
+	int slen = sprintf(httpMessage,"HTTP/1.1 200 OK\nContent-Type: application/json; charset=UTF-8\nContent-Length: %i\nConnection: Closed\n\n%s",(int)(ptr-message)-2,message);
 	write(fd,httpMessage,slen);	/*echo*/
 }
 
@@ -208,8 +208,14 @@ int count_open_files(void)
 {
     struct dirent *entry;
     int count = 0;
-    DIR *dp = opendir("/proc/self/fd");
-    
+
+	DIR *dp;
+#ifdef __linux__
+    dp = opendir("/proc/self/fd");
+#elif __FreeBSD__
+    dp = opendir("/dev/fd/");
+#endif
+
     if (dp == NULL) 
 	{
         perror("opendir");
@@ -232,7 +238,6 @@ void read_memory_usage(void)
 {
     FILE *status_file;
 
-    // باز کردن فایل
     status_file = fopen("/proc/self/status", "r");
     if (!status_file) 
 	{
@@ -241,12 +246,11 @@ void read_memory_usage(void)
     }
 
 	char line[256];
-    // خواندن هر خط از فایل و پیدا کردن VmRSS و VmSize
     while (fgets(line, sizeof(line), status_file)) 
 	{
         if (strncmp(line, "VmRSS:", 6) == 0 || strncmp(line, "VmSize:", 7) == 0) 
 		{
-            printf("%s", line);  // چاپ مقدار حافظه مصرف شده
+            printf("%s", line);
         }
 		//printf("%s", line);
     }

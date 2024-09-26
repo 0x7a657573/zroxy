@@ -10,6 +10,11 @@
 #include <stdlib.h>
 #ifdef __linux__
 #include <sys/inotify.h>
+#elif __FreeBSD__
+#include <sys/types.h>
+#include <sys/event.h>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 #include <unistd.h>
 
@@ -125,6 +130,63 @@ void *filter_Handlefilewatcher(void *vargp)
 
 	pthread_exit(0);
 }
+#elif __FreeBSD__
+void *filter_Handlefilewatcher(void *vargp)
+{
+	filter_t *self = (filter_t *)vargp;
+	const char *filename = self->filepath; // The file to monitor
+    int kq = kqueue(); // Create a new kernel event queue
+
+    if (kq == -1) 
+	{
+        log_error("Couldn't initialize kqueue");
+        return NULL;
+    }
+
+    // Open the file for event notifications
+    int fd = open(filename, O_RDONLY);
+    if (fd == -1) 
+	{
+		log_error("Couldn't add open %s\n",filename);
+        return NULL;
+    }
+
+    // Register the file descriptor for events
+    struct kevent change;
+    EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_DELETE | NOTE_ATTRIB, 0, NULL);
+
+    log_info("Watching for changes to %s...", filename);
+    
+    while (1) 
+	{
+        struct kevent event;
+        int nev = kevent(kq, &change, 1, &event, 1, NULL); // Wait for events
+
+        if (nev == -1) 
+		{
+            log_error("kevent event error");
+            exit(EXIT_FAILURE);
+        }
+		else if (nev > 0) 
+		{
+            if (event.fflags & NOTE_DELETE) 
+			{
+                log_info("File deleted: %s\n", filename);
+                break; // Exit on file delete
+            }
+            if (event.fflags & NOTE_ATTRIB) 
+			{
+				log_info( "file %s was modified", self->filepath);
+				filter_Reload(self);
+            }
+        }
+    }
+
+    // Cleanup
+    close(fd);
+    close(kq);
+	return NULL;
+}
 #endif
 
 filter_t *filter_init(char *filename)
@@ -197,16 +259,12 @@ filter_t *filter_init(char *filename)
 	free(line);
 	fclose(FilterFile);
 
-#ifdef __linux__
 	/*create file watcher*/
 	if(self)
 	{
 		pthread_t thread_id;
 		pthread_create(&thread_id, NULL, filter_Handlefilewatcher, (void*)self);
 	}
-#elif __FreeBSD__
-	log_info("Now BSD version of zroxy don't support file watcher");
-#endif
 
 	return self;
 }
