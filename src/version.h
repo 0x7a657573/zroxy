@@ -11,7 +11,9 @@
 #define version	 "1.2.7"
 /*
 * sni : fix bug in bsd
-* monitor: fix bug of print long long data  
+* sni : add white list watch for bsd system
+* monitor : fix bug of print long long data
+* monitor : fix content length of response
 */
 
 //#define version	 "1.2.6"
