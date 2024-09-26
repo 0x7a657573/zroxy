@@ -157,8 +157,8 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,statistics_t *stat)
 		ptr += sprintf(ptr,"\"MaxConnection\" : %i ,\n",stdata.MaxConnection);
 		ptr += sprintf(ptr,"\"ActiveConnection\" : %i ,\n",stdata.ActiveConnection);
 		ptr += sprintf(ptr,"\"TotalConnection\" : %i ,\n",stdata.TotalConnection);
-		ptr += sprintf(ptr,"\"TotalRx\" : %d ,\n",stdata.TotalRx);
-		ptr += sprintf(ptr,"\"TotalTx\" : %d",stdata.TotalTx);
+		ptr += sprintf(ptr,"\"TotalRx\" : %llu ,\n",stdata.TotalRx);
+		ptr += sprintf(ptr,"\"TotalTx\" : %llu",stdata.TotalTx);
 		ptr += sprintf(ptr,"\n},\n");
 
 		sta = (statistics_t*)sta->next;

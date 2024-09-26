@@ -8,7 +8,9 @@
 #include <log.h>
 #include <string.h>
 #include <stdlib.h>
+#ifdef __linux__
 #include <sys/inotify.h>
+#endif
 #include <unistd.h>
 
 void filter_Remove(filter_t *self);
@@ -74,6 +76,7 @@ void filter_Reload(filter_t *self)
 	log_info("Reload filter: %i valid host loaded",num);
 }
 
+#ifdef __linux__
 void *filter_Handlefilewatcher(void *vargp)
 {
 	filter_t *self = (filter_t *)vargp;
@@ -122,6 +125,7 @@ void *filter_Handlefilewatcher(void *vargp)
 
 	pthread_exit(0);
 }
+#endif
 
 filter_t *filter_init(char *filename)
 {
@@ -193,13 +197,17 @@ filter_t *filter_init(char *filename)
 	free(line);
 	fclose(FilterFile);
 
+#ifdef __linux__
 	/*create file watcher*/
 	if(self)
 	{
 		pthread_t thread_id;
 		pthread_create(&thread_id, NULL, filter_Handlefilewatcher, (void*)self);
 	}
-	
+#elif __FreeBSD__
+	#warning "BSD now don't support file watcher"
+#endif
+
 	return self;
 }
 
