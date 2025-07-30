@@ -73,7 +73,11 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 
 		//log_info("incoming connection %i",client->connid);
 		pthread_t thread_id;
-		pthread_create(&thread_id, NULL, SniClientHandler, (void*)client);
+		if(pthread_create(&thread_id, NULL, SniClientHandler, (void*)client))
+		{
+			log_error("can not create thread for new client");
+			free(client);
+		}
 		pthread_detach(thread_id);
 	}
 }

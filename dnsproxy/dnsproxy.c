@@ -189,27 +189,13 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 		break;
 		case AAAA_Resource_RecordType:
 			rr->rd_length = 16;
-			rr->rd_data.a_record.addr[0] = 0;
-			rr->rd_data.a_record.addr[1] = 0;
-			rr->rd_data.a_record.addr[2] = 0;
-			rr->rd_data.a_record.addr[3] = 0;
-			rr->rd_data.a_record.addr[4] = 0;
-			rr->rd_data.a_record.addr[5] = 0;
-			rr->rd_data.a_record.addr[6] = 0;
-			rr->rd_data.a_record.addr[7] = 0;
-			rr->rd_data.a_record.addr[8] = 0;
-			rr->rd_data.a_record.addr[9] = 0;
-			rr->rd_data.a_record.addr[10] = 0;
-			rr->rd_data.a_record.addr[11] = 0;
-			rr->rd_data.a_record.addr[12] = 0;
-			rr->rd_data.a_record.addr[13] = 0;
-			rr->rd_data.a_record.addr[14] = 0;
-			rr->rd_data.a_record.addr[15] = 0;
+			memset(rr->rd_data.aaaa_record.addr,0,16);
 			msg->anCount++;
 			// prepend resource record to answers list
     		msg->answers = rr;
 		break;
 		default:
+			free(rr->name);
 			free(rr);
 			msg->rcode = NotImplemented_ResponseType;
 		break;
@@ -401,7 +387,11 @@ void *dnsserver_workerTask(void *vargp)
 		newmsg->dns = dns;
 		/*Process incoming dns message*/
 		pthread_t thread_id;
-		pthread_create(&thread_id, NULL, DNS_HandleIncomingRequset, (void*)newmsg);
+		if(pthread_create(&thread_id, NULL, DNS_HandleIncomingRequset, (void*)newmsg))
+		{
+			log_error("can not create thread for new dns request");
+			free(newmsg);
+		}
 		pthread_detach(thread_id);
 	}
 

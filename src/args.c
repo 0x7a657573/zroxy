@@ -520,6 +520,21 @@ void Free_PortList(zroxy_t *ptr)
 	}
 }
 
+void Free_DnsServer(zroxy_t *ptr)
+{
+	if(ptr->dnsserver)
+	{
+		if(ptr->dnsserver->Socks)
+		{
+			free(ptr->dnsserver->Socks->host);
+			free(ptr->dnsserver->Socks->user);
+			free(ptr->dnsserver->Socks->pass);
+			free(ptr->dnsserver->Socks);
+		}
+		free(ptr->dnsserver);
+	}
+}
+
 void Parse_DnsSocks(zroxy_t *ptr,char *str)
 {
 	ptr->dnsserver->Socks = (sockshost_t*)malloc(sizeof(sockshost_t));
