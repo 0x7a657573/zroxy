@@ -27,6 +27,7 @@ typedef struct
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv);
 void print_usage(void);
 void Free_PortList(zroxy_t *ptr);
+void Free_DnsServer(zroxy_t *ptr);
 
 
 #endif /* ARGS_H_ */
