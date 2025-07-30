@@ -28,11 +28,24 @@
 /*
 * Basic memory operations.
 */
+
+/**
+ * @brief Puts 8 bits of data into the buffer.
+ *
+ * @param buffer The buffer to write to.
+ * @param value The value to write.
+ */
 static void put8bits(uint8_t **buffer, uint8_t value)
 {
   *(*buffer)++=value;
 }
 
+/**
+ * @brief Gets 16 bits of data from the buffer.
+ *
+ * @param buffer The buffer to read from.
+ * @return The 16-bit value.
+ */
 static size_t get16bits(const uint8_t **buffer)
 {
   uint16_t value;
@@ -41,12 +54,24 @@ static size_t get16bits(const uint8_t **buffer)
   return value;
 }
 
+/**
+ * @brief Puts 16 bits of data into the buffer.
+ *
+ * @param buffer The buffer to write to.
+ * @param value The value to write.
+ */
 static void put16bits(uint8_t **buffer, uint16_t value)
 {
   *(*buffer)++ = value>>8;
   *(*buffer)++ = value&0xFF;
 }
 
+/**
+ * @brief Puts 32 bits of data into the buffer.
+ *
+ * @param buffer The buffer to write to.
+ * @param value The value to write.
+ */
 static void put32bits(uint8_t **buffer, uint32_t value)
 {
   *(*buffer)++ = (value>>24)&0xFF;
@@ -55,20 +80,24 @@ static void put32bits(uint8_t **buffer, uint32_t value)
   *(*buffer)++ = (value>> 0)&0xFF;
 }
 
-// 3foo3bar3com0 => foo.bar.com (No full validation is done!)
+/**
+ * @brief Decodes a domain name from the buffer.
+ *
+ * @param buf The buffer to read from.
+ * @param len The length of the buffer.
+ * @return The decoded domain name, or NULL on error.
+ */
 char *decode_domain_name(const uint8_t **buf, size_t len)
 {
-  /*find end if name*/
-  int domain_len = 0;
-  for(size_t i=0;i<len;i++)
-    if((*buf)[i]==0)
-    {
-      domain_len = i+1;
-      break;
-    }  
-
   char domain[_MaxHostName_];
-  for (int i = 1; i < MIN(_MaxHostName_, domain_len); i++) 
+  size_t domain_len = strnlen((const char *)*buf, len);
+
+  if (domain_len == 0 || domain_len >= _MaxHostName_)
+  {
+    return NULL;
+  }
+
+  for (size_t i = 1; i < domain_len; i++)
   {
     uint8_t c = (*buf)[i];
     if (c == 0) 
@@ -89,37 +118,44 @@ char *decode_domain_name(const uint8_t **buf, size_t len)
   return NULL;
 }
 
-// foo.bar.com => 3foo3bar3com0
+/**
+ * @brief Encodes a domain name into the buffer.
+ *
+ * @param buffer The buffer to write to.
+ * @param domain The domain name to encode.
+ */
 void encode_domain_name(uint8_t **buffer, const char *domain)
 {
   uint8_t *buf = *buffer;
   const char *beg = domain;
-  const char *pos;
-  int len = 0;
   int i = 0;
 
-  while ((pos = strchr(beg, '.'))) 
+  while (*beg)
   {
-    len = pos - beg;
+    const char *pos = strchr(beg, '.');
+    int len = pos ? pos - beg : strlen(beg);
+
     buf[i++] = len;
-    memcpy(buf+i, beg, len);
+    memcpy(buf + i, beg, len);
     i += len;
 
-    beg = pos + 1;
+    beg += len;
+    if (*beg == '.')
+    {
+      beg++;
+    }
   }
 
-  len = strlen(domain) - (beg - domain);
-
-  buf[i++] = len;
-
-  memcpy(buf + i, beg, len);
-  i += len;
-
   buf[i++] = 0;
-
   *buffer += i;
 }
 
+/**
+ * @brief Decodes the header of a DNS message.
+ *
+ * @param msg The message to decode into.
+ * @param buffer The buffer to read from.
+ */
 void dns_decode_header(struct Message *msg, const uint8_t **buffer)
 {
   msg->id = get16bits(buffer);
@@ -139,6 +175,12 @@ void dns_decode_header(struct Message *msg, const uint8_t **buffer)
   msg->arCount = get16bits(buffer);
 }
 
+/**
+ * @brief Encodes the header of a DNS message.
+ *
+ * @param msg The message to encode.
+ * @param buffer The buffer to write to.
+ */
 void dns_encode_header(struct Message *msg, uint8_t **buffer)
 {
   put16bits(buffer, msg->id);
@@ -155,15 +197,17 @@ void dns_encode_header(struct Message *msg, uint8_t **buffer)
   put16bits(buffer, msg->arCount);
 }
 
+/**
+ * @brief Decodes a DNS message.
+ *
+ * @param msg The message to decode into.
+ * @param buffer The buffer to read from.
+ * @param size The size of the buffer.
+ * @return True on success, false on failure.
+ */
 bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size)
 {
   dns_decode_header(msg, &buffer);
-
-  if (msg->anCount != 0 || msg->nsCount != 0) 
-  {
-    log_error("Only questions expected!");
-    return false;
-  }
 
   // parse questions
   uint32_t qcount = msg->qdCount;
@@ -190,6 +234,11 @@ bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size)
   return true;
 }
 
+/**
+ * @brief Frees the memory allocated for a list of questions.
+ *
+ * @param qq The list of questions to free.
+ */
 void free_questions(struct Question *qq)
 {
   struct Question *next;
@@ -202,6 +251,11 @@ void free_questions(struct Question *qq)
   }
 }
 
+/**
+ * @brief Frees the memory allocated for a list of resource records.
+ *
+ * @param rr The list of resource records to free.
+ */
 void free_resource_records(struct ResourceRecord *rr)
 {
   struct ResourceRecord *next;
@@ -214,6 +268,11 @@ void free_resource_records(struct ResourceRecord *rr)
   }
 }
 
+/**
+ * @brief Frees the memory allocated for a DNS message.
+ *
+ * @param msg The message to free.
+ */
 void free_msg(struct Message *msg)
 {
   free_questions(msg->questions);
@@ -223,7 +282,13 @@ void free_msg(struct Message *msg)
   memset(msg, 0, sizeof(struct Message));
 }
 
-/* @return 0 upon failure, 1 upon success */
+/**
+ * @brief Encodes a list of resource records into the buffer.
+ *
+ * @param rr The list of resource records to encode.
+ * @param buffer The buffer to write to.
+ * @return 0 on success, 1 on failure.
+ */
 int encode_resource_records(struct ResourceRecord *rr, uint8_t **buffer)
 {
   int i;
@@ -260,27 +325,30 @@ int encode_resource_records(struct ResourceRecord *rr, uint8_t **buffer)
   return 0;
 }
 
+/**
+ * @brief Encodes a DNS message.
+ *
+ * @param msg The message to encode.
+ * @param buffer The buffer to write to.
+ * @return True on success, false on failure.
+ */
 bool dns_encode_msg(struct Message *msg, uint8_t **buffer)
 {
-  struct Question *q;
-  int rc;
-
   dns_encode_header(msg, buffer);
 
-  q = msg->questions;
-  while (q) 
+  for (struct Question *q = msg->questions; q; q = q->next)
   {
     encode_domain_name(buffer, q->qName);
     put16bits(buffer, q->qType);
     put16bits(buffer, q->qClass);
-
-    q = q->next;
   }
 
-  rc = 0;
-  rc |= encode_resource_records(msg->answers, buffer);
-  rc |= encode_resource_records(msg->authorities, buffer);
-  rc |= encode_resource_records(msg->additionals, buffer);
+  if (encode_resource_records(msg->answers, buffer) != 0)
+    return false;
+  if (encode_resource_records(msg->authorities, buffer) != 0)
+    return false;
+  if (encode_resource_records(msg->additionals, buffer) != 0)
+    return false;
 
-  return rc==0;
+  return true;
 }
