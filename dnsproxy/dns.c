@@ -90,9 +90,17 @@ static void put32bits(uint8_t **buffer, uint32_t value)
 char *decode_domain_name(const uint8_t **buf, size_t len)
 {
   char domain[_MaxHostName_];
-  size_t domain_len = strnlen((const char *)*buf, len);
 
-  if (domain_len == 0 || domain_len >= _MaxHostName_)
+    /*find end if name*/
+  int domain_len = 0;
+  for(size_t i=0;i<len;i++)
+    if((*buf)[i]==0)
+    {
+      domain_len = i+1;
+      break;
+    }  
+
+    if (domain_len == 0 || domain_len >= _MaxHostName_)
   {
     return NULL;
   }
