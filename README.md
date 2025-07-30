@@ -1,44 +1,45 @@
 
 # zroxy
 
-**zroxy is a simple TLS sni proxy (sniproxy) written with pure C and no dependensi.**
+**zroxy is a simple TLS sni proxy (sniproxy) written in pure C with no dependencies.**
 
-This program supports incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs … traffic and upstream to DIRECT/SOCKS4/SOCKS5 proxy.
+This program supports incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs traffic and can upstream to a DIRECT/SOCKS4/SOCKS5 proxy.
 
-  
-### What is SNI?
-*Server Name Indication* (**SNI**) is an extension to the Transport Layer Security (**TLS**) computer networking protocol by which a client indicates which hostname it is attempting to connect to at the start of the handshaking process.
+## What is SNI?
 
-This allows a server to present one of multiple possible certificates on the same IP address and TCP port number and hence allows multiple secure (HTTPS) websites (or any other service over TLS) to be served by the same IP address without requiring all those sites to use the same certificate.
+*Server Name Indication* (**SNI**) is an extension to the Transport Layer Security (**TLS**) protocol that allows a client to indicate which hostname it is attempting to connect to at the start of the handshaking process. This allows a server to present multiple certificates on the same IP address and TCP port number, and therefore allows multiple secure (HTTPS) websites (or any other service over TLS) to be served by the same IP address without requiring all of those sites to use the same certificate.
 
 It is the conceptual equivalent to HTTP/1.1 name-based virtual hosting, but for HTTPS.
 
-**This** also allows a proxy to forward client traffic to the right server during TLS/SSL handshake. The desired hostname is not encrypted in the original SNI extension, so an eavesdropper can see which site is being requested.
-for more read [SNI wiki](https://en.wikipedia.org/wiki/Server_Name_Indication).
+This also allows a proxy to forward client traffic to the right server during the TLS/SSL handshake. The desired hostname is not encrypted in the original SNI extension, so an eavesdropper can see which site is being requested.
 
-  
-### How Does it Work?
-This project implements a transparent proxy that accepts TLS connection, parses the initial client greeting and proxies the complete SSL session to the backend corresponding to the server's name (or default backend if no SNI specified). This proxy **does NOT** require any cryptographic materials such private keys, public keys, certificates. It does not modify TLS session and does not perform man-in-the middle intrusion. Moreover, it is not even linked with any cryptographic library.
+For more information, see the [SNI Wikipedia article](https://en.wikipedia.org/wiki/Server_Name_Indication).
 
-When connecting to a domain through TLS/HTTPS the initial TCP session contain the domain name **un-encrypted** and thus sniproxy can redirect a TLS connection based on that initial negotiation without decrypting the traffic nor needing a private key. this technique require a custom DNS Server that redirect the targeted domains to our zroxy server (dns server like Unbound, Bind or PowerDNS).
+## How Does it Work?
 
+This project implements a transparent proxy that accepts TLS connections, parses the initial client greeting, and proxies the complete SSL session to the backend corresponding to the server's name (or the default backend if no SNI is specified). This proxy **does NOT** require any cryptographic materials such as private keys, public keys, or certificates. It does not modify the TLS session and does not perform a man-in-the-middle attack. Moreover, it is not even linked with any cryptographic library.
 
-#  Features
-- Supporting incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs
-- Support upstream DIRECT/SOCKS5 proxy
-- Support SOCKS5 user/pass Authentication method(RFC 1929)
-- Support independent port for one service (src/dst)
-- Name-based proxying of HTTPS without decrypting traffic.
-- Supports both TLS and HTTP protocols.
-- Traffic monitor with web user interface
-- forward DNS request (**UDP**) from SOCKS5 (**TCP**)
-- Support domain whitelist
-- auto reload whitelist
-- Multi-thread
-- Etc.
+When connecting to a domain through TLS/HTTPS, the initial TCP session contains the domain name **un-encrypted**, and thus zroxy can redirect a TLS connection based on that initial negotiation without decrypting the traffic or needing a private key. This technique requires a custom DNS server that redirects the targeted domains to our zroxy server (e.g., Unbound, Bind, or PowerDNS).
 
-#  Usage
-## Command Details
+## Features
+
+*   Supports incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs
+*   Supports upstream DIRECT/SOCKS5 proxy
+*   Supports SOCKS5 user/pass authentication (RFC 1929)
+*   Supports independent ports for each service (src/dst)
+*   Name-based proxying of HTTPS without decrypting traffic
+*   Supports both TLS and HTTP protocols
+*   Traffic monitor with a web user interface
+*   Forwards DNS requests (**UDP**) from SOCKS5 (**TCP**)
+*   Supports domain whitelisting
+*   Automatically reloads the whitelist
+*   Multi-threaded
+*   And more!
+
+## Usage
+
+### Command Details
+
 ```
 Usage: zroxy [OPTION...]
 	zroxy v1.2.3
@@ -59,60 +60,83 @@ Usage: zroxy [OPTION...]
 	-h, 'help'	Give this help list
 ```
 
-#  Build
-for build you need `CMake` and `gcc` tools. please check install on your device or install they.
+## Build
 
-## install compile tools for debian
+To build zroxy, you need `CMake` and `gcc`.
+
+### Install Compile Tools for Debian
+
 ```
 	# apt install cmake build-essential git
 ```
 
-## build on Linux/OS X/FreeBSD
+### Build on Linux/OS X/FreeBSD
 
-clone the project 
-```	
-git clone https://github.com/0x7a657573/zroxy.git
-cd zroxy
-```
-make build dir
-```
-mkdir build
-cd build
-```
-config project
-``` 
-cmake ..
-```
-build
-``` 
-make
-```
-# Static Build
-I use glibc only for zroxy, but glibc use other library that can't link staticly, like `libnss`; this library used for resolve hostname to ip, and we need it. for solve this problem we can use [musl libc](https://musl.libc.org/), **musl** is an implementation of the C standard library built on top of the Linux system call API, including interfaces defined in the base language standard, POSIX, and widely agreed-upon extensions.
-## install musl tools for debian
+1.  Clone the project:
+
+    ```
+    git clone https://github.com/0x7a657573/zroxy.git
+    cd zroxy
+    ```
+
+2.  Create a build directory:
+
+    ```
+    mkdir build
+    cd build
+    ```
+
+3.  Configure the project:
+
+    ```
+    cmake ..
+    ```
+
+4.  Build the project:
+
+    ```
+    make
+    ```
+
+### Static Build
+
+I use glibc only for zroxy, but glibc uses other libraries that cannot be linked statically, such as `libnss`. This library is used to resolve hostnames to IP addresses, and we need it. To solve this problem, we can use [musl libc](https://musl.libc.org/). **musl** is an implementation of the C standard library built on top of the Linux system call API, including interfaces defined in the base language standard, POSIX, and widely agreed-upon extensions.
+
+#### Install musl Tools for Debian
+
 ```
 apt install musl-tools cmake git
 ```
-## static build on Linux/OS X/FreeBSD
-clone the project 
-```	
-git clone https://github.com/0x7a657573/zroxy.git
-cd zroxy
-```
-make build dir
-```
-mkdir build
-cd build
-```
-config project and use `musl-gcc` for static linking
-``` 
-export CC="musl-gcc -static -Os"
-cmake ..
-```
-build
-``` 
-make
-```
 
-# openwrt Build
-## read [`zroxy in openwrt`](openwrt/README.md) document.
+#### Static Build on Linux/OS X/FreeBSD
+
+1.  Clone the project:
+
+    ```
+    git clone https://github.com/0x7a657573/zroxy.git
+    cd zroxy
+    ```
+
+2.  Create a build directory:
+
+    ```
+    mkdir build
+    cd build
+    ```
+
+3.  Configure the project and use `musl-gcc` for static linking:
+
+    ```
+    export CC="musl-gcc -static -Os"
+    cmake ..
+    ```
+
+4.  Build the project:
+
+    ```
+    make
+    ```
+
+## OpenWrt Build
+
+See the [`zroxy in openwrt`](openwrt/README.md) document.
