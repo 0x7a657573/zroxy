@@ -59,6 +59,11 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 	while(1)
 	{
 		client = (sniclient_t *)malloc(sizeof(sniclient_t));
+		if (!client)
+		{
+			log_error("malloc failed for sniclient_t");
+			continue;
+		}
 		client->SniConfig = sniconf;
 		client->connid = accept(sockfd, (struct sockaddr*)&client->cli, &client->addr_len);
 		if (client->connid < 0)
