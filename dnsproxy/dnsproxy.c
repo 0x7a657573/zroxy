@@ -168,6 +168,11 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 	msg->arCount = 0;
 
 	rr->name = strdup(msg->questions->qName);
+	if (!rr->name)
+	{
+		free(rr);
+		return 0;
+	}
 	rr->type = msg->questions->qType;
 	rr->class = msg->questions->qClass;
 	rr->ttl = 60*60; // in seconds; 0 means no caching
@@ -202,7 +207,7 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 	}
 
 	uint8_t *p = buf;
-	if (!dns_encode_msg(msg, &p)) 
+	if (!dns_encode_msg(msg, &p))
 	{
     	return 0;
     }
