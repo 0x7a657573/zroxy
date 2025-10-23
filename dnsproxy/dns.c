@@ -219,7 +219,7 @@ bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size)
 
   // parse questions
   uint32_t qcount = msg->qdCount;
-  for (int i = 0; i < qcount; ++i) 
+  for (int i = 0; i < qcount; ++i)
   {
     struct Question *q = malloc(sizeof(struct Question));
 
@@ -227,9 +227,10 @@ bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size)
     q->qType = get16bits(&buffer);
     q->qClass = get16bits(&buffer);
 
-    if (q->qName == NULL) 
+    if (q->qName == NULL)
     {
       log_error("Failed to decode domain name!");
+      free(q);
       return false;
     }
 
