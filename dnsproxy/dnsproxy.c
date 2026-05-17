@@ -29,6 +29,54 @@
 
 void *dnsserver_workerTask(void *vargp);
 
+static bool write_all(int fd, const void *buf, size_t len)
+{
+	const uint8_t *p = (const uint8_t *)buf;
+	size_t written = 0;
+	while (written < len)
+	{
+		ssize_t n = write(fd, p + written, len - written);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+		if (n == 0)
+		{
+			return false;
+		}
+		written += (size_t)n;
+	}
+	return true;
+}
+
+static bool read_exact(int fd, void *buf, size_t len)
+{
+	uint8_t *p = (uint8_t *)buf;
+	size_t read_total = 0;
+	while (read_total < len)
+	{
+		ssize_t n = read(fd, p + read_total, len - read_total);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+		if (n == 0)
+		{
+			return false;
+		}
+		read_total += (size_t)n;
+	}
+	return true;
+}
+
 typedef struct
 {
 	dnsserver_t	*dns;
@@ -316,22 +364,29 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			}
 
 			// forward dns query
-			if(send(sockssocket, msg->message, msg->len + 2,MSG_NOSIGNAL)<0)
+			if(!write_all(sockssocket, msg->message, msg->len + 2))
 			{
-				/*maybe socket is not connect*/
-				//close(sockssocket);
-				//continue;
 				break;
 			}
 
-			rlen = read(sockssocket, msg->message, DNS_MSG_SIZE);
-			if(rlen<=0)
+			if(!read_exact(sockssocket, msg->message, 2))
 			{
-				/*maybe socket is not connect*/
-				//close(sockssocket);
-				//continue;
+				break;
 			}
 
+			uint16_t response_len = ((uint8_t)msg->message[0] << 8) | (uint8_t)msg->message[1];
+			if(response_len > DNS_MSG_SIZE - 2)
+			{
+				log_error("DNS: upstream response too large: %u", response_len);
+				break;
+			}
+
+			if(!read_exact(sockssocket, msg->message + 2, response_len))
+			{
+				break;
+			}
+
+			rlen = response_len + 2;
 			break;
 		}
 
