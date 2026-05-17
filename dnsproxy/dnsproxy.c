@@ -61,7 +61,7 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	// copy stat handler
 	ptr->Stat = conf->Stat;
 
-	// copy withlist status;
+	// copy whitelist status;
 	ptr->whitelist = conf->whitelist;
 
 	// copy sni ip
