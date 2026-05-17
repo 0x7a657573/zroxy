@@ -18,31 +18,7 @@
 #include <socks.h>
 #include "net.h"
 #include <stdint.h>
-#include <errno.h>
-
-static bool write_all(int fd, const void *buf, size_t len)
-{
-	const uint8_t *p = (const uint8_t *)buf;
-	size_t written = 0;
-	while (written < len)
-	{
-		ssize_t n = write(fd, p + written, len - written);
-		if (n < 0)
-		{
-			if (errno == EINTR)
-			{
-				continue;
-			}
-			return false;
-		}
-		if (n == 0)
-		{
-			return false;
-		}
-		written += (size_t)n;
-	}
-	return true;
-}
+#include "net_io.h"
 
 void *SniClientHandler(void *arg)
 {
@@ -124,7 +100,7 @@ void *SniClientHandler(void *arg)
 
 
 			int n;
-			if(!write_all(sockssocket,buffer,Windex))
+			if(!net_write_all(sockssocket,buffer,Windex))
 			{
 				/*try close upstream socket*/
 				close(sockssocket);
@@ -150,14 +126,14 @@ void *SniClientHandler(void *arg)
 				{
 					/* data coming in */
 					if((n=read(sockssocket,buffer,sizeof(buffer)))<1) break;
-					if(!write_all(client->connid,buffer,(size_t)n)) break;
+					if(!net_write_all(client->connid,buffer,(size_t)n)) break;
 					TotalRx += n;
 				}
 				else if(FD_ISSET( client->connid, &rfds ) )
 				{
 					/* data going out */
 					if((n=read(client->connid,buffer,sizeof(buffer)))<1) break;
-					if(!write_all(sockssocket,buffer,(size_t)n)) break;
+					if(!net_write_all(sockssocket,buffer,(size_t)n)) break;
 					TotalTx += n;
 				}
 				else

@@ -32,6 +32,7 @@ set(SOURCES
     log/loglock.c
     log/log.c
     network/net.c
+    network/net_io.c
     network/socks/socks.c
     sniproxy/filter/filter.c
     statistics/monitor.c
@@ -139,6 +140,7 @@ if(BUILD_TESTING)
         tests/test_socks_handshake.c
         network/socks/socks.c
         network/net.c
+        network/net_io.c
         log/log.c
     )
 
@@ -162,6 +164,7 @@ if(BUILD_TESTING)
         sniproxy/sniclient.c
         sniproxy/filter/filter.c
         network/net.c
+        network/net_io.c
         network/socks/socks.c
         log/log.c
         statistics/statistics.c
@@ -190,6 +193,7 @@ if(BUILD_TESTING)
         dnsproxy/dns.c
         fifo/fifo.c
         network/net.c
+        network/net_io.c
         network/socks/socks.c
         sniproxy/filter/filter.c
         statistics/statistics.c
