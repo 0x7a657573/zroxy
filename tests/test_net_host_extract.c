@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 
 #include "config.h"
 #include "log.h"
@@ -108,6 +111,58 @@ static void test_tls_sni_valid(void)
     expect_string(host, "example.com", "valid TLS SNI value");
 }
 
+static void test_net_connect_failure_sets_invalid_fd(void)
+{
+    int fd = 12345;
+    expect_false(net_connect(&fd, "127.0.0.1", 1), "connect to closed port fails");
+    if (fd != -1)
+    {
+        fprintf(stderr, "FAIL: failed connect should set fd=-1, got %d\n", fd);
+        failures++;
+    }
+}
+
+static void test_net_connect_success_loopback(void)
+{
+    int listen_fd = -1;
+    int client_fd = -1;
+    int accepted_fd = -1;
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0)
+    {
+        return;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(0);
+
+    expect_true(bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0, "bind loopback listener");
+    expect_true(listen(listen_fd, 1) == 0, "listen loopback");
+    expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "getsockname loopback");
+    if (failures != 0)
+    {
+        close(listen_fd);
+        return;
+    }
+
+    expect_true(net_connect(&client_fd, "127.0.0.1", ntohs(addr.sin_port)), "connect to loopback listener");
+    expect_true(client_fd >= 0, "successful connect returns valid fd");
+    if (client_fd >= 0)
+    {
+        accepted_fd = accept(listen_fd, NULL, NULL);
+        expect_true(accepted_fd >= 0, "accept loopback client");
+    }
+
+    if (accepted_fd >= 0) close(accepted_fd);
+    if (client_fd >= 0) close(client_fd);
+    close(listen_fd);
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -116,6 +171,8 @@ int main(void)
     test_http_without_host();
     test_http_host_with_port();
     test_tls_sni_valid();
+    test_net_connect_failure_sets_invalid_fd();
+    test_net_connect_success_loopback();
 
     return failures == 0 ? 0 : 1;
 }
