@@ -156,4 +156,31 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME socks_handshake COMMAND test_socks_handshake)
+
+    add_executable(test_sni_forwarding
+        tests/test_sni_forwarding.c
+        sniproxy/sniclient.c
+        sniproxy/filter/filter.c
+        network/net.c
+        network/socks/socks.c
+        log/log.c
+        statistics/statistics.c
+    )
+
+    target_include_directories(test_sni_forwarding
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/sniproxy
+            ${PROJECT_SOURCE_DIR}/network
+            ${PROJECT_SOURCE_DIR}/network/socks
+            ${PROJECT_SOURCE_DIR}/statistics
+    )
+
+    target_link_libraries(test_sni_forwarding
+        PRIVATE
+            Threads::Threads
+    )
+
+    add_test(NAME sni_forwarding COMMAND test_sni_forwarding)
 endif()
