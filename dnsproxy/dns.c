@@ -195,8 +195,12 @@ void dns_encode_header(struct Message *msg, uint8_t **buffer)
 
   int fields = 0;
   fields |= (msg->qr << 15) & QR_MASK;
+  fields |= (msg->opcode << 11) & OPCODE_MASK;
+  fields |= (msg->aa << 10) & AA_MASK;
+  fields |= (msg->tc << 9) & TC_MASK;
+  fields |= (msg->rd << 8) & RD_MASK;
+  fields |= (msg->ra << 7) & RA_MASK;
   fields |= (msg->rcode << 0) & RCODE_MASK;
-  // TODO: insert the rest of the fields
   put16bits(buffer, fields);
 
   put16bits(buffer, msg->qdCount);
