@@ -177,7 +177,7 @@ static void write_all_or_fail(int fd, const char *data)
     }
 }
 
-static void test_config_lowercase_behavior(void)
+static void test_config_value_case_preserved(void)
 {
     zroxy_t cfg = {0};
     char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
@@ -196,16 +196,16 @@ static void test_config_lowercase_behavior(void)
     write_all_or_fail(fd, config_data);
     close(fd);
 
-    expect_true(Parse_config(&cfg, template_path), "Parse_config lowercase behavior");
+    expect_true(Parse_config(&cfg, template_path), "Parse_config value case preserved");
     expect_true(cfg.socks != NULL, "config socks parsed");
     if (cfg.socks)
     {
-        expect_string(cfg.socks->user, "username", "config socks user lowercased");
-        expect_string(cfg.socks->pass, "password", "config socks pass lowercased");
-        expect_string(cfg.socks->host, "proxyhost.example", "config socks host lowercased");
+        expect_string(cfg.socks->user, "UserName", "config socks user preserved");
+        expect_string(cfg.socks->pass, "PassWord", "config socks pass preserved");
+        expect_string(cfg.socks->host, "ProxyHost.Example", "config socks host preserved");
         expect_u16(cfg.socks->port, 1081, "config socks port");
     }
-    expect_string(cfg.WhitePath, "/tmp/whitelist.txt", "config white path lowercased");
+    expect_string(cfg.WhitePath, "/TMP/WhiteList.TXT", "config white path preserved");
 
     unlink(template_path);
     free_settings(&cfg);
@@ -249,7 +249,7 @@ int main(void)
     test_cli_listener_defaults();
     test_cli_socks_case_preserved();
     test_cli_monitor_and_sni_timeout();
-    test_config_lowercase_behavior();
+    test_config_value_case_preserved();
     test_config_port_key_case_insensitive();
 
     return failures == 0 ? 0 : 1;
