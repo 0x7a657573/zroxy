@@ -81,4 +81,24 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME net_host_extract COMMAND test_net_host_extract)
+
+    add_executable(test_filter_whitelist
+        tests/test_filter_whitelist.c
+        sniproxy/filter/filter.c
+        log/log.c
+    )
+
+    target_include_directories(test_filter_whitelist
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/sniproxy
+    )
+
+    target_link_libraries(test_filter_whitelist
+        PRIVATE
+            Threads::Threads
+    )
+
+    add_test(NAME filter_whitelist COMMAND test_filter_whitelist)
 endif()
