@@ -18,7 +18,31 @@
 #include <socks.h>
 #include "net.h"
 #include <stdint.h>
+#include <errno.h>
 
+static bool write_all(int fd, const void *buf, size_t len)
+{
+	const uint8_t *p = (const uint8_t *)buf;
+	size_t written = 0;
+	while (written < len)
+	{
+		ssize_t n = write(fd, p + written, len - written);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+		if (n == 0)
+		{
+			return false;
+		}
+		written += (size_t)n;
+	}
+	return true;
+}
 
 void *SniClientHandler(void *arg)
 {
@@ -99,10 +123,8 @@ void *SniClientHandler(void *arg)
 			}
 
 
-			FD_ZERO(&rfds);
-
 			int n;
-			if(write(sockssocket,buffer,Windex)<Windex)
+			if(!write_all(sockssocket,buffer,Windex))
 			{
 				/*try close upstream socket*/
 				close(sockssocket);
@@ -114,9 +136,11 @@ void *SniClientHandler(void *arg)
 			{
 				tv.tv_sec  = timeout;
 				tv.tv_usec = 0;
+				FD_ZERO(&rfds);
 				FD_SET(sockssocket,&rfds);
 				FD_SET(client->connid,&rfds);
-				if (select(FD_SETSIZE, &rfds, NULL, NULL, &tv) < 0)
+				int max_fd = (sockssocket > client->connid) ? sockssocket : client->connid;
+				if (select(max_fd + 1, &rfds, NULL, NULL, &tv) < 0)
 				{
 					log_error("SNI error in select");
 					break;
@@ -126,14 +150,14 @@ void *SniClientHandler(void *arg)
 				{
 					/* data coming in */
 					if((n=read(sockssocket,buffer,sizeof(buffer)))<1) break;
-					if(write(client->connid,buffer,n)<n) break;
+					if(!write_all(client->connid,buffer,(size_t)n)) break;
 					TotalRx += n;
 				}
 				else if(FD_ISSET( client->connid, &rfds ) )
 				{
 					/* data going out */
 					if((n=read(client->connid,buffer,sizeof(buffer)))<1) break;
-					if(write(sockssocket,buffer,n)<n) break;
+					if(!write_all(sockssocket,buffer,(size_t)n)) break;
 					TotalTx += n;
 				}
 				else
