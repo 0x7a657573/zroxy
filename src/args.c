@@ -49,7 +49,7 @@ static arg_option options[] =
 	{ "socks", 's', "socks proxy", required_argument, "set proxy for up stream. -s 127.0.0.1:9050"},
 	{ "monitor", 'm', "monitor port", required_argument, "monitor port that listens. -m 1234"},
 	{ "snitimeout", 'o', "set sni timeout", required_argument, "set sni timeout in sec. -o 30"},
-	{ "white", 'w' , "white list" , required_argument, "white list for host -w /etc/withlist.txt"},
+	{ "white", 'w' , "white list" , required_argument, "white list for host -w /etc/whitelist.txt"},
 	{ "ldns", 'd' , "local DNS server" , required_argument, "dns server that listens. -d 0.0.0.0:53"},
 	{ "dns", 'u' , "upstream DNS providers" , required_argument, "upstream DNS providers. -u 8.8.8.8"},
 	{ "dsocks", 'x' , "DNS upstream socks" , required_argument, "DNS upstream socks. -x 127.0.0.1:9050"},
