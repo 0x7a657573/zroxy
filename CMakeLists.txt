@@ -101,4 +101,19 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME filter_whitelist COMMAND test_filter_whitelist)
+
+    add_executable(test_dns_codec
+        tests/test_dns_codec.c
+        dnsproxy/dns.c
+        log/log.c
+    )
+
+    target_include_directories(test_dns_codec
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/dnsproxy
+    )
+
+    add_test(NAME dns_codec COMMAND test_dns_codec)
 endif()
