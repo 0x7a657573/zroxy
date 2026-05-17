@@ -20,6 +20,9 @@
 #include "args.h"
 #include <monitor.h>
 #include "filter/filter.h"
+#include "dnsproxy.h"
+#include "monitor.h"
+#include "filter/filter.h"
 
 zroxy_t prg_setting = {0};
 
@@ -103,6 +106,9 @@ int main(int argc, const char **argv)
 	{
 		sleep(1);
 	}
+
+	if(prg_setting.dnsserver)
+		Free_DnsServer(&prg_setting);
 	//return 0;
 }
 

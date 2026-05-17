@@ -59,6 +59,11 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 	while(1)
 	{
 		client = (sniclient_t *)malloc(sizeof(sniclient_t));
+		if (!client)
+		{
+			log_error("malloc failed for sniclient_t");
+			continue;
+		}
 		client->SniConfig = sniconf;
 		client->connid = accept(sockfd, (struct sockaddr*)&client->cli, &client->addr_len);
 		if (client->connid < 0)
@@ -73,7 +78,11 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 
 		//log_info("incoming connection %i",client->connid);
 		pthread_t thread_id;
-		pthread_create(&thread_id, NULL, SniClientHandler, (void*)client);
+		if(pthread_create(&thread_id, NULL, SniClientHandler, (void*)client))
+		{
+			log_error("can not create thread for new client");
+			free(client);
+		}
 		pthread_detach(thread_id);
 	}
 }

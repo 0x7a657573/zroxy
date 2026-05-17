@@ -275,7 +275,7 @@ bool Parse_config(zroxy_t *ptr,char *str)
 		if(xpars!=2)
 			continue;
 		char *fix_key = toLower(trim(key));
-		char *fix_val = toLower(trim(val));
+		char *fix_val = trim(val);
 
 		int ckey = config_find_key(fix_key);
 		if(ckey<0)
@@ -517,6 +517,21 @@ void Free_PortList(zroxy_t *ptr)
 		lport_t *next = p->next;
 		free(p);
 		p=next;
+	}
+}
+
+void Free_DnsServer(zroxy_t *ptr)
+{
+	if(ptr->dnsserver)
+	{
+		if(ptr->dnsserver->Socks)
+		{
+			free(ptr->dnsserver->Socks->host);
+			free(ptr->dnsserver->Socks->user);
+			free(ptr->dnsserver->Socks->pass);
+			free(ptr->dnsserver->Socks);
+		}
+		free(ptr->dnsserver);
 	}
 }
 
