@@ -8,6 +8,7 @@ set(EXECUTABLE_NAME zroxy)
 
 # Set the project name
 project (${EXECUTABLE_NAME} C)
+include(CTest)
 
 # Platform-specific configurations
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -64,3 +65,20 @@ TARGET_LINK_LIBRARIES(${EXECUTABLE_NAME}
 )
 
 INSTALL(TARGETS ${EXECUTABLE_NAME} RUNTIME DESTINATION bin)
+
+if(BUILD_TESTING)
+    add_executable(test_net_host_extract
+        tests/test_net_host_extract.c
+        network/net.c
+        log/log.c
+    )
+
+    target_include_directories(test_net_host_extract
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/network
+    )
+
+    add_test(NAME net_host_extract COMMAND test_net_host_extract)
+endif()
