@@ -275,7 +275,7 @@ bool Parse_config(zroxy_t *ptr,char *str)
 		if(xpars!=2)
 			continue;
 		char *fix_key = toLower(trim(key));
-		char *fix_val = toLower(trim(val));
+		char *fix_val = trim(val);
 
 		int ckey = config_find_key(fix_key);
 		if(ckey<0)
