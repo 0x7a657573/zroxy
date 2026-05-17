@@ -43,10 +43,13 @@ bool net_enable_keepalive(int sock)
 
 bool net_connect(int *sockfd,const char *hostname, uint16_t port)
 {
+    *sockfd = -1;
+
     /*check Hostname is IP or Domain*/
     if(isTrueIpAddress(hostname))
 	{
-        if((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        int sfd = socket(AF_INET, SOCK_STREAM, 0);
+        if(sfd < 0)
 	    {
 	        log_error("Socks Error : Could not create socket");
 	        return false;
@@ -59,15 +62,18 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port)
         if(inet_pton(AF_INET, hostname, &serv_addr.sin_addr)<=0)
 		{
 			log_error("inet_pton error occured");
+            close(sfd);
 			return false;
 		}
 
-		if(connect(*sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+		if(connect(sfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
 		{
 			log_error("net_connect Error : Connect Failed");
+            close(sfd);
 			return false;
 		}
-        
+
+        *sockfd = sfd;
         return true;
 	}
 
@@ -88,31 +94,29 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port)
         return false;
     }
 
-    int sfd;
-    bool result = false;
+    int sfd = -1;
     for (struct addrinfo *addr = addrs; addr != NULL; addr = addr->ai_next)
     {
-        sfd = socket(addrs->ai_family, addrs->ai_socktype, addrs->ai_protocol);
+        sfd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
         if (sfd == -1)
         {
         	log_error("Socks Error : Could not create socket");
-        	//freeaddrinfo(addrs);
-            //return false;
             continue;
         }
 
         if (connect(sfd, addr->ai_addr, addr->ai_addrlen) != -1)
         {
-            result = true;
-            break;
+            *sockfd = sfd;
+            freeaddrinfo(addrs);
+            return true;
         }
 
         close(sfd);
+        sfd = -1;
     }
 
     freeaddrinfo(addrs);
-    *sockfd = sfd;
-    return result;
+    return false;
 }
 
 bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd)

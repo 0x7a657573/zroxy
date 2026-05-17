@@ -25,7 +25,7 @@
 #include <net.h>
 #include <filter/filter.h>
 #include <time.h>
-
+#include <net_io.h>
 
 void *dnsserver_workerTask(void *vargp);
 
@@ -168,6 +168,11 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 	msg->arCount = 0;
 
 	rr->name = strdup(msg->questions->qName);
+	if (!rr->name)
+	{
+		free(rr);
+		return 0;
+	}
 	rr->type = msg->questions->qType;
 	rr->class = msg->questions->qClass;
 	rr->ttl = 60*60; // in seconds; 0 means no caching
@@ -189,34 +194,20 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 		break;
 		case AAAA_Resource_RecordType:
 			rr->rd_length = 16;
-			rr->rd_data.a_record.addr[0] = 0;
-			rr->rd_data.a_record.addr[1] = 0;
-			rr->rd_data.a_record.addr[2] = 0;
-			rr->rd_data.a_record.addr[3] = 0;
-			rr->rd_data.a_record.addr[4] = 0;
-			rr->rd_data.a_record.addr[5] = 0;
-			rr->rd_data.a_record.addr[6] = 0;
-			rr->rd_data.a_record.addr[7] = 0;
-			rr->rd_data.a_record.addr[8] = 0;
-			rr->rd_data.a_record.addr[9] = 0;
-			rr->rd_data.a_record.addr[10] = 0;
-			rr->rd_data.a_record.addr[11] = 0;
-			rr->rd_data.a_record.addr[12] = 0;
-			rr->rd_data.a_record.addr[13] = 0;
-			rr->rd_data.a_record.addr[14] = 0;
-			rr->rd_data.a_record.addr[15] = 0;
+			memset(rr->rd_data.aaaa_record.addr,0,16);
 			msg->anCount++;
 			// prepend resource record to answers list
     		msg->answers = rr;
 		break;
 		default:
+			free(rr->name);
 			free(rr);
 			msg->rcode = NotImplemented_ResponseType;
 		break;
 	}
 
 	uint8_t *p = buf;
-	if (!dns_encode_msg(msg, &p)) 
+	if (!dns_encode_msg(msg, &p))
 	{
     	return 0;
     }
@@ -325,22 +316,29 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			}
 
 			// forward dns query
-			if(send(sockssocket, msg->message, msg->len + 2,MSG_NOSIGNAL)<0)
+			if(!net_write_all(sockssocket, msg->message, msg->len + 2))
 			{
-				/*maybe socket is not connect*/
-				//close(sockssocket);
-				//continue;
 				break;
 			}
 
-			rlen = read(sockssocket, msg->message, DNS_MSG_SIZE);
-			if(rlen<=0)
+			if(!net_read_exact(sockssocket, msg->message, 2))
 			{
-				/*maybe socket is not connect*/
-				//close(sockssocket);
-				//continue;
+				break;
 			}
 
+			uint16_t response_len = ((uint8_t)msg->message[0] << 8) | (uint8_t)msg->message[1];
+			if(response_len > DNS_MSG_SIZE - 2)
+			{
+				log_error("DNS: upstream response too large: %u", response_len);
+				break;
+			}
+
+			if(!net_read_exact(sockssocket, msg->message + 2, response_len))
+			{
+				break;
+			}
+
+			rlen = response_len + 2;
 			break;
 		}
 
@@ -401,7 +399,11 @@ void *dnsserver_workerTask(void *vargp)
 		newmsg->dns = dns;
 		/*Process incoming dns message*/
 		pthread_t thread_id;
-		pthread_create(&thread_id, NULL, DNS_HandleIncomingRequset, (void*)newmsg);
+		if(pthread_create(&thread_id, NULL, DNS_HandleIncomingRequset, (void*)newmsg))
+		{
+			log_error("can not create thread for new dns request");
+			free(newmsg);
+		}
 		pthread_detach(thread_id);
 	}
 

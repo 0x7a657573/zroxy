@@ -70,6 +70,9 @@ void filter_Reload(filter_t *self)
 	    num++;
 	}
 
+	/*free getline buffer*/
+	free(line);
+
 	/*replace new list with old one*/
 	pthread_mutex_lock(&self->Lock);
 	item_t *ptr = self->item;
