@@ -116,4 +116,22 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME dns_codec COMMAND test_dns_codec)
+
+    add_executable(test_args_parse
+        tests/test_args_parse.c
+        src/args.c
+        log/log.c
+    )
+
+    target_include_directories(test_args_parse
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/sniproxy
+            ${PROJECT_SOURCE_DIR}/dnsproxy
+            ${PROJECT_SOURCE_DIR}/network/socks
+            ${PROJECT_SOURCE_DIR}/statistics
+    )
+
+    add_test(NAME args_parse COMMAND test_args_parse)
 endif()
