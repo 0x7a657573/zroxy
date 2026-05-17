@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "log.h"
@@ -165,6 +166,7 @@ static void test_sni_forwarding_basic(void)
     upstream_server_t server = {0};
     sniclient_t *client = NULL;
     uint8_t resp_buf[sizeof(response)];
+    struct timeval tv = {0};
 
     listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     expect_true(listen_fd >= 0, "create upstream listen socket");
@@ -240,7 +242,9 @@ static void test_sni_forwarding_basic(void)
     }
 
     expect_true(write_all_fd(pair[0], request, sizeof(request) - 1), "write request to client socket");
-    shutdown(pair[0], SHUT_WR);
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    setsockopt(pair[0], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     expect_true(read_exact_fd(pair[0], resp_buf, sizeof(response) - 1), "read response from client socket");
     if (failures == 0)
     {
