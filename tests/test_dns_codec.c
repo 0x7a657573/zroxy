@@ -103,6 +103,51 @@ static void test_transaction_id_preserved_on_encode(void)
     free_msg(&msg);
 }
 
+static void test_decode_rd_ra_preservation(void)
+{
+    struct Message msg_query = {0};
+    struct Message msg_response = {0};
+    static const uint8_t k_query_rd_set[] = {
+        0x12, 0x34,
+        0x01, 0x00,
+        0x00, 0x01,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+        0x03, 'c', 'o', 'm',
+        0x00,
+        0x00, 0x01,
+        0x00, 0x01
+    };
+    static const uint8_t k_response_rd_ra_set[] = {
+        0x12, 0x34,
+        0x81, 0x80,
+        0x00, 0x01,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+        0x03, 'c', 'o', 'm',
+        0x00,
+        0x00, 0x01,
+        0x00, 0x01
+    };
+
+    expect_true(dns_decode_msg(&msg_query, k_query_rd_set, (int)sizeof(k_query_rd_set)),
+                "decode RD query");
+    expect_u16(msg_query.rd, 1, "query RD decoded");
+    expect_u16(msg_query.ra, 0, "query RA decoded");
+    free_msg(&msg_query);
+
+    expect_true(dns_decode_msg(&msg_response, k_response_rd_ra_set, (int)sizeof(k_response_rd_ra_set)),
+                "decode RD/RA response");
+    expect_u16(msg_response.qr, 1, "response QR decoded");
+    expect_u16(msg_response.rd, 1, "response RD decoded");
+    expect_u16(msg_response.ra, 1, "response RA decoded");
+    free_msg(&msg_response);
+}
+
 static void test_encode_local_a_response(void)
 {
     struct Question q = {0};
@@ -167,7 +212,7 @@ static void test_encode_local_a_response(void)
     expect_u8(out[55], 10, "answer ip byte3");
 }
 
-static void test_flags_todo_behavior(void)
+static void test_encode_dns_flags(void)
 {
     struct Question q = {0};
     struct Message msg = {0};
@@ -180,16 +225,18 @@ static void test_flags_todo_behavior(void)
 
     msg.id = 0x5678;
     msg.qr = 1;
+    msg.opcode = 0;
     msg.aa = 1;
+    msg.tc = 0;
     msg.rd = 1;
     msg.ra = 1;
     msg.rcode = 0;
     msg.qdCount = 1;
     msg.questions = &q;
 
-    expect_true(dns_encode_msg(&msg, &p), "encode flags TODO behavior");
-    expect_u8(out[2], 0x80, "flags high byte preserves only qr");
-    expect_u8(out[3], 0x00, "flags low byte preserves only rcode");
+    expect_true(dns_encode_msg(&msg, &p), "encode dns flags");
+    expect_u8(out[2], 0x85, "flags high byte");
+    expect_u8(out[3], 0x80, "flags low byte");
 }
 
 int main(void)
@@ -198,8 +245,9 @@ int main(void)
 
     test_decode_basic_a_query();
     test_transaction_id_preserved_on_encode();
+    test_decode_rd_ra_preservation();
     test_encode_local_a_response();
-    test_flags_todo_behavior();
+    test_encode_dns_flags();
 
     return failures == 0 ? 0 : 1;
 }
