@@ -63,7 +63,7 @@ void filter_Reload(filter_t *self)
 	    if ((pos=strchr(line, '\n')) != NULL)
 	        *pos = '\0';
 
-	    strcpy(NewList->Rec,line);
+	    snprintf(NewList->Rec, _MaxHostName_, "%s", line);
 
 	    NewList->Next = Pvitem;
 	    Pvitem = NewList;
@@ -222,7 +222,7 @@ filter_t *filter_init(char *filename)
 	    exit(0);
 	}
 	bzero(self->filepath,strlen(filename)+1);
-	strcpy(self->filepath,filename);
+	snprintf(self->filepath, strlen(filename)+1, "%s", filename);
 
 	item_t *Pvitem = NULL;
 	int num = 0;
@@ -250,7 +250,7 @@ filter_t *filter_init(char *filename)
 	    if ((pos=strchr(line, '\n')) != NULL)
 	        *pos = '\0';
 
-	    strcpy(self->item->Rec,line);
+	    snprintf(self->item->Rec, _MaxHostName_, "%s", line);
 
 	    self->item->Next = Pvitem;
 	    Pvitem = self->item;
