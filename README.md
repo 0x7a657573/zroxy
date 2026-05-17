@@ -38,27 +38,58 @@ When connecting to a domain through TLS/HTTPS, the initial TCP session contains 
 
 ## Usage
 
-### Command Details
+### Command Details (`./build/zroxy -h`)
+
+Current binary version in help output: `zroxy v1.2.7`
 
 ```
 Usage: zroxy [OPTION...]
-	zroxy v1.2.3
-	simple sni and dns proxy.
-
-	-c, 'config'	path to config		path to config. -c /etc/zroxy.conf
-	-p, 'port'	sni port		sni port that listens.
-						<bind ip>:<local port>@<remote port>
-						-p 127.0.0.1:8080@80,4433@433,853...
-	-s, 'socks'	socks proxy		set proxy for up stream. -s 127.0.0.1:9050
-	-m, 'monitor'	monitor port		monitor port that listens. -m 1234
-	-w, 'white'	white list		white list for host -w /etc/withlist.txt
-	-d, 'ldns'	local DNS server		dns server that listens. -d 0.0.0.0:53
-	-u, 'dns'	upstream DNS providers		upstream DNS providers. -u 8.8.8.8
-	-x, 'dsocks'	DNS upstream socks		DNS upstream socks. -x 127.0.0.1:9050
-	-t, 'dtimeout'	DNS timeout in sec		DNS upstream timeout. -t 5
-	-i, 'snip'	SNI IP for DNS server		SNI IP for DNS server. -i 127.0.0.1
-	-h, 'help'	Give this help list
+  -c, --config <path>          path to config file
+  -p, --port <listeners>       SNI listeners: <bind ip>:<local>@<remote>,...
+  -s, --socks <spec>           upstream SOCKS5 for SNI forwarding
+  -m, --monitor <port>         monitor HTTP port
+  -o, --snitimeout <sec>       SNI socket timeout in seconds
+  -w, --white <path>           whitelist file path
+  -d, --ldns <bind:port>       local DNS UDP listener
+  -u, --dns <host[:port]>      upstream DNS-over-TCP server
+  -x, --dsocks <spec>          SOCKS5 for DNS upstream connection
+  -t, --dtimeout <sec>         DNS upstream socket timeout
+  -i, --snip <ipv4>            synthesized A/AAAA target IP for local DNS replies
+  -l, --log <0..5>             log level
+  -h, --help                   show help
 ```
+
+### Config Behavior
+
+- Default config path (when no CLI args are passed): `zroxy.conf`.
+- Config keys are case-insensitive.
+- Config values are trimmed but preserved (not lowercased).
+- Listener syntax: `port = <bind ip>:<local port>@<remote port>` with comma-separated entries.
+  - Example: `PORT = 127.0.0.1:8080@80,4433@443`
+- SOCKS syntax for `SOCKS` and `DSOCKS`:
+  - `<host>:<port>`
+  - `<user>:<pass>@<host>:<port>`
+- Whitelist file (`WHITE`) format:
+  - One host pattern per line.
+  - `*` and `?` wildcard matching is supported by current filter logic.
+- DNS options:
+  - `LDNS`: local UDP bind endpoint.
+  - `DNS`: upstream resolver endpoint (`host[:port]`, default port `53` when omitted).
+  - `DSOCKS`: optional SOCKS5 tunnel for upstream DNS TCP connection.
+  - `DTIMEOUT`: DNS upstream socket timeout in seconds.
+  - `SNIP`: IPv4 returned for locally-resolved whitelist A records.
+
+### Monitor Endpoint
+
+When enabled (`-m` / `MONITOR`), zroxy serves an HTTP endpoint returning JSON statistics
+(`ZroxyVersion`, connection counters, rx/tx totals, open-file count). The current monitor
+handler does not route by URL path; it responds with stats JSON for incoming HTTP requests.
+
+### DNS Proxy Notes
+
+If DNS forwarding is enabled, zroxy accepts UDP DNS locally and forwards upstream over TCP
+(direct or via SOCKS5). DNS-over-TCP framing uses a 2-byte length prefix and full
+read/write loops for exact transfer.
 
 ## Build
 
@@ -70,33 +101,32 @@ To build zroxy, you need `CMake` and `gcc`.
 	# apt install cmake build-essential git
 ```
 
-### Build on Linux/OS X/FreeBSD
+### Build (current workflow)
 
-1.  Clone the project:
+```
+cmake -S . -B build
+cmake --build build
+```
 
-    ```
-    git clone https://github.com/0x7a657573/zroxy.git
-    cd zroxy
-    ```
+## Tests
 
-2.  Create a build directory:
+Run the stabilization suite:
 
-    ```
-    mkdir build
-    cd build
-    ```
+```
+ctest --test-dir build -j12 --output-on-failure
+```
 
-3.  Configure the project:
+Current test list:
 
-    ```
-    cmake ..
-    ```
+- `net_host_extract`
+- `filter_whitelist`
+- `dns_codec`
+- `args_parse`
+- `socks_handshake`
+- `sni_forwarding`
+- `dnsproxy_tcp_io`
 
-4.  Build the project:
-
-    ```
-    make
-    ```
+The automated tests are local loopback/unit-style checks and do not require public Internet access.
 
 ### Static Build
 
