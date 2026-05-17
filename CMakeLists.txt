@@ -134,4 +134,26 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME args_parse COMMAND test_args_parse)
+
+    add_executable(test_socks_handshake
+        tests/test_socks_handshake.c
+        network/socks/socks.c
+        network/net.c
+        log/log.c
+    )
+
+    target_include_directories(test_socks_handshake
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/network
+            ${PROJECT_SOURCE_DIR}/network/socks
+    )
+
+    target_link_libraries(test_socks_handshake
+        PRIVATE
+            Threads::Threads
+    )
+
+    add_test(NAME socks_handshake COMMAND test_socks_handshake)
 endif()
