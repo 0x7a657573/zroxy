@@ -15,8 +15,57 @@
 #include <string.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include "socks.h"
 #include "net.h"
+
+static bool write_all(int fd, const void *buf, size_t len)
+{
+	const uint8_t *p = (const uint8_t *)buf;
+	size_t written = 0;
+	while (written < len)
+	{
+		ssize_t n = write(fd, p + written, len - written);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+		if (n == 0)
+		{
+			return false;
+		}
+		written += (size_t)n;
+	}
+	return true;
+}
+
+static bool read_exact(int fd, void *buf, size_t len)
+{
+	uint8_t *p = (uint8_t *)buf;
+	size_t read_total = 0;
+	while (read_total < len)
+	{
+		ssize_t n = read(fd, p + read_total, len - read_total);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+		if (n == 0)
+		{
+			return false;
+		}
+		read_total += (size_t)n;
+	}
+	return true;
+}
 
 
 bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,bool keepalive)
@@ -50,7 +99,12 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
     // +-----+----------+----------+
     // |  1  |    1     | 1 to 255 |
     // +-----+----------+----------+
-	write(*sockfd,"\x05\x02\x00\x02",4);	/*Write Hello*/
+	if(!write_all(*sockfd,"\x05\x02\x00\x02",4))	/*Write Hello*/
+	{
+		log_error("[!] Error writing SOCKS hello to %s", socks5_host);
+		close(*sockfd);
+		return false;
+	}
 
     // SOCKS5 SERVER HELLO
     // +-----+--------+
@@ -59,7 +113,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
     // |  1  |   1    |
     // +-----+--------+
 	uint8_t SocksVer = 0;
-	if(read(*sockfd,&SocksVer,sizeof(uint8_t))<=0)
+	if(!read_exact(*sockfd,&SocksVer,sizeof(uint8_t)))
 	{
 		log_error("[!] Error reading SOCKS version from %s", socks5_host);
 		close(*sockfd);
@@ -74,7 +128,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 	 }
 
 	 uint8_t SocksMethod;
-	if(read(*sockfd,&SocksMethod,sizeof(uint8_t))<=0)
+	if(!read_exact(*sockfd,&SocksMethod,sizeof(uint8_t)))
 	{
 		log_error("[!] Error reading SOCKS method from %s", socks5_host);
 		close(*sockfd);
@@ -118,10 +172,15 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 			return false;
 		}
 		
-		write(*sockfd,temp,packet_len); /*write UserPass*/
+		if(!write_all(*sockfd,temp,(size_t)packet_len)) /*write UserPass*/
+		{
+			log_error("[!] Error writing SOCKS authentication packet to %s", socks5_host);
+			close(*sockfd);
+			return false;
+		}
 
 		SocksAuthenticationReplay_t SocksAuth;
-		if(read(*sockfd,&SocksAuth,sizeof(SocksAuthenticationReplay_t))<=0)
+		if(!read_exact(*sockfd,&SocksAuth,sizeof(SocksAuthenticationReplay_t)))
 		{
 			log_error("[!] Error reading SOCKS authentication response from %s", socks5_host);
 			close(*sockfd);
@@ -174,7 +233,12 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 		*(uint16_t *)(Tempbuf + 8) = htons(port); /*copy port*/
 	 }
 
-	 write(*sockfd,Tempbuf,datalen);
+	 if(!write_all(*sockfd,Tempbuf,datalen))
+	 {
+		log_error("[!] Error writing SOCKS connect request to %s", socks5_host);
+		close(*sockfd);
+		return false;
+	 }
 
     // SOCKS5 SERVER REPLY
     // +-----+-----+-------+------+----------+----------+
@@ -183,7 +247,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
     // |  1  |  1  | X'00' |  1   | Variable |    2     |
     // +-----+-----+-------+------+----------+----------+
 	 SocksReplayHeader_t Replay;
-	if(read(*sockfd,&Replay,sizeof(SocksReplayHeader_t))<=0)
+	if(!read_exact(*sockfd,&Replay,sizeof(SocksReplayHeader_t)))
 	{
 		log_error("[!] Error reading SOCKS5 server reply from %s", socks5_host);
 		close(*sockfd);
@@ -206,7 +270,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 
 	 if(Replay.atyp == 0x01)	// IPv4 address
 	 {
-		if(read(*sockfd,Tempbuf,4)<=0)
+		if(!read_exact(*sockfd,Tempbuf,4))
 		{
 			log_error("[!] Error reading IPv4 address from %s", socks5_host);
 			close(*sockfd);
@@ -216,14 +280,14 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 	 else if (Replay.atyp == 0x03)	// Domain name
 	 {
 		 uint8_t len;
-		if(read(*sockfd,&len,sizeof(uint8_t))<=0)
+		if(!read_exact(*sockfd,&len,sizeof(uint8_t)))
 		{
 			log_error("[!] Error reading domain name length from %s", socks5_host);
 			close(*sockfd);
 			return false;
 		}
 
-		if(read(*sockfd,&Tempbuf,len)<=0)
+		if(!read_exact(*sockfd,&Tempbuf,len))
 		{
 			log_error("[!] Error reading domain name from %s", socks5_host);
 			close(*sockfd);
@@ -232,7 +296,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 	 }
 	 else if (Replay.atyp == 0x04)	// IPv6 address
 	 {
-		if(read(*sockfd,&Tempbuf,16) != 16)
+		if(!read_exact(*sockfd,&Tempbuf,16))
 		{
 			log_error("[!] Error reading IPv6 address from %s", socks5_host);
 			close(*sockfd);
@@ -246,7 +310,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 		 return false;
 	 }
 
-	if(read(*sockfd,&Tempbuf,sizeof(uint16_t))<=0)	/*Read Port*/
+	if(!read_exact(*sockfd,&Tempbuf,sizeof(uint16_t)))	/*Read Port*/
 	{
 		log_error("[!] Error reading port from %s", socks5_host);
 		close(*sockfd);
