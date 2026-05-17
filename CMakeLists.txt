@@ -183,4 +183,35 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME sni_forwarding COMMAND test_sni_forwarding)
+
+    add_executable(test_dnsproxy_tcp_io
+        tests/test_dnsproxy_tcp_io.c
+        dnsproxy/dnsproxy.c
+        dnsproxy/dns.c
+        fifo/fifo.c
+        network/net.c
+        network/socks/socks.c
+        sniproxy/filter/filter.c
+        statistics/statistics.c
+        log/log.c
+    )
+
+    target_include_directories(test_dnsproxy_tcp_io
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/dnsproxy
+            ${PROJECT_SOURCE_DIR}/fifo
+            ${PROJECT_SOURCE_DIR}/network
+            ${PROJECT_SOURCE_DIR}/network/socks
+            ${PROJECT_SOURCE_DIR}/sniproxy
+            ${PROJECT_SOURCE_DIR}/statistics
+    )
+
+    target_link_libraries(test_dnsproxy_tcp_io
+        PRIVATE
+            Threads::Threads
+    )
+
+    add_test(NAME dnsproxy_tcp_io COMMAND test_dnsproxy_tcp_io)
 endif()
