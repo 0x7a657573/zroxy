@@ -110,13 +110,29 @@ cmake --build build
 
 ## Tests
 
-Run the stabilization suite:
+Default tests are local only. They use loopback sockets and do not need the public Internet, external DNS, SSH, Tor, curl, dig, or Docker.
+
+The suites are different jobs:
+
+- **Unit tests** exercise parsers, limits, and in-process forwarding with the C binaries under `tests/`.
+- **Integration tests** start the real `zroxy` binary and prove an SNI, DNS, or monitor exchange over loopback.
+- **Stress tests** hold a real `zroxy` under concurrent, malformed, slow, and overloaded clients. Intentional capacity rejections are not failures. Crashes, hangs, corruption, and file-descriptor growth are.
+- **Soak tests** are the stress runner with a long `--duration`. They are not part of the default CTest run.
+- **Benchmark tests** measure local throughput and latency. A single JSON file is a baseline. Compare two result files before calling a difference a regression or an improvement.
+
+Run the default suite (unit and integration):
 
 ```
-ctest --test-dir build -j12 --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
 
-Current test list:
+Integration only:
+
+```
+ctest --test-dir build -L integration --output-on-failure
+```
+
+Unit tests:
 
 - `net_host_extract`
 - `filter_whitelist`
@@ -125,8 +141,50 @@ Current test list:
 - `socks_handshake`
 - `sni_forwarding`
 - `dnsproxy_tcp_io`
+- `io_limits`
+- `process_limits`
 
-The automated tests are local loopback/unit-style checks and do not require public Internet access.
+Integration tests, registered when Python 3 is available:
+
+- `sni_e2e`
+- `dns_e2e`
+- `monitor_e2e`
+
+Stress:
+
+```
+python3 tests/stress/zroxy_stress.py \
+  --duration 30 \
+  --connections 100 \
+  --workers 4 \
+  --payload-size 4096 \
+  --output build/stress-result.json
+```
+
+Benchmark:
+
+```
+python3 tests/benchmark/zroxy_benchmark.py \
+  --connections 1,10,50,100 \
+  --payload-size 1024,65536 \
+  --duration 10 \
+  --output build/benchmark-result.json
+```
+
+Each benchmark scenario runs for `--duration` seconds, so the full matrix takes longer than one interval. Loopback results move with CPU scheduling and machine load. Treat a single file as a baseline. `tests/benchmark/compare_baseline.py` compares two JSON files and fails by default on a throughput drop of 15 percent, a p99 latency increase of 20 percent, an RSS increase of 25 percent, or any persistent file-descriptor increase (`fd_after` above `fd_baseline`).
+
+```
+python3 tests/benchmark/compare_baseline.py build/baseline.json build/current.json
+```
+
+Benchmark JSON contains one object per scenario. `latency_ms.p50`, `p95`, and `p99` are rank-interpolated percentiles of successful exchanges, not an average. `throughput_bytes_sec` is bytes sent plus bytes received, divided by the measured duration. `resources` records peak RSS, file descriptors, and threads for that scenario.
+
+Stress and benchmark targets are registered with CTest labels `stress` and `benchmark` but are disabled in the default run. Include them explicitly:
+
+```
+ctest --test-dir build -L stress --include-disabled --output-on-failure
+ctest --test-dir build -L benchmark --include-disabled --output-on-failure
+```
 
 ### Static Build
 

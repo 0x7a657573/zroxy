@@ -265,4 +265,54 @@ if(BUILD_TESTING)
     add_dependencies(test_process zroxy)
     add_test(NAME process_limits COMMAND test_process)
     set_tests_properties(process_limits PROPERTIES TIMEOUT 60)
+
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        set(ZROXY_TEST_ENV "ZROXY_BIN=${CMAKE_BINARY_DIR}/zroxy")
+        add_test(NAME sni_e2e
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/integration/test_sni_e2e.py)
+        add_test(NAME dns_e2e
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/integration/test_dns_e2e.py)
+        add_test(NAME monitor_e2e
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/integration/test_monitor_e2e.py)
+        set_tests_properties(sni_e2e dns_e2e monitor_e2e PROPERTIES
+            TIMEOUT 90
+            LABELS "integration;e2e"
+            ENVIRONMENT "${ZROXY_TEST_ENV}"
+            REQUIRED_FILES "${CMAKE_BINARY_DIR}/zroxy"
+        )
+
+        # Stress and benchmark runs are local, but they are slower than the
+        # default suite. DISABLED keeps them out of a plain ctest invocation.
+        # Run them with: ctest --test-dir build -L stress --include-disabled
+        add_test(NAME zroxy_stress
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/stress/zroxy_stress.py
+                --duration 3
+                --connections 8
+                --workers 2
+                --payload-size 1024
+                --output ${CMAKE_BINARY_DIR}/stress-result.json)
+        add_test(NAME zroxy_benchmark
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/benchmark/zroxy_benchmark.py
+                --connections 4
+                --payload-size 1024
+                --duration 2
+                --output ${CMAKE_BINARY_DIR}/benchmark-result.json)
+        set_tests_properties(zroxy_stress PROPERTIES
+            TIMEOUT 180
+            LABELS "stress"
+            DISABLED TRUE
+            ENVIRONMENT "${ZROXY_TEST_ENV}"
+            REQUIRED_FILES "${CMAKE_BINARY_DIR}/zroxy"
+        )
+        set_tests_properties(zroxy_benchmark PROPERTIES
+            TIMEOUT 180
+            LABELS "benchmark"
+            DISABLED TRUE
+            ENVIRONMENT "${ZROXY_TEST_ENV}"
+            REQUIRED_FILES "${CMAKE_BINARY_DIR}/zroxy"
+        )
+    else()
+        message(STATUS "Python3 not found; integration tests will not be registered")
+    endif()
 endif()
