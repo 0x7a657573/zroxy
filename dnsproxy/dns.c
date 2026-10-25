@@ -18,157 +18,193 @@
  **********************************************************************/
 #include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <config.h>
 #include <string.h>
 #include "dns.h"
 #include <log.h>
 #include <arpa/inet.h>
 
-#define MIN(x, y) ((x) <= (y) ? (x) : (y))
+#define DNS_MAX_LABEL 63
+#define DNS_MAX_POINTERS 16
+#define DNS_MAX_QUESTIONS 32
+
+typedef struct
+{
+  const uint8_t *base;
+  const uint8_t *p;
+  const uint8_t *end;
+} dns_reader;
+
+typedef struct
+{
+  uint8_t *p;
+  uint8_t *end; /* NULL disables the limit; callers that know the size must set it. */
+} dns_writer;
+
+static bool reader_u8(dns_reader *r, uint8_t *out)
+{
+  if (r->p >= r->end)
+    return false;
+  *out = *r->p++;
+  return true;
+}
+
+static bool reader_u16(dns_reader *r, uint16_t *out)
+{
+  uint8_t hi, lo;
+  if (!reader_u8(r, &hi) || !reader_u8(r, &lo))
+    return false;
+  *out = (uint16_t)(((uint16_t)hi << 8) | lo);
+  return true;
+}
+
+static bool writer_need(dns_writer *w, size_t n)
+{
+  if (w->end == NULL)
+    return true;
+  if (n > (size_t)(w->end - w->p))
+    return false;
+  return true;
+}
+
+static bool writer_u8(dns_writer *w, uint8_t value)
+{
+  if (!writer_need(w, 1))
+    return false;
+  *w->p++ = value;
+  return true;
+}
+
+static bool writer_u16(dns_writer *w, uint16_t value)
+{
+  return writer_u8(w, (uint8_t)(value >> 8)) &&
+         writer_u8(w, (uint8_t)(value & 0xFF));
+}
+
+static bool writer_u32(dns_writer *w, uint32_t value)
+{
+  return writer_u8(w, (uint8_t)((value >> 24) & 0xFF)) &&
+         writer_u8(w, (uint8_t)((value >> 16) & 0xFF)) &&
+         writer_u8(w, (uint8_t)((value >> 8) & 0xFF)) &&
+         writer_u8(w, (uint8_t)(value & 0xFF));
+}
+
+static bool writer_bytes(dns_writer *w, const void *src, size_t n)
+{
+  if (!writer_need(w, n))
+    return false;
+  memcpy(w->p, src, n);
+  w->p += n;
+  return true;
+}
+
 /*
-* Basic memory operations.
-*/
-
-/**
- * @brief Puts 8 bits of data into the buffer.
- *
- * @param buffer The buffer to write to.
- * @param value The value to write.
+ * Presentation name: labels joined by '.', no trailing dot.
+ * Compression pointers are followed with a jump limit. The message
+ * cursor advances only across the first on-wire name, not the target.
  */
-static void put8bits(uint8_t **buffer, uint8_t value)
+static bool decode_domain_name(dns_reader *r, char **out)
 {
-  *(*buffer)++=value;
-}
+  const uint8_t *pkt = r->base;
+  size_t pkt_len = (size_t)(r->end - r->base);
+  size_t pos = (size_t)(r->p - r->base);
+  size_t wire_end = 0;
+  bool wire_done = false;
+  int jumps = 0;
+  char name[_MaxHostName_];
+  size_t nlen = 0;
 
-/**
- * @brief Gets 16 bits of data from the buffer.
- *
- * @param buffer The buffer to read from.
- * @return The 16-bit value.
- */
-static size_t get16bits(const uint8_t **buffer)
-{
-  uint16_t value;
-  value  = (*(*buffer)++)<<8 ;
-  value |= *(*buffer)++;
-  return value;
-}
+  *out = NULL;
+  if (pos >= pkt_len)
+    return false;
 
-/**
- * @brief Puts 16 bits of data into the buffer.
- *
- * @param buffer The buffer to write to.
- * @param value The value to write.
- */
-static void put16bits(uint8_t **buffer, uint16_t value)
-{
-  *(*buffer)++ = value>>8;
-  *(*buffer)++ = value&0xFF;
-}
-
-/**
- * @brief Puts 32 bits of data into the buffer.
- *
- * @param buffer The buffer to write to.
- * @param value The value to write.
- */
-static void put32bits(uint8_t **buffer, uint32_t value)
-{
-  *(*buffer)++ = (value>>24)&0xFF;
-  *(*buffer)++ = (value>>16)&0xFF;
-  *(*buffer)++ = (value>> 8)&0xFF;
-  *(*buffer)++ = (value>> 0)&0xFF;
-}
-
-/**
- * @brief Decodes a domain name from the buffer.
- *
- * @param buf The buffer to read from.
- * @param len The length of the buffer.
- * @return The decoded domain name, or NULL on error.
- */
-char *decode_domain_name(const uint8_t **buf, size_t len)
-{
-  char domain[_MaxHostName_];
-
-    /*find end if name*/
-  int domain_len = 0;
-  for(size_t i=0;i<len;i++)
-    if((*buf)[i]==0)
+  for (;;)
+  {
+    uint8_t lab;
+    if (pos >= pkt_len)
+      return false;
+    lab = pkt[pos];
+    if (lab == 0)
     {
-      domain_len = i+1;
+      if (!wire_done)
+        wire_end = pos + 1;
       break;
-    }  
-
-    if (domain_len == 0 || domain_len >= _MaxHostName_)
-  {
-    return NULL;
-  }
-
-  for (size_t i = 1; i < domain_len; i++)
-  {
-    uint8_t c = (*buf)[i];
-    if (c == 0) 
-    {
-      domain[i - 1] = 0;
-      *buf += i + 1;
-      return strdup(domain);
-    } 
-    else if (c <= 63 && c <= (domain_len-i)) 
-    {
-      domain[i - 1] = '.';
-    } 
-    else 
-    {
-      domain[i - 1] = c;
     }
+    if ((lab & 0xC0) == 0xC0)
+    {
+      size_t off;
+      if (pos + 1 >= pkt_len)
+        return false;
+      off = ((size_t)(lab & 0x3F) << 8) | pkt[pos + 1];
+      if (off >= pkt_len)
+        return false;
+      if (++jumps > DNS_MAX_POINTERS)
+        return false;
+      if (!wire_done)
+      {
+        wire_end = pos + 2;
+        wire_done = true;
+      }
+      pos = off;
+      continue;
+    }
+    if ((lab & 0xC0) != 0)
+      return false;
+    if (lab > DNS_MAX_LABEL)
+      return false;
+    if (pos + 1u + lab > pkt_len)
+      return false;
+    if (nlen > 0)
+    {
+      if (nlen + 1 >= sizeof(name))
+        return false;
+      name[nlen++] = '.';
+    }
+    if (nlen + lab >= sizeof(name))
+      return false;
+    memcpy(name + nlen, pkt + pos + 1, lab);
+    nlen += lab;
+    pos += 1u + lab;
   }
-  return NULL;
+
+  if (nlen == 0 || wire_end == 0 || wire_end > pkt_len)
+    return false;
+
+  name[nlen] = '\0';
+  r->p = pkt + wire_end;
+  *out = strdup(name);
+  return *out != NULL;
 }
 
-/**
- * @brief Encodes a domain name into the buffer.
- *
- * @param buffer The buffer to write to.
- * @param domain The domain name to encode.
- */
-void encode_domain_name(uint8_t **buffer, const char *domain)
+static bool encode_domain_name(dns_writer *w, const char *domain)
 {
-  uint8_t *buf = *buffer;
-  const char *beg = domain;
-  int i = 0;
+  const char *beg;
+  if (!domain || domain[0] == '\0')
+    return false;
 
+  beg = domain;
   while (*beg)
   {
     const char *pos = strchr(beg, '.');
-    int len = pos ? pos - beg : strlen(beg);
-
-    buf[i++] = len;
-    memcpy(buf + i, beg, len);
-    i += len;
-
+    size_t len = pos ? (size_t)(pos - beg) : strlen(beg);
+    if (len == 0 || len > DNS_MAX_LABEL)
+      return false;
+    if (!writer_u8(w, (uint8_t)len) || !writer_bytes(w, beg, len))
+      return false;
     beg += len;
     if (*beg == '.')
-    {
       beg++;
-    }
   }
-
-  buf[i++] = 0;
-  *buffer += i;
+  return writer_u8(w, 0);
 }
 
-/**
- * @brief Decodes the header of a DNS message.
- *
- * @param msg The message to decode into.
- * @param buffer The buffer to read from.
- */
-void dns_decode_header(struct Message *msg, const uint8_t **buffer)
+static bool dns_decode_header(struct Message *msg, dns_reader *r)
 {
-  msg->id = get16bits(buffer);
+  uint16_t fields;
+  if (!reader_u16(r, &msg->id) || !reader_u16(r, &fields))
+    return false;
 
-  uint32_t fields = get16bits(buffer);
   msg->qr = (fields & QR_MASK) >> 15;
   msg->opcode = (fields & OPCODE_MASK) >> 11;
   msg->aa = (fields & AA_MASK) >> 10;
@@ -177,22 +213,16 @@ void dns_decode_header(struct Message *msg, const uint8_t **buffer)
   msg->ra = (fields & RA_MASK) >> 7;
   msg->rcode = (fields & RCODE_MASK) >> 0;
 
-  msg->qdCount = get16bits(buffer);
-  msg->anCount = get16bits(buffer);
-  msg->nsCount = get16bits(buffer);
-  msg->arCount = get16bits(buffer);
+  if (!reader_u16(r, &msg->qdCount) ||
+      !reader_u16(r, &msg->anCount) ||
+      !reader_u16(r, &msg->nsCount) ||
+      !reader_u16(r, &msg->arCount))
+    return false;
+  return true;
 }
 
-/**
- * @brief Encodes the header of a DNS message.
- *
- * @param msg The message to encode.
- * @param buffer The buffer to write to.
- */
-void dns_encode_header(struct Message *msg, uint8_t **buffer)
+static bool dns_encode_header(struct Message *msg, dns_writer *w)
 {
-  put16bits(buffer, msg->id);
-
   int fields = 0;
   fields |= (msg->qr << 15) & QR_MASK;
   fields |= (msg->opcode << 11) & OPCODE_MASK;
@@ -201,61 +231,66 @@ void dns_encode_header(struct Message *msg, uint8_t **buffer)
   fields |= (msg->rd << 8) & RD_MASK;
   fields |= (msg->ra << 7) & RA_MASK;
   fields |= (msg->rcode << 0) & RCODE_MASK;
-  put16bits(buffer, fields);
 
-  put16bits(buffer, msg->qdCount);
-  put16bits(buffer, msg->anCount);
-  put16bits(buffer, msg->nsCount);
-  put16bits(buffer, msg->arCount);
+  return writer_u16(w, msg->id) &&
+         writer_u16(w, (uint16_t)fields) &&
+         writer_u16(w, msg->qdCount) &&
+         writer_u16(w, msg->anCount) &&
+         writer_u16(w, msg->nsCount) &&
+         writer_u16(w, msg->arCount);
 }
 
-/**
- * @brief Decodes a DNS message.
- *
- * @param msg The message to decode into.
- * @param buffer The buffer to read from.
- * @param size The size of the buffer.
- * @return True on success, false on failure.
- */
 bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size)
 {
-  dns_decode_header(msg, &buffer);
+  dns_reader r;
+  uint32_t qcount;
+  uint32_t i;
 
-  // parse questions
-  uint32_t qcount = msg->qdCount;
-  for (int i = 0; i < qcount; ++i)
+  if (!msg || !buffer || size < 12)
+    return false;
+
+  r.base = buffer;
+  r.p = buffer;
+  r.end = buffer + size;
+
+  if (!dns_decode_header(msg, &r))
+    return false;
+
+  qcount = msg->qdCount;
+  if (qcount > DNS_MAX_QUESTIONS)
+    return false;
+
+  for (i = 0; i < qcount; ++i)
   {
-    struct Question *q = malloc(sizeof(struct Question));
+    struct Question *q = calloc(1, sizeof(*q));
+    uint16_t qtype = 0;
+    uint16_t qclass = 0;
+    if (!q)
+      return false;
 
-    q->qName = decode_domain_name(&buffer, size);
-    q->qType = get16bits(&buffer);
-    q->qClass = get16bits(&buffer);
-
-    if (q->qName == NULL)
+    if (!decode_domain_name(&r, &q->qName) ||
+        !reader_u16(&r, &qtype) ||
+        !reader_u16(&r, &qclass))
     {
-      log_error("Failed to decode domain name!");
+      free(q->qName);
       free(q);
+      log_error("Failed to decode domain name!");
       return false;
     }
 
-    // prepend question to questions list
+    q->qType = qtype;
+    q->qClass = qclass;
     q->next = msg->questions;
     msg->questions = q;
   }
 
-  // We do not expect any resource records to parse here.
   return true;
 }
 
-/**
- * @brief Frees the memory allocated for a list of questions.
- *
- * @param qq The list of questions to free.
- */
 void free_questions(struct Question *qq)
 {
   struct Question *next;
-  while (qq) 
+  while (qq)
   {
     free(qq->qName);
     next = qq->next;
@@ -264,15 +299,10 @@ void free_questions(struct Question *qq)
   }
 }
 
-/**
- * @brief Frees the memory allocated for a list of resource records.
- *
- * @param rr The list of resource records to free.
- */
 void free_resource_records(struct ResourceRecord *rr)
 {
   struct ResourceRecord *next;
-  while (rr) 
+  while (rr)
   {
     free(rr->name);
     next = rr->next;
@@ -281,87 +311,117 @@ void free_resource_records(struct ResourceRecord *rr)
   }
 }
 
-/**
- * @brief Frees the memory allocated for a DNS message.
- *
- * @param msg The message to free.
- */
 void free_msg(struct Message *msg)
 {
+  if (!msg)
+    return;
   free_questions(msg->questions);
   free_resource_records(msg->answers);
   free_resource_records(msg->authorities);
   free_resource_records(msg->additionals);
-  memset(msg, 0, sizeof(struct Message));
+  memset(msg, 0, sizeof(*msg));
 }
 
-/**
- * @brief Encodes a list of resource records into the buffer.
- *
- * @param rr The list of resource records to encode.
- * @param buffer The buffer to write to.
- * @return 0 on success, 1 on failure.
- */
-int encode_resource_records(struct ResourceRecord *rr, uint8_t **buffer)
+static bool encode_resource_records(struct ResourceRecord *rr, dns_writer *w)
 {
-  int i;
-  while (rr) {
-    // Answer questions by attaching resource sections.
-    encode_domain_name(buffer, rr->name);
-    put16bits(buffer, rr->type);
-    put16bits(buffer, rr->class);
-    put32bits(buffer, rr->ttl);
-    put16bits(buffer, rr->rd_length);
+  while (rr)
+  {
+    int i;
+    if (!rr->name || !encode_domain_name(w, rr->name))
+      return false;
+    if (!writer_u16(w, rr->type) ||
+        !writer_u16(w, rr->class) ||
+        !writer_u32(w, rr->ttl) ||
+        !writer_u16(w, rr->rd_length))
+      return false;
 
-    switch (rr->type) {
+    switch (rr->type)
+    {
       case A_Resource_RecordType:
+        if (rr->rd_length != 4)
+          return false;
         for (i = 0; i < 4; ++i)
-          put8bits(buffer, rr->rd_data.a_record.addr[i]);
+        {
+          if (!writer_u8(w, rr->rd_data.a_record.addr[i]))
+            return false;
+        }
         break;
       case AAAA_Resource_RecordType:
+        if (rr->rd_length != 16)
+          return false;
         for (i = 0; i < 16; ++i)
-          put8bits(buffer, rr->rd_data.aaaa_record.addr[i]);
+        {
+          if (!writer_u8(w, rr->rd_data.aaaa_record.addr[i]))
+            return false;
+        }
         break;
       case TXT_Resource_RecordType:
-        put8bits(buffer, rr->rd_data.txt_record.txt_data_len);
+        if (!rr->rd_data.txt_record.txt_data)
+          return false;
+        if (!writer_u8(w, rr->rd_data.txt_record.txt_data_len))
+          return false;
         for (i = 0; i < rr->rd_data.txt_record.txt_data_len; i++)
-          put8bits(buffer, rr->rd_data.txt_record.txt_data[i]);
+        {
+          if (!writer_u8(w, (uint8_t)rr->rd_data.txt_record.txt_data[i]))
+            return false;
+        }
         break;
       default:
-        fprintf(stderr, "Unknown type %u. => Ignore resource record.\n", rr->type);
-      return 1;
+        log_error("Unknown type %u. => Ignore resource record.", rr->type);
+        return false;
     }
 
     rr = rr->next;
   }
-
-  return 0;
+  return true;
 }
 
-/**
- * @brief Encodes a DNS message.
- *
- * @param msg The message to encode.
- * @param buffer The buffer to write to.
- * @return True on success, false on failure.
- */
-bool dns_encode_msg(struct Message *msg, uint8_t **buffer)
+static bool dns_encode_into(struct Message *msg, dns_writer *w)
 {
-  dns_encode_header(msg, buffer);
+  struct Question *q;
+  if (!msg || !dns_encode_header(msg, w))
+    return false;
 
-  for (struct Question *q = msg->questions; q; q = q->next)
+  for (q = msg->questions; q; q = q->next)
   {
-    encode_domain_name(buffer, q->qName);
-    put16bits(buffer, q->qType);
-    put16bits(buffer, q->qClass);
+    if (!q->qName || !encode_domain_name(w, q->qName))
+      return false;
+    if (!writer_u16(w, q->qType) || !writer_u16(w, q->qClass))
+      return false;
   }
 
-  if (encode_resource_records(msg->answers, buffer) != 0)
+  if (!encode_resource_records(msg->answers, w))
     return false;
-  if (encode_resource_records(msg->authorities, buffer) != 0)
+  if (!encode_resource_records(msg->authorities, w))
     return false;
-  if (encode_resource_records(msg->additionals, buffer) != 0)
+  if (!encode_resource_records(msg->additionals, w))
     return false;
+  return true;
+}
 
+bool dns_encode_msg(struct Message *msg, uint8_t **buffer)
+{
+  dns_writer w;
+  if (!buffer || !*buffer)
+    return false;
+  w.p = *buffer;
+  w.end = NULL;
+  if (!dns_encode_into(msg, &w))
+    return false;
+  *buffer = w.p;
+  return true;
+}
+
+bool dns_encode_msg_n(struct Message *msg, uint8_t *buffer, size_t capacity, size_t *written)
+{
+  dns_writer w;
+  if (!buffer || capacity == 0)
+    return false;
+  w.p = buffer;
+  w.end = buffer + capacity;
+  if (!dns_encode_into(msg, &w))
+    return false;
+  if (written)
+    *written = (size_t)(w.p - buffer);
   return true;
 }
