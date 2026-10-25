@@ -22,7 +22,12 @@ void dnsserver_init(dnshost_t *config)
 {
 	/*make thread for dns server*/
 	pthread_t thread_id;
-	pthread_create(&thread_id, NULL, dnsserver_HandleIncomingConnection, (void*)config);
+	if (pthread_create(&thread_id, NULL, dnsserver_HandleIncomingConnection, (void*)config) != 0)
+	{
+		log_error("dns server thread create failed");
+		return;
+	}
+	pthread_detach(thread_id);
 }
 
 void *dnsserver_HandleIncomingConnection(void *vargp)
@@ -40,7 +45,14 @@ void *dnsserver_HandleIncomingConnection(void *vargp)
 	{
 		localdns_free(dns);
 		log_error("dns server socket error.");
-		pthread_exit(0);
+		return NULL;
+	}
+
+	if(!localdns_start_worker(dns))
+	{
+		localdns_free(dns);
+		log_error("dns server worker error.");
+		return NULL;
 	}
 
 	log_info("dns server start on %s:%d",conf->Local.ip,conf->Local.port);

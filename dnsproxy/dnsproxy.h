@@ -40,8 +40,10 @@ typedef struct
 	uint8_t sni_ip[4];
 
 	/*bind ip/port*/
-	char 	 	  listen_addr[_MaxIPAddress_];
+	char 	 	  listen_addr[_MaxDNSHost_ + 1];
 	char	 	  listen_port[_MaxPORTAddress_];
+
+	bool		  worker_started;
 
 	dnsStream_t   upstream;
 	sockshost_t	  *socks;
@@ -57,6 +59,7 @@ dnsserver_t *localdns_init_config(dnshost_t *conf);
 void localdns_free(dnsserver_t *dns);
 
 bool localdns_init_sockets(dnsserver_t *dns);
+bool localdns_start_worker(dnsserver_t *dns);
 bool localdns_pull(dnsserver_t *dns);
 
 #endif /* DNSPROXY_H_ */
