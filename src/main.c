@@ -17,6 +17,8 @@
 #include "version.h"
 #include <netdb.h>		/* getaddrinfo, getnameinfo */ /*https://rosettacode.org/wiki/DNS_query#C*/
 #include <stdbool.h>
+#include <signal.h>
+#include <string.h>
 #include "args.h"
 #include <monitor.h>
 #include "filter/filter.h"
@@ -41,7 +43,13 @@ zroxy_t prg_setting = {0};
  * */
 int main(int argc, const char **argv)
 {
+	struct sigaction ignore_pipe;
+
 	Log_init();
+	memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+	ignore_pipe.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE, &ignore_pipe, NULL);
+
 	if(arg_Init(&prg_setting,argc,argv)==false)
 	{
 		print_usage();
