@@ -47,7 +47,9 @@ Usage: zroxy [OPTION...]
   -c, --config <path>          path to config file
   -p, --port <listeners>       SNI listeners: <bind ip>:<local>@<remote>,...
   -s, --socks <spec>           upstream SOCKS5 for SNI forwarding
-  -m, --monitor <port>         monitor HTTP port
+  -m, --monitor <[ip:]port>    monitor HTTP port (default bind 127.0.0.1)
+  -k, --monitortoken <token>   bearer token required by the monitor
+  -a, --monitortimeout <sec>   incomplete monitor header timeout (1..60, default 5)
   -o, --snitimeout <sec>       SNI socket timeout in seconds
   -w, --white <path>           whitelist file path
   -d, --ldns <bind:port>       local DNS UDP listener
@@ -81,9 +83,12 @@ Usage: zroxy [OPTION...]
 
 ### Monitor Endpoint
 
-When enabled (`-m` / `MONITOR`), zroxy serves an HTTP endpoint returning JSON statistics
-(`ZroxyVersion`, connection counters, rx/tx totals, open-file count). The current monitor
-handler does not route by URL path; it responds with stats JSON for incoming HTTP requests.
+When enabled (`-m` / `MONITOR`), zroxy serves `GET /` and returns JSON statistics
+(`ZroxyVersion`, connection counters, rx/tx totals, open-file count). A bare port binds
+`127.0.0.1`. `MONITOR = 0.0.0.0:8123` (or `-m 0.0.0.0:8123`) listens on all interfaces.
+`MONITORTOKEN` (`-k`) requires `Authorization: Bearer <token>`. `MONITORTIMEOUT` (`-a`)
+is an absolute deadline, in seconds, for the client to finish the header. Later bytes do not
+extend it. Other methods, other paths, and a missing or wrong token do not receive the counters.
 
 ### DNS Proxy Notes
 

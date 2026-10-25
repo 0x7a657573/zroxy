@@ -65,6 +65,7 @@ static void free_settings(zroxy_t *cfg)
         free(cfg->socks);
     }
     free(cfg->monitorPort);
+    free(cfg->monitor_token);
     free(cfg->WhitePath);
     memset(cfg, 0, sizeof(*cfg));
 }
@@ -155,8 +156,45 @@ static void test_cli_monitor_and_sni_timeout(void)
     {
         expect_u16(*cfg.monitorPort, 8123, "monitor port value");
     }
+    expect_string(cfg.monitor_bind, "127.0.0.1", "bare monitor port binds localhost");
+    expect_int(cfg.monitor_header_timeout, 5, "default monitor header timeout");
     expect_int(cfg.snitimeout, 45, "sni timeout value");
 
+    free_settings(&cfg);
+}
+
+static void test_cli_monitor_bind_and_token(void)
+{
+    zroxy_t cfg = {0};
+    char arg0[] = "zroxy";
+    char m[] = "-m";
+    char bind[] = "10.1.2.3:8123";
+    char k[] = "-k";
+    char tok[] = "secret";
+    char a[] = "-a";
+    char to[] = "7";
+    char bad_to[] = "0";
+    char bad_hi[] = "61";
+    const char *argv[] = {arg0, m, bind, k, tok, a, to};
+    const char *bad_argv[] = {arg0, a, bad_to};
+    const char *hi_argv[] = {arg0, a, bad_hi};
+
+    reset_getopt();
+    expect_true(arg_Init(&cfg, 7, argv), "arg_Init monitor bind token timeout");
+    expect_true(cfg.monitorPort != NULL, "explicit monitor port parsed");
+    if (cfg.monitorPort)
+        expect_u16(*cfg.monitorPort, 8123, "explicit monitor port");
+    expect_string(cfg.monitor_bind, "10.1.2.3", "explicit monitor bind");
+    expect_string(cfg.monitor_token, "secret", "monitor token");
+    expect_int(cfg.monitor_header_timeout, 7, "monitor header timeout");
+    free_settings(&cfg);
+
+    reset_getopt();
+    expect_true(!arg_Init(&cfg, 3, bad_argv), "reject monitor timeout 0");
+    free_settings(&cfg);
+
+    reset_getopt();
+    expect_true(!arg_Init(&cfg, 3, hi_argv), "reject monitor timeout 61");
     free_settings(&cfg);
 }
 
@@ -482,6 +520,7 @@ int main(void)
     test_cli_listener_defaults();
     test_cli_socks_case_preserved();
     test_cli_monitor_and_sni_timeout();
+    test_cli_monitor_bind_and_token();
     test_config_value_case_preserved();
     test_config_port_key_case_insensitive();
     test_cli_socks_no_auth_cleanup_safe();

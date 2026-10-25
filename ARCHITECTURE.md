@@ -27,11 +27,11 @@ This is the layout the code uses. It is not a production-readiness statement.
 
 ## Ownership
 
-- `zroxy_t` owns the port list, the SOCKS settings, the DNS config object, the monitor port, and the whitelist path string until `main` frees that path.
+- `zroxy_t` owns the port list, the SOCKS settings, the DNS config object, the monitor port, bind address, token, and the whitelist path string until `main` frees that path. An enabled monitor, DNS listener, or SNI listener that cannot bind or start its thread makes `main` return 1. A service that was not configured is skipped.
 - The DNS server stores the config's SOCKS pointer and whitelist pointer. `localdns_free` closes the UDP socket and frees the DNS queue. It does not free the SOCKS object.
 - `socks5_connect` owns the descriptor it creates. Every failure path closes it and stores `-1`.
 - An SNI worker that fails while writing upstream closes that upstream socket and leaves the outer loop, so the later close of the same descriptor is not run. The client descriptor is closed once at the end of the handler.
-- The monitor closes the client descriptor once. If the worker cap is full, or the descriptor is outside `FD_SETSIZE`, the accept loop closes it and does not start a thread.
+- The monitor closes the client descriptor once. If the worker cap is full, or the descriptor is outside `FD_SETSIZE`, the accept loop closes it and does not start a thread. The default listen address is `127.0.0.1`. Header reads stop at 4096 bytes or at one absolute header deadline. A later byte does not move that deadline.
 - `fifo_init` destroys its mutex if the buffer allocation fails. `fifo_deinit` frees the buffer and destroys the mutex.
 - A failed whitelist reload frees the new list and keeps the list already published. Readers hold the filter mutex for the whole walk.
 
@@ -47,4 +47,4 @@ SNI and HTTP host detection only choose the upstream. After that, the original b
 
 DNS answers are synthetic A/AAAA records when the whitelist matches. Other queries are forwarded upstream. `recvfrom` errors, including `EINTR`, do not enqueue a message.
 
-The monitor writes one JSON document and closes. It does not route on the request path.
+The monitor writes one JSON document for an authorized `GET /` and closes. Other methods and paths are rejected. A configured bearer token is required before the counters are written. Connect, SOCKS handshake, and SNI relay writes use a deadline so a stalled peer releases its worker.

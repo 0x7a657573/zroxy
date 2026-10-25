@@ -106,6 +106,8 @@ static int parse_opt(int key, char *arg, void *userprm);
 bool Parse_Ports(zroxy_t *ptr,char *str);
 bool Parse_Socks(zroxy_t *ptr,char *str);
 bool Parse_Monit(zroxy_t *ptr,char *str);
+bool Parse_monitor_token(zroxy_t *ptr,char *str);
+bool Parse_monitor_timeout(zroxy_t *ptr,char *str);
 bool Parse_whitelist(zroxy_t *ptr,char *str);
 bool Parse_DNSServer(zroxy_t *ptr,char *str);
 bool Parse_DnsUpstream(zroxy_t *ptr,char *str);
@@ -131,7 +133,9 @@ static arg_option options[] =
 	{ "config", 'c' , "path to config" , required_argument, "path to config. -c /etc/zroxy.conf"},
     { "port", 'p', "sni port", required_argument, "sni port that listens.\n\t\t\t\t\t\t<bind ip>:<local port>@<remote port>\n\t\t\t\t\t\t -p 127.0.0.1:8080@80,4433@433,853..."},
 	{ "socks", 's', "socks proxy", required_argument, "set proxy for up stream. -s 127.0.0.1:9050"},
-	{ "monitor", 'm', "monitor port", required_argument, "monitor port that listens. -m 1234"},
+	{ "monitor", 'm', "monitor port", required_argument, "monitor port that listens. -m 1234 or -m 127.0.0.1:1234"},
+	{ "monitortoken", 'k', "monitor token", required_argument, "bearer token for the monitor. -k secret"},
+	{ "monitortimeout", 'a', "monitor header timeout", required_argument, "incomplete header timeout in sec. -a 5"},
 	{ "snitimeout", 'o', "set sni timeout", required_argument, "set sni timeout in sec. -o 30"},
 	{ "white", 'w' , "white list" , required_argument, "white list for host -w /etc/whitelist.txt"},
 	{ "ldns", 'd' , "local DNS server" , required_argument, "dns server that listens. -d 0.0.0.0:53"},
@@ -166,6 +170,9 @@ void print_usage(void)
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
 {
 	pgp->snitimeout = 30;
+	pgp->monitor_header_timeout = 5;
+	pgp->monitor_bind[0] = '\0';
+	pgp->monitor_token = NULL;
 	pgp->ports = NULL;
 	pgp->socks = NULL;
 	pgp->monitorPort = NULL;
@@ -238,6 +245,8 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'p': if (!Parse_Ports(setting,arg)) return -1; break;
 		case 's': if (!Parse_Socks(setting,arg)) return -1; break;
 		case 'm': if (!Parse_Monit(setting,arg)) return -1; break;
+		case 'k': if (!Parse_monitor_token(setting,arg)) return -1; break;
+		case 'a': if (!Parse_monitor_timeout(setting,arg)) return -1; break;
 		case 'w': if (!Parse_whitelist(setting,arg)) return -1; break;
 		case 'd': if (!Parse_DNSServer(setting,arg)) return -1; break;
 		case 'u': if (!Parse_DnsUpstream(setting,arg)) return -1; break;
@@ -419,9 +428,26 @@ bool Parse_whitelist(zroxy_t *ptr,char *str)
 
 bool Parse_Monit(zroxy_t *ptr,char *str)
 {
+	char *colon;
+	char *port_str = str;
+	char bind[_MaxIPAddress_];
 	uint16_t port;
 	uint16_t *slot;
-	if (!parse_u16(str, &port, 1, 65535))
+
+	if (!copy_bounded(bind, sizeof(bind), "127.0.0.1"))
+		return false;
+	colon = strrchr(str, ':');
+	if (colon)
+	{
+		*colon = '\0';
+		port_str = colon + 1;
+		if (!validate_ip(str) || !copy_bounded(bind, sizeof(bind), str))
+		{
+			log_error("invalid monitor bind address");
+			return false;
+		}
+	}
+	if (!parse_u16(port_str, &port, 1, 65535))
 		return false;
 	slot = (uint16_t*)malloc(sizeof(uint16_t));
 	if (!slot)
@@ -429,6 +455,26 @@ bool Parse_Monit(zroxy_t *ptr,char *str)
 	*slot = port;
 	free(ptr->monitorPort);
 	ptr->monitorPort = slot;
+	memcpy(ptr->monitor_bind, bind, sizeof(bind));
+	return true;
+}
+
+bool Parse_monitor_token(zroxy_t *ptr,char *str)
+{
+	char *token = dup_bounded(str, 256);
+	if (!token)
+		return false;
+	free(ptr->monitor_token);
+	ptr->monitor_token = token;
+	return true;
+}
+
+bool Parse_monitor_timeout(zroxy_t *ptr,char *str)
+{
+	int timeout;
+	if (!parse_i32_range(str, &timeout, 1, 60))
+		return false;
+	ptr->monitor_header_timeout = timeout;
 	return true;
 }
 

@@ -19,6 +19,9 @@ typedef struct
 	lport_t 	*ports;
 	sockshost_t *socks;
 	uint16_t	*monitorPort;
+	char		monitor_bind[_MaxIPAddress_];
+	char		*monitor_token;
+	int			monitor_header_timeout;
 	char 		*WhitePath;
 	dnshost_t	*dnsserver;
 	int			snitimeout;
