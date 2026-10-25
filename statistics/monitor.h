@@ -17,6 +17,8 @@ typedef struct
 	uint16_t Port;
 	statistics_t *state;
 	pthread_mutex_t state_lock; /* guards the state list head only */
+	char *token; /* optional bearer secret; NULL disables authentication */
+	int header_timeout; /* seconds to wait for a complete header */
 }mon_t;
 
 typedef struct
@@ -35,7 +37,7 @@ typedef struct
 	uint8_t  tm_sec;
 }UpTime_t;
 
-mon_t *monitor_Init(uint16_t *Port);
+mon_t *monitor_Init(uint16_t port, const char *bind_ip, const char *token, int header_timeout_sec);
 statistics_t *monitor_AddNewStat(mon_t *self,char *name);
 
 #endif /* MONITOR_H_ */

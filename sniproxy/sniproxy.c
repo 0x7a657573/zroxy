@@ -39,6 +39,7 @@ bool SniProxy_Start(SniServer_t *Sni)
 	server_t *ptr = malloc(sizeof(server_t));
 	if (!ptr)
 	{
+		log_error("sni listener allocation failed");
 		close(sockfd);
 		return false;
 	}
@@ -46,6 +47,7 @@ bool SniProxy_Start(SniServer_t *Sni)
 	ptr->sockfd = sockfd;
 	if (pthread_create(&thread_id, NULL, SniProxy_HandleIncomingConnection, (void*)ptr) != 0)
 	{
+		log_error("sni listener thread create failed");
 		close(sockfd);
 		free(ptr);
 		return false;
