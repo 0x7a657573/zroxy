@@ -19,6 +19,34 @@
 #include "net.h"
 #include <stdint.h>
 #include "net_io.h"
+#include <errno.h>
+#include <sys/select.h>
+
+#define SNI_MAX_WORKERS 1024
+
+static pthread_mutex_t sni_worker_mu = PTHREAD_MUTEX_INITIALIZER;
+static int sni_workers = 0;
+
+bool sni_worker_acquire(void)
+{
+	bool ok = false;
+	pthread_mutex_lock(&sni_worker_mu);
+	if (sni_workers < SNI_MAX_WORKERS)
+	{
+		sni_workers++;
+		ok = true;
+	}
+	pthread_mutex_unlock(&sni_worker_mu);
+	return ok;
+}
+
+void sni_worker_release(void)
+{
+	pthread_mutex_lock(&sni_worker_mu);
+	if (sni_workers > 0)
+		sni_workers--;
+	pthread_mutex_unlock(&sni_worker_mu);
+}
 
 void *SniClientHandler(void *arg)
 {
@@ -39,12 +67,17 @@ void *SniClientHandler(void *arg)
 	while(1)
 	{
 
+		if (client->connid < 0 || client->connid >= FD_SETSIZE)
+			break;
+
 		FD_ZERO(&rfds);
 		tv.tv_sec = 5;
 		tv.tv_usec = 0;
 		FD_SET(client->connid,&rfds);
-		if (select(FD_SETSIZE, &rfds, NULL, NULL, &tv) < 0)	/*wait for socket data ready*/
+		if (select(client->connid + 1, &rfds, NULL, NULL, &tv) < 0)	/*wait for socket data ready*/
 		{
+			if (errno == EINTR)
+				continue;
 			log_error("Err in select");
 			break;
 		}
@@ -57,13 +90,17 @@ void *SniClientHandler(void *arg)
 		}
 
 		int newData = read(client->connid, &buffer[Windex], sizeof(buffer) - Windex);/* read length of message */
+		if (newData < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+			continue;
 		if (newData <= 0)
 		{
 			log_trace("client %i disconnect %i",client->connid,newData);
 			break;
 		}
 
-		Windex += newData;
+		if ((uint32_t)newData > sizeof(buffer) - Windex)
+			break;
+		Windex += (uint32_t)newData;
 		if(Windex>=sizeof(buffer))
 		{
 			log_error("Host Buffer OverFlow");
@@ -86,7 +123,7 @@ void *SniClientHandler(void *arg)
 			}
 
 			log_trace("SNI start Host { %s } ",HostName);
-			int sockssocket = 0;
+			int sockssocket = -1;
 			if(socks)	/*Set Connect to socks*/
 			{
 				if(!socks5_connect(&sockssocket,socks,HostName,xport.remote_port,false))
@@ -118,6 +155,8 @@ void *SniClientHandler(void *arg)
 				int max_fd = (sockssocket > client->connid) ? sockssocket : client->connid;
 				if (select(max_fd + 1, &rfds, NULL, NULL, &tv) < 0)
 				{
+					if (errno == EINTR)
+						continue;
 					log_error("SNI error in select");
 					break;
 				}
@@ -125,14 +164,20 @@ void *SniClientHandler(void *arg)
 				if( FD_ISSET( sockssocket, &rfds ) )
 				{
 					/* data coming in */
-					if((n=read(sockssocket,buffer,sizeof(buffer)))<1) break;
+					if((n=read(sockssocket,buffer,sizeof(buffer)))<0 &&
+					   (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+						continue;
+					if(n<1) break;
 					if(!net_write_all(client->connid,buffer,(size_t)n)) break;
 					TotalRx += n;
 				}
 				else if(FD_ISSET( client->connid, &rfds ) )
 				{
 					/* data going out */
-					if((n=read(client->connid,buffer,sizeof(buffer)))<1) break;
+					if((n=read(client->connid,buffer,sizeof(buffer)))<0 &&
+					   (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+						continue;
+					if(n<1) break;
 					if(!net_write_all(sockssocket,buffer,(size_t)n)) break;
 					TotalTx += n;
 				}
@@ -145,7 +190,8 @@ void *SniClientHandler(void *arg)
 			}
 			
 			/*try close upstream socket*/
-			close(sockssocket);
+			if (sockssocket >= 0)
+				close(sockssocket);
 			break;
 		}
 	}
@@ -158,7 +204,9 @@ void *SniClientHandler(void *arg)
 	}
 
 	/* close socket and clean up */
-	close(client->connid);
+	if (client->connid >= 0)
+		close(client->connid);
+	sni_worker_release();
 	free(client);
-	pthread_exit(0);
+	return NULL;
 }
