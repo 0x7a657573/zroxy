@@ -2,3 +2,4 @@
 build
 /Debug/
 .cache
+HARDENING_AUDIT.md
