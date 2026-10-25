@@ -16,29 +16,54 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  **********************************************************************/
 #include <fifo.h>
+#include <stdint.h>
 #include <string.h>
 
 
 bool fifo_init(fifo_t *self,uint16_t MessageSize,uint16_t ItemNumber)
 {
-	if(!self)
+	size_t bytes;
+
+	if(!self || MessageSize == 0 || ItemNumber == 0)
 		return false;
-		
+
+	memset(self, 0, sizeof(*self));
 	if(fifo_CreateMutex(self->Mutex_Id)!=0)
 		return false;
 
+	if((size_t)MessageSize > SIZE_MAX / (size_t)ItemNumber)
+	{
+		pthread_mutex_destroy(&self->Mutex_Id);
+		return false;
+	}
+	bytes = (size_t)MessageSize * (size_t)ItemNumber;
+
 	self->MessageSize = MessageSize;
 	self->MessageItem = ItemNumber;
-	self->Buffer = fifo_maloc(MessageSize*ItemNumber);
+	self->Buffer = fifo_maloc(bytes);
 	self->wr_index = 0;
 	self->rd_index = 0;
 	self->counter = 0;
 	
 	if(self->Buffer==0)
 	{
+		pthread_mutex_destroy(&self->Mutex_Id);
 		return false;
 	}
 	return true;
+}
+
+void fifo_deinit(fifo_t *self)
+{
+	if(self==NULL)
+		return;
+
+	if(self->Buffer)
+	{
+		fifo_free(self->Buffer);
+		self->Buffer = NULL;
+	}
+	pthread_mutex_destroy(&self->Mutex_Id);
 }
 
 void fifo_Remove(fifo_t *self)
@@ -46,10 +71,8 @@ void fifo_Remove(fifo_t *self)
 	if(self==NULL)
 		return;
 
-	if(self->Buffer)
-		fifo_free(self->Buffer);
-	if(self)
-		fifo_free(self);
+	fifo_deinit(self);
+	fifo_free(self);
 }
 
 bool fifo_incert(fifo_t *self,void *data)

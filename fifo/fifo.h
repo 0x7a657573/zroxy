@@ -34,11 +34,12 @@ typedef struct
 
 
 bool fifo_init(fifo_t *self,uint16_t MessageSize,uint16_t ItemNumber);
+void fifo_deinit(fifo_t *self);
 void fifo_Remove(fifo_t *self);
 bool fifo_incert(fifo_t *self,void *data);
 bool fifo_Read(fifo_t *self,void *data);
-void MailBox_flush(fifo_t *self);
-uint16_t MailBox_UnreadMessage(fifo_t *self);
-uint16_t MailBox_SpacesAvailable(fifo_t *self);
+void fifo_flush(fifo_t *self);
+uint16_t fifo_UnreadMessage(fifo_t *self);
+uint16_t fifo_SpacesAvailable(fifo_t *self);
 
 #endif /* HARDFIFO_H */
