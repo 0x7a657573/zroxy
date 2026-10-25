@@ -241,6 +241,239 @@ static void test_config_port_key_case_insensitive(void)
     free_settings(&cfg);
 }
 
+static void test_cli_socks_no_auth_cleanup_safe(void)
+{
+    zroxy_t cfg = {0};
+    char arg0[] = "zroxy";
+    char arg1[] = "-s";
+    char arg2[] = "127.0.0.1:9050";
+    const char *argv[] = {arg0, arg1, arg2};
+
+    reset_getopt();
+    expect_true(arg_Init(&cfg, 3, argv), "arg_Init socks no auth");
+    expect_true(cfg.socks != NULL, "socks no auth allocated");
+    if (cfg.socks)
+    {
+        expect_string(cfg.socks->host, "127.0.0.1", "socks no auth host");
+        expect_u16(cfg.socks->port, 9050, "socks no auth port");
+        expect_true(cfg.socks->user == NULL, "socks no auth user is NULL");
+        expect_true(cfg.socks->pass == NULL, "socks no auth pass is NULL");
+    }
+
+    free_settings(&cfg);
+}
+
+static void test_cli_socks_user_no_pass_cleanup_safe(void)
+{
+    zroxy_t cfg = {0};
+    char arg0[] = "zroxy";
+    char arg1[] = "-s";
+    char arg2[] = "myuser@127.0.0.1:9050";
+    const char *argv[] = {arg0, arg1, arg2};
+
+    reset_getopt();
+    expect_true(arg_Init(&cfg, 3, argv), "arg_Init socks user no pass");
+    expect_true(cfg.socks != NULL, "socks user no pass allocated");
+    if (cfg.socks)
+    {
+        expect_string(cfg.socks->user, "myuser", "socks user no pass user");
+        expect_true(cfg.socks->pass == NULL, "socks user no pass is NULL");
+        expect_string(cfg.socks->host, "127.0.0.1", "socks user no pass host");
+    }
+
+    free_settings(&cfg);
+}
+
+static void test_config_dns_only_cleanup_safe(void)
+{
+    zroxy_t cfg = {0};
+    char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+    int fd = mkstemp(template_path);
+    const char *config_data =
+        "LDNS = 127.0.0.1:5353\n"
+        "DNS = 8.8.8.8\n";
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return;
+    }
+
+    write_all_or_fail(fd, config_data);
+    close(fd);
+
+    expect_true(Parse_config(&cfg, template_path), "Parse_config dns only");
+    expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
+    if (cfg.dnsserver)
+    {
+        expect_true(cfg.dnsserver->Socks == NULL, "dns only Socks is NULL");
+        expect_true(cfg.dnsserver->whitelist == NULL, "dns only whitelist is NULL");
+    }
+
+    unlink(template_path);
+    free_settings(&cfg);
+}
+
+static void test_config_dns_with_dsocks_no_auth_cleanup_safe(void)
+{
+    zroxy_t cfg = {0};
+    char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+    int fd = mkstemp(template_path);
+    const char *config_data =
+        "LDNS = 127.0.0.1:5353\n"
+        "DNS = 8.8.8.8\n"
+        "DSOCKS = 127.0.0.1:9050\n";
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return;
+    }
+
+    write_all_or_fail(fd, config_data);
+    close(fd);
+
+    expect_true(Parse_config(&cfg, template_path), "Parse_config dns with dsocks no auth");
+    expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
+    if (cfg.dnsserver)
+    {
+        expect_true(cfg.dnsserver->Socks != NULL, "dns dsocks allocated");
+        if (cfg.dnsserver->Socks)
+        {
+            expect_string(cfg.dnsserver->Socks->host, "127.0.0.1", "dns dsocks host");
+            expect_u16(cfg.dnsserver->Socks->port, 9050, "dns dsocks port");
+            expect_true(cfg.dnsserver->Socks->user == NULL, "dns dsocks user is NULL");
+            expect_true(cfg.dnsserver->Socks->pass == NULL, "dns dsocks pass is NULL");
+        }
+        expect_true(cfg.dnsserver->whitelist == NULL, "dns dsocks whitelist is NULL");
+    }
+
+    unlink(template_path);
+    free_settings(&cfg);
+}
+
+static void test_config_dns_with_snip_cleanup_safe(void)
+{
+    zroxy_t cfg = {0};
+    char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+    int fd = mkstemp(template_path);
+    const char *config_data =
+        "LDNS = 127.0.0.1:5353\n"
+        "DNS = 8.8.8.8\n"
+        "SNIP = 127.0.0.1\n";
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return;
+    }
+
+    write_all_or_fail(fd, config_data);
+    close(fd);
+
+    expect_true(Parse_config(&cfg, template_path), "Parse_config dns with snip");
+    expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
+    if (cfg.dnsserver)
+    {
+        expect_true(cfg.dnsserver->Socks == NULL, "dns with snip Socks is NULL");
+        expect_true(cfg.dnsserver->whitelist == NULL, "dns with snip whitelist is NULL");
+    }
+
+    unlink(template_path);
+    free_settings(&cfg);
+}
+
+static void test_cli_rejects_overlong_bind_and_bad_port(void)
+{
+    zroxy_t cfg = {0};
+    char arg0[] = "zroxy";
+    char arg1[] = "-p";
+    char arg2[] = "this-name-is-not-an-ipv4-address:8080@80";
+    const char *argv[] = {arg0, arg1, arg2};
+
+    reset_getopt();
+    expect_true(!arg_Init(&cfg, 3, argv), "reject overlong listener token");
+    free_settings(&cfg);
+
+    {
+        char bad0[] = "zroxy";
+        char bad1[] = "-p";
+        char bad2[] = "127.0.0.1:80abc@80";
+        const char *bad_argv[] = {bad0, bad1, bad2};
+        reset_getopt();
+        expect_true(!arg_Init(&cfg, 3, bad_argv), "reject non-numeric listener port");
+        free_settings(&cfg);
+    }
+}
+
+static void test_cli_accepts_long_dns_hostname(void)
+{
+    zroxy_t cfg = {0};
+    char arg0[] = "zroxy";
+    char arg1[] = "-u";
+    char arg2[] = "long.dns.example.test";
+    const char *argv[] = {arg0, arg1, arg2};
+
+    reset_getopt();
+    expect_true(arg_Init(&cfg, 3, argv), "arg_Init long DNS hostname");
+    expect_true(cfg.dnsserver != NULL, "long DNS hostname allocated");
+    if (cfg.dnsserver)
+        expect_string(cfg.dnsserver->Remote.ip, "long.dns.example.test", "long DNS hostname stored");
+    free_settings(&cfg);
+}
+
+static void test_config_rejects_blank_value(void)
+{
+    zroxy_t cfg = {0};
+    char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+    int fd = mkstemp(template_path);
+    const char *config_data = "PORT =\n";
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return;
+    }
+
+    write_all_or_fail(fd, config_data);
+    close(fd);
+    expect_true(!Parse_config(&cfg, template_path), "reject blank config value");
+    unlink(template_path);
+    free_settings(&cfg);
+}
+
+static void test_config_minimal_cleanup_safe(void)
+{
+    zroxy_t cfg = {0};
+    char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+    int fd = mkstemp(template_path);
+    const char *config_data = "PORT = 8080\n";
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return;
+    }
+
+    write_all_or_fail(fd, config_data);
+    close(fd);
+
+    expect_true(Parse_config(&cfg, template_path), "Parse_config minimal");
+    expect_true(cfg.ports != NULL, "config port parsed");
+    expect_true(cfg.socks == NULL, "minimal socks is NULL");
+    expect_true(cfg.dnsserver == NULL, "minimal dnsserver is NULL");
+    expect_true(cfg.WhitePath == NULL, "minimal WhitePath is NULL");
+    expect_true(cfg.monitorPort == NULL, "minimal monitorPort is NULL");
+
+    unlink(template_path);
+    free_settings(&cfg);
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -251,6 +484,15 @@ int main(void)
     test_cli_monitor_and_sni_timeout();
     test_config_value_case_preserved();
     test_config_port_key_case_insensitive();
+    test_cli_socks_no_auth_cleanup_safe();
+    test_cli_socks_user_no_pass_cleanup_safe();
+    test_config_dns_only_cleanup_safe();
+    test_config_dns_with_dsocks_no_auth_cleanup_safe();
+    test_config_dns_with_snip_cleanup_safe();
+    test_cli_rejects_overlong_bind_and_bad_port();
+    test_cli_accepts_long_dns_hostname();
+    test_config_rejects_blank_value();
+    test_config_minimal_cleanup_safe();
 
     return failures == 0 ? 0 : 1;
 }
