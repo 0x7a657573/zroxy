@@ -146,7 +146,7 @@ bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd)
 	  log_error("socket creation on port %d failed.",Port);
 	  return false;
 	}
-	bzero((void*)&servaddr, sizeof(servaddr));
+	memset(&servaddr, 0, sizeof(servaddr));
 
 	// assign IP, PORT
 	servaddr.sin_family = AF_INET;
@@ -173,6 +173,8 @@ bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd)
 	if ((listen(*sockfd, 10)) != 0)
 	{
 	   log_error("Listen failed on port %d",Port);
+	   close(*sockfd);
+	   *sockfd = -1;
 	   return false;
 	}
 
