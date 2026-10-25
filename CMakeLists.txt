@@ -62,7 +62,7 @@ target_include_directories(${EXECUTABLE_NAME}
 )
 
 TARGET_LINK_LIBRARIES(${EXECUTABLE_NAME}
-        pthread
+        Threads::Threads
 )
 
 INSTALL(TARGETS ${EXECUTABLE_NAME} RUNTIME DESTINATION bin)
