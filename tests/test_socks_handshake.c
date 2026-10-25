@@ -97,7 +97,13 @@ enum scenario_mode
 {
     SCENARIO_NO_AUTH = 1,
     SCENARIO_USERPASS = 2,
-    SCENARIO_CLOSE_MID_REPLY = 3
+    SCENARIO_CLOSE_MID_REPLY = 3,
+    SCENARIO_AUTH_WITHOUT_PASSWORD = 4,
+    SCENARIO_BAD_VERSION = 5,
+    SCENARIO_BAD_METHOD = 6,
+    SCENARIO_TRUNCATED_METHOD = 7,
+    SCENARIO_BAD_ATYP = 8,
+    SCENARIO_AUTH_REJECTED = 9
 };
 
 typedef struct
@@ -250,6 +256,103 @@ static void *server_thread(void *arg)
         }
         sc->server_ok = true;
     }
+    else if (sc->mode == SCENARIO_AUTH_WITHOUT_PASSWORD)
+    {
+        const uint8_t method_reply[2] = {0x05, 0x02};
+        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+        {
+            sc->stage = -16;
+            close(client_fd);
+            return NULL;
+        }
+        sc->server_ok = true;
+    }
+    else if (sc->mode == SCENARIO_BAD_VERSION)
+    {
+        const uint8_t method_reply[2] = {0x04, 0x00};
+        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+        {
+            sc->stage = -17;
+            close(client_fd);
+            return NULL;
+        }
+        sc->server_ok = true;
+    }
+    else if (sc->mode == SCENARIO_BAD_METHOD)
+    {
+        const uint8_t method_reply[2] = {0x05, 0xFF};
+        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+        {
+            sc->stage = -18;
+            close(client_fd);
+            return NULL;
+        }
+        sc->server_ok = true;
+    }
+    else if (sc->mode == SCENARIO_TRUNCATED_METHOD)
+    {
+        const uint8_t method_reply[1] = {0x05};
+        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+        {
+            sc->stage = -19;
+            close(client_fd);
+            return NULL;
+        }
+        sc->server_ok = true;
+    }
+    else if (sc->mode == SCENARIO_BAD_ATYP)
+    {
+        const uint8_t method_reply[2] = {0x05, 0x00};
+        const uint8_t bad_reply[4] = {0x05, 0x00, 0x00, 0x02};
+        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+        {
+            sc->stage = -20;
+            close(client_fd);
+            return NULL;
+        }
+        if (!write_all_fd(client_fd, bad_reply, sizeof(bad_reply)))
+        {
+            sc->stage = -21;
+            close(client_fd);
+            return NULL;
+        }
+        sc->server_ok = true;
+    }
+    else if (sc->mode == SCENARIO_AUTH_REJECTED)
+    {
+        const uint8_t method_reply[2] = {0x05, 0x02};
+        const uint8_t expected_auth[] = {
+            0x01, 0x04, 'u', 's', 'e', 'r',
+            0x04, 'p', 'a', 's', 's'
+        };
+        const uint8_t auth_reply[2] = {0x01, 0x01};
+        uint8_t auth_buf[sizeof(expected_auth)];
+        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+        {
+            sc->stage = -22;
+            close(client_fd);
+            return NULL;
+        }
+        if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)))
+        {
+            sc->stage = -23;
+            close(client_fd);
+            return NULL;
+        }
+        if (memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
+        {
+            sc->stage = -24;
+            close(client_fd);
+            return NULL;
+        }
+        if (!write_all_fd(client_fd, auth_reply, sizeof(auth_reply)))
+        {
+            sc->stage = -25;
+            close(client_fd);
+            return NULL;
+        }
+        sc->server_ok = true;
+    }
 
     close(client_fd);
     return NULL;
@@ -348,6 +451,49 @@ static void test_userpass_split_reply_success(void)
     expect_true(ok, "user/pass split reply handshake success");
 }
 
+static void test_auth_without_password_fails(void)
+{
+    sockshost_t socks = {0};
+    bool server_ok = false;
+    int stage = 0;
+    socks.user = "only-user";
+    socks.pass = NULL;
+    bool ok = run_scenario(SCENARIO_AUTH_WITHOUT_PASSWORD, &socks, "1.2.3.4", 443, &server_ok, &stage);
+    (void)stage;
+    expect_true(server_ok, "missing password server saw the greeting");
+    expect_false(ok, "missing password is rejected");
+}
+
+static void test_malformed_replies_fail(void)
+{
+    sockshost_t socks = {0};
+    bool server_ok = false;
+    int stage = 0;
+    bool ok;
+
+    ok = run_scenario(SCENARIO_BAD_VERSION, &socks, "1.2.3.4", 443, &server_ok, &stage);
+    expect_true(server_ok, "bad version server wrote the reply");
+    expect_false(ok, "SOCKS version 4 is rejected");
+
+    ok = run_scenario(SCENARIO_BAD_METHOD, &socks, "1.2.3.4", 443, &server_ok, &stage);
+    expect_true(server_ok, "bad method server wrote the reply");
+    expect_false(ok, "SOCKS method 0xFF is rejected");
+
+    ok = run_scenario(SCENARIO_TRUNCATED_METHOD, &socks, "1.2.3.4", 443, &server_ok, &stage);
+    expect_true(server_ok, "truncated method server wrote the byte");
+    expect_false(ok, "truncated SOCKS method reply fails");
+
+    ok = run_scenario(SCENARIO_BAD_ATYP, &socks, "1.2.3.4", 443, &server_ok, &stage);
+    expect_true(server_ok, "bad atyp server wrote the reply");
+    expect_false(ok, "SOCKS address type 0x02 is rejected");
+
+    socks.user = "user";
+    socks.pass = "pass";
+    ok = run_scenario(SCENARIO_AUTH_REJECTED, &socks, "1.2.3.4", 443, &server_ok, &stage);
+    expect_true(server_ok, "auth reject server saw the credentials");
+    expect_false(ok, "SOCKS authentication failure is rejected");
+}
+
 static void test_close_mid_reply_fails(void)
 {
     sockshost_t socks = {0};
@@ -382,6 +528,8 @@ int main(void)
     test_no_auth_split_reply_success();
     test_userpass_split_reply_success();
     test_close_mid_reply_fails();
+    test_auth_without_password_fails();
+    test_malformed_replies_fail();
 
     return failures == 0 ? 0 : 1;
 }
