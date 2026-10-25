@@ -218,4 +218,51 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME dnsproxy_tcp_io COMMAND test_dnsproxy_tcp_io)
+
+    add_executable(test_io_limits
+        tests/test_io_limits.c
+        network/net_io.c
+        network/net.c
+        network/socks/socks.c
+        dnsproxy/dnsproxy.c
+        dnsproxy/dns.c
+        fifo/fifo.c
+        sniproxy/sniclient.c
+        sniproxy/filter/filter.c
+        statistics/statistics.c
+        log/log.c
+    )
+
+    target_include_directories(test_io_limits
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/log
+            ${PROJECT_SOURCE_DIR}/dnsproxy
+            ${PROJECT_SOURCE_DIR}/fifo
+            ${PROJECT_SOURCE_DIR}/network
+            ${PROJECT_SOURCE_DIR}/network/socks
+            ${PROJECT_SOURCE_DIR}/sniproxy
+            ${PROJECT_SOURCE_DIR}/statistics
+    )
+
+    target_link_libraries(test_io_limits
+        PRIVATE
+            Threads::Threads
+    )
+
+    add_test(NAME io_limits COMMAND test_io_limits)
+    set_tests_properties(io_limits PROPERTIES TIMEOUT 60)
+
+    add_executable(test_process
+        tests/test_process.c
+    )
+
+    target_compile_definitions(test_process
+        PRIVATE
+            "ZROXY_BIN=\"${CMAKE_BINARY_DIR}/zroxy\""
+    )
+
+    add_dependencies(test_process zroxy)
+    add_test(NAME process_limits COMMAND test_process)
+    set_tests_properties(process_limits PROPERTIES TIMEOUT 60)
 endif()
