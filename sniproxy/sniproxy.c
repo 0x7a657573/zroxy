@@ -18,6 +18,7 @@
 #include "net.h"
 #include <arpa/inet.h>
 #include <errno.h>
+#include <sys/select.h>
 
 void *SniProxy_HandleIncomingConnection(void *vargp);
 
@@ -36,10 +37,20 @@ bool SniProxy_Start(SniServer_t *Sni)
 
 	pthread_t thread_id;
 	server_t *ptr = malloc(sizeof(server_t));
+	if (!ptr)
+	{
+		close(sockfd);
+		return false;
+	}
 	ptr->SniConfig = *Sni;
 	ptr->sockfd = sockfd;
-	pthread_create(&thread_id, NULL, SniProxy_HandleIncomingConnection, (void*)ptr);
-	//pthread_join(thread_id, NULL);
+	if (pthread_create(&thread_id, NULL, SniProxy_HandleIncomingConnection, (void*)ptr) != 0)
+	{
+		close(sockfd);
+		free(ptr);
+		return false;
+	}
+	pthread_detach(thread_id);
 
 	return true;
 }
@@ -58,18 +69,28 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 	sniclient_t *client;
 	while(1)
 	{
-		client = (sniclient_t *)malloc(sizeof(sniclient_t));
+		client = (sniclient_t *)calloc(1, sizeof(sniclient_t));
 		if (!client)
 		{
 			log_error("malloc failed for sniclient_t");
 			continue;
 		}
 		client->SniConfig = sniconf;
+		client->addr_len = sizeof(client->cli);
 		client->connid = accept(sockfd, (struct sockaddr*)&client->cli, &client->addr_len);
 		if (client->connid < 0)
 		{
+			if (errno != EINTR)
+				log_error("server accept() %i: %s",errno,strerror(errno));
 			free(client);
-			log_error("server accept() %i: %s",errno,strerror(errno));
+			continue;
+		}
+
+		if (client->connid >= FD_SETSIZE || !sni_worker_acquire())
+		{
+			log_error("refusing SNI connection");
+			close(client->connid);
+			free(client);
 			continue;
 		}
 
@@ -78,10 +99,15 @@ void *SniProxy_HandleIncomingConnection(void *vargp)
 
 		//log_info("incoming connection %i",client->connid);
 		pthread_t thread_id;
-		if(pthread_create(&thread_id, NULL, SniClientHandler, (void*)client))
+		if(pthread_create(&thread_id, NULL, SniClientHandler, (void*)client) != 0)
 		{
 			log_error("can not create thread for new client");
+			if (sniconf.sta)
+				state_abandon(sniconf.sta);
+			sni_worker_release();
+			close(client->connid);
 			free(client);
+			continue;
 		}
 		pthread_detach(thread_id);
 	}

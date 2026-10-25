@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <netinet/in.h>
+#include "sniproxy.h"
 
 typedef struct
 {

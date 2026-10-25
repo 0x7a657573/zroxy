@@ -9,6 +9,7 @@
 #define SNIPROXY_H_
 #include <stdint.h>
 #include <stdbool.h>
+#include <config.h>
 #include <statistics.h>
 #include <filter/filter.h>
 #include <socks.h>
@@ -41,6 +42,8 @@ typedef struct
 
 
 bool SniProxy_Start(SniServer_t *Sni);
+bool sni_worker_acquire(void);
+void sni_worker_release(void);
 
 
 
