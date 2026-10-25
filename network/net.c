@@ -194,6 +194,13 @@ bool net_GetHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
 	return false;
 }
 
+static bool tls_need(size_t pos, size_t n, size_t limit)
+{
+	if (n > limit || pos > limit - n)
+		return false;
+	return true;
+}
+
 bool net_GetHttpsHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
 {
     /* 1   TLS_HANDSHAKE_CONTENT_TYPE
@@ -213,22 +220,28 @@ bool net_GetHttpsHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostN
      * ?   Compression Methods
      * 2   Extensions length
      * ---------------
-     * 2   Extension data length
      * 2   Extension type (0x0000 for server_name)
+     * 2   Extension data length
      * ---------------
      * 2   server_name list length
      * 1   server_name type (0)
      * 2   server_name length
      * ?   server_name
      */
-    const int TLS_HEADER_LEN = 5;
-    const int FIXED_LENGTH_RECORDS = 38;
-    const int TLS_HANDSHAKE_CONTENT_TYPE = 0x16;
-    const int TLS_HANDSHAKE_TYPE_CLIENT_HELLO = 0x01;
+    const size_t TLS_HEADER_LEN = 5;
+    const size_t FIXED_LENGTH_RECORDS = 38;
+    const uint8_t TLS_HANDSHAKE_CONTENT_TYPE = 0x16;
+    const uint8_t TLS_HANDSHAKE_TYPE_CLIENT_HELLO = 0x01;
     const uint8_t *data = buf;
+    size_t pos = 0;
+    size_t length = len;
+    size_t record_len;
+    size_t record_end;
+    size_t extensions_end;
+
+    if (!buf || !HostName || MaxHostName == 0)
+        return false;
     HostName[0] = '\0';
-    int pos = 0;
-    int length = len;
 
     if (length < TLS_HEADER_LEN + FIXED_LENGTH_RECORDS)
     {
@@ -251,133 +264,152 @@ bool net_GetHttpsHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostN
         return false;
     }
 
-    int record_len = (data[3] << 8) + data[4] + TLS_HEADER_LEN;
-    if (length < record_len)
+    record_len = ((size_t)data[3] << 8) + data[4];
+    if (record_len < FIXED_LENGTH_RECORDS || record_len > length - TLS_HEADER_LEN)
     {
     	log_error("Get HTTPS Host: not enough data");
     	return false;
     }
+    record_end = TLS_HEADER_LEN + record_len;
     if (data[TLS_HEADER_LEN] != TLS_HANDSHAKE_TYPE_CLIENT_HELLO)
     {
     	log_error("HTTPS Host: invalid handshake type");
         return false;
     }
-    pos += TLS_HEADER_LEN + FIXED_LENGTH_RECORDS;
+    pos = TLS_HEADER_LEN + FIXED_LENGTH_RECORDS;
 
-    // skip session ID
-    if (pos + 1 > length || pos + 1 + data[pos] > length)
+    if (!tls_need(pos, 1, record_end))
+    	return false;
+    if (!tls_need(pos + 1, data[pos], record_end))
     {
     	log_error("Get HTTPS Host: not enough data");
     	return false;
     }
-    pos += 1 + data[pos];
-    // skip cipher suites
-    if (pos + 2 > length || pos + 2 + (data[pos] << 8) + data[pos+1] > length)
+    pos += 1u + data[pos];
+
+    if (!tls_need(pos, 2, record_end))
+    	return false;
+    {
+    	size_t suite_len = ((size_t)data[pos] << 8) + data[pos + 1];
+    	if ((suite_len % 2u) != 0 || !tls_need(pos + 2, suite_len, record_end))
+    	{
+    		log_error("Get HTTPS Host: not enough data");
+    		return false;
+    	}
+    	pos += 2u + suite_len;
+    }
+
+    if (!tls_need(pos, 1, record_end) || !tls_need(pos + 1, data[pos], record_end))
     {
     	log_error("Get HTTPS Host: not enough data");
     	return false;
     }
-    pos += 2 + (data[pos] << 8) + data[pos+1];
-    // skip compression methods
-    if (pos + 1 > length || pos + 1 + data[pos] > length)
-    {
-    	log_error("Get HTTPS Host: not enough data");
-    	return false;
-    }
-    pos += 1 + data[pos];
-    // skip extension length
-    if (pos + 2 > length)
-    {
+    pos += 1u + data[pos];
+
+    if (!tls_need(pos, 2, record_end))
        return false;
-    }
-    pos += 2;
-
-        // parse extension data
-    while (1)
     {
-       if (pos + 4 > record_len)
-       {
-    	   log_error("buffer more than one record, SNI still not found");
-          return false;
-       }
-       if (pos + 4 > length)
+    	size_t ext_total = ((size_t)data[pos] << 8) + data[pos + 1];
+    	pos += 2;
+    	if (!tls_need(pos, ext_total, record_end))
+    		return false;
+    	extensions_end = pos + ext_total;
+    }
+
+    while (pos + 4 <= extensions_end)
+    {
+       size_t ext_data_len;
+       size_t ext_end;
+       if (!tls_need(pos, 4, extensions_end))
+    	   return false;
+       ext_data_len = ((size_t)data[pos + 2] << 8) + data[pos + 3];
+       if (!tls_need(pos + 4, ext_data_len, extensions_end))
        {
     	   log_error("Get HTTPS Host: not enough data");
     	   return false;
        }
-       int ext_data_len = (data[pos+2] << 8) + data[pos+3];
-       if (data[pos] == 0 && data[pos+1] == 0)
+       ext_end = pos + 4 + ext_data_len;
+       if (data[pos] == 0 && data[pos + 1] == 0)
        {
-          // server_name extension type
+          size_t name_pos;
+          size_t list_len;
+          size_t server_name_len;
           pos += 4;
-          if (pos + 5 > length)
+          if (!tls_need(pos, 5, ext_end))
           {
         	 log_error("server_name list header");
              return false;
           }
-
-          int server_name_len = (data[pos+3] << 8) + data[pos+4];
-          if (pos + 5 + server_name_len > length)
+          list_len = ((size_t)data[pos] << 8) + data[pos + 1];
+          if (list_len < 3 || pos + 2 + list_len != ext_end)
+        	  return false;
+          if (data[pos + 2] != 0)
+        	  return false;
+          server_name_len = ((size_t)data[pos + 3] << 8) + data[pos + 4];
+          if (server_name_len + 3 != list_len)
+        	  return false;
+          name_pos = pos + 5;
+          if (!tls_need(name_pos, server_name_len, ext_end))
           {
           	log_error("Get HTTPS Host: not enough data");
           	return false;
           }
-
-          // return server_name
-          if (server_name_len + 1 > MaxHostName)
-          {
+          if (server_name_len == 0 || server_name_len + 1 > MaxHostName)
               return false;
-          }
 
-          memcpy(HostName, data + pos + 5, server_name_len);
+          memcpy(HostName, data + name_pos, server_name_len);
           HostName[server_name_len] = '\0';
-          return HostName;
+          return true;
         }
-        else
-        {
-            // skip
-            pos += 4 + ext_data_len;
-        }
+        if (ext_end <= pos)
+        	return false;
+        pos = ext_end;
     }
+    log_error("buffer more than one record, SNI still not found");
+    return false;
 }
 
 bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
 {
     const uint8_t *data = buf;
+    const uint8_t *end;
+    const uint8_t *pos;
+    const uint8_t *end_pos;
+    size_t host_len;
+
+    if (!buf || !HostName || MaxHostName == 0)
+        return false;
     HostName[0] = '\0';
+    end = data + len;
 
-    char *pos = (char *)MemSearch(buf, len, "\r\nHost:", 7/*strlen("\r\nHost:")*/);
-    if (pos != NULL)
+    pos = (const uint8_t *)MemSearch(buf, len, "\r\nHost:", 7);
+    if (pos == NULL || pos < data || pos > end)
+        return false;
+
+    if ((size_t)(end - pos) < 7)
+        return false;
+    pos += 7;
+    while (pos < end && *pos == ' ')
+        pos++;
+    if (pos >= end)
+        return false;
+
+    end_pos = (const uint8_t *)MemSearch(pos, (size_t)(end - pos), "\r\n", 2);
+    if (end_pos == NULL || end_pos < pos || end_pos > end)
+        return false;
+
+    host_len = (size_t)(end_pos - pos);
+    if (host_len == 0)
     {
-        pos += 7;/*strlen("\r\nHost:")*/;
-        while (*pos == ' ')
-        {
-            pos++;
-        }
-
-        len -= (int)(uint32_t)(pos - (char *)data);
-        char *end_pos = (char *)MemSearch(pos, len, "\r\n", strlen("\r\n"));
-        if (end_pos != NULL)
-        {
-            len = (int)(uint32_t)(end_pos - pos);
-            if (len <= 0)
-            {
-                log_error("invalid Host in request");
-                return false;
-            }
-
-            if (len + 1 > MaxHostName)
-            {
-                return false;
-            }
-
-            memcpy(HostName, pos, len);
-            HostName[len] = '\0';
-            return true;
-        }
+        log_error("invalid Host in request");
+        return false;
     }
+    if (host_len + 1 > MaxHostName)
+        return false;
 
-    return false;
+    memcpy(HostName, pos, host_len);
+    HostName[host_len] = '\0';
+    return true;
 }
 
 void *MemSearch(const void *haystack_start, size_t haystack_len,
