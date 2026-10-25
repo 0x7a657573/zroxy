@@ -18,7 +18,7 @@
 
 typedef struct
 {
-	char 	 ip[_MaxIPAddress_];
+	char 	 ip[_MaxDNSHost_ + 1];
 	uint16_t port;
 }dnsStream_t;
 
