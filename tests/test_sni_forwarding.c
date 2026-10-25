@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -258,6 +259,112 @@ static void test_sni_forwarding_basic(void)
     expect_true(server.ok, "upstream received full request and sent response");
 }
 
+static void *stall_upstream(void *arg)
+{
+    int listen_fd = *(int *)arg;
+    int fd = accept(listen_fd, NULL, NULL);
+    char buf[128];
+
+    if (fd < 0)
+        return NULL;
+    while (read(fd, buf, sizeof(buf)) > 0)
+        ;
+    close(fd);
+    return NULL;
+}
+
+static void on_sni_alarm(int sig)
+{
+    (void)sig;
+    fprintf(stderr, "FAIL: stalled SNI worker was not released\n");
+    _exit(2);
+}
+
+static void test_stalled_upstream_releases_worker(void)
+{
+    static const uint8_t request[] =
+        "GET / HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "\r\n";
+    int listen_fd = -1;
+    int pair[2] = {-1, -1};
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+    pthread_t up_tid;
+    pthread_t sni_tid;
+    sniclient_t *client;
+    struct sigaction sa;
+    int started = 0;
+    int n = 0;
+    int i;
+
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    expect_true(listen_fd >= 0, "stalled upstream socket");
+    if (listen_fd < 0)
+        return;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(listen_fd, 1) != 0 ||
+        getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) != 0 ||
+        pthread_create(&up_tid, NULL, stall_upstream, &listen_fd) != 0 ||
+        socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
+    {
+        expect_true(false, "prepare stalled upstream");
+        close(listen_fd);
+        return;
+    }
+
+    client = (sniclient_t *)calloc(1, sizeof(*client));
+    expect_true(client != NULL, "alloc stalled sniclient");
+    if (!client)
+    {
+        close(pair[0]);
+        close(pair[1]);
+        close(listen_fd);
+        pthread_join(up_tid, NULL);
+        return;
+    }
+
+    client->connid = pair[1];
+    strcpy(client->SniConfig.Port.bindip, "127.0.0.1");
+    client->SniConfig.Port.remote_port = ntohs(addr.sin_port);
+    client->SniConfig.snitimeout = 1;
+    expect_true(sni_worker_acquire(), "reserve one SNI worker");
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_sni_alarm;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGALRM, &sa, NULL);
+    alarm(8);
+    if (pthread_create(&sni_tid, NULL, SniClientHandler, client) != 0)
+    {
+        alarm(0);
+        sni_worker_release();
+        expect_true(false, "start stalled handler");
+        close(pair[0]);
+        close(pair[1]);
+        close(listen_fd);
+        pthread_join(up_tid, NULL);
+        free(client);
+        return;
+    }
+    started = 1;
+    expect_true(write_all_fd(pair[0], request, sizeof(request) - 1), "write stalled client request");
+    if (started)
+        pthread_join(sni_tid, NULL);
+    alarm(0);
+    close(pair[0]);
+    close(listen_fd);
+    pthread_join(up_tid, NULL);
+
+    while (sni_worker_acquire())
+        n++;
+    expect_true(n == 1024, "stalled SNI worker released its slot");
+    for (i = 0; i < n; i++)
+        sni_worker_release();
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -268,5 +375,6 @@ int main(void)
     }
 
     test_sni_forwarding_basic();
+    test_stalled_upstream_releases_worker();
     return failures == 0 ? 0 : 1;
 }

@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "log.h"
@@ -413,7 +414,7 @@ static bool run_scenario(enum scenario_mode mode, sockshost_t *socks, const char
     socks->host = "127.0.0.1";
     socks->port = ntohs(addr.sin_port);
 
-    bool ok = socks5_connect(&client_fd, socks, dst_host, dst_port, false);
+    bool ok = socks5_connect(&client_fd, socks, dst_host, dst_port, false, 5);
     if (ok)
     {
         close(client_fd);
@@ -505,6 +506,60 @@ static void test_close_mid_reply_fails(void)
     expect_false(ok, "server close mid-reply should fail cleanly");
 }
 
+static void *stall_socks_server(void *arg)
+{
+    int listen_fd = *(int *)arg;
+    int fd = accept(listen_fd, NULL, NULL);
+    char buf[16];
+
+    if (fd < 0)
+        return NULL;
+    while (read(fd, buf, sizeof(buf)) > 0)
+        ;
+    close(fd);
+    return NULL;
+}
+
+static void test_stalled_socks_times_out(void)
+{
+    int listen_fd = -1;
+    int client_fd = 99;
+    pthread_t tid;
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+    sockshost_t socks = {0};
+    struct timespec start;
+    struct timespec end;
+    int64_t elapsed_ms;
+    bool ok;
+
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    expect_true(listen_fd >= 0, "stalled socks listen socket");
+    if (listen_fd < 0)
+        return;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    expect_true(bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0, "bind stalled socks");
+    expect_true(listen(listen_fd, 1) == 0, "listen stalled socks");
+    expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "stalled socks port");
+    expect_true(pthread_create(&tid, NULL, stall_socks_server, &listen_fd) == 0, "start stalled socks server");
+
+    socks.host = "127.0.0.1";
+    socks.port = ntohs(addr.sin_port);
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    ok = socks5_connect(&client_fd, &socks, "1.2.3.4", 443, false, 1);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    elapsed_ms = (int64_t)(end.tv_sec - start.tv_sec) * 1000 +
+                 (end.tv_nsec - start.tv_nsec) / 1000000;
+    expect_false(ok, "stalled SOCKS handshake fails");
+    expect_true(client_fd == -1, "stalled SOCKS handshake closes the socket");
+    expect_true(elapsed_ms < 3000, "stalled SOCKS handshake returns before 3s");
+    expect_true(elapsed_ms >= 200, "stalled SOCKS handshake waits for the deadline");
+    pthread_join(tid, NULL);
+    close(listen_fd);
+}
+
 static bool can_run_loopback_socket_test(void)
 {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -530,6 +585,7 @@ int main(void)
     test_close_mid_reply_fails();
     test_auth_without_password_fails();
     test_malformed_replies_fail();
+    test_stalled_socks_times_out();
 
     return failures == 0 ? 0 : 1;
 }

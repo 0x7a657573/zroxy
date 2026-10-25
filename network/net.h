@@ -26,7 +26,7 @@ bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd);
  * sockfd -> Store Socket fd in this Pointer
  * bool -> set keepalive tcp socket
  */
-bool net_connect(int *sockfd,const char *hostname, uint16_t port);
+bool net_connect(int *sockfd,const char *hostname, uint16_t port, int timeout_sec);
 
 /*
  * net_GetHost is smart function for extract host name from http/https packet

@@ -388,13 +388,13 @@ void *DNS_HandleIncomingRequset(void *ptr)
 			if(dns->socks)
 			{
 				// make socks5 socket
-				if(!socks5_connect(&sockssocket,dns->socks, dns->upstream.ip, dns->upstream.port,true))
+				if(!socks5_connect(&sockssocket,dns->socks, dns->upstream.ip, dns->upstream.port,true, (int)dns->timeout))
 					break;
 			}
 			else
 			{
 				/*direct connect to dns server*/
-				if(!net_connect(&sockssocket, dns->upstream.ip, dns->upstream.port))
+				if(!net_connect(&sockssocket, dns->upstream.ip, dns->upstream.port, (int)dns->timeout))
 					break;
 			}
 			

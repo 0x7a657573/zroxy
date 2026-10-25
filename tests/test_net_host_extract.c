@@ -218,7 +218,7 @@ static void test_tls_sni_malformed_extensions(void)
 static void test_net_connect_failure_sets_invalid_fd(void)
 {
     int fd = 12345;
-    expect_false(net_connect(&fd, "127.0.0.1", 1), "connect to closed port fails");
+    expect_false(net_connect(&fd, "127.0.0.1", 1, 2), "connect to closed port fails");
     if (fd != -1)
     {
         fprintf(stderr, "FAIL: failed connect should set fd=-1, got %d\n", fd);
@@ -254,7 +254,7 @@ static void test_net_connect_success_loopback(void)
         return;
     }
 
-    expect_true(net_connect(&client_fd, "127.0.0.1", ntohs(addr.sin_port)), "connect to loopback listener");
+    expect_true(net_connect(&client_fd, "127.0.0.1", ntohs(addr.sin_port), 2), "connect to loopback listener");
     expect_true(client_fd >= 0, "successful connect returns valid fd");
     if (client_fd >= 0)
     {

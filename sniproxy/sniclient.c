@@ -21,6 +21,7 @@
 #include "net_io.h"
 #include <errno.h>
 #include <sys/select.h>
+#include <sys/time.h>
 
 #define SNI_MAX_WORKERS 1024
 
@@ -55,6 +56,8 @@ void *SniClientHandler(void *arg)
 	sockshost_t *socks = client->SniConfig.Socks;
 	lport_t 	xport = client->SniConfig.Port;
 	int			timeout = client->SniConfig.snitimeout;
+	int			io_ms = net_timeout_ms(timeout);
+	int64_t		hello_deadline = net_mono_ms() + io_ms;
 
 	//log_info("client thread %i",client->connid);
 	uint8_t buffer[0x2000]; /*8Kb memory tmp*/
@@ -66,13 +69,25 @@ void *SniClientHandler(void *arg)
 	struct timeval tv;
 	while(1)
 	{
+		int64_t now;
+		int64_t remain_ms;
 
 		if (client->connid < 0 || client->connid >= FD_SETSIZE)
 			break;
 
+		now = net_mono_ms();
+		if (now < 0 || now >= hello_deadline)
+		{
+			log_trace("TimeOut tid:%i",client->connid);
+			break;
+		}
+		remain_ms = hello_deadline - now;
+		if (remain_ms > 5000)
+			remain_ms = 5000;
+
 		FD_ZERO(&rfds);
-		tv.tv_sec = 5;
-		tv.tv_usec = 0;
+		tv.tv_sec = (time_t)(remain_ms / 1000);
+		tv.tv_usec = (suseconds_t)((remain_ms % 1000) * 1000);
 		FD_SET(client->connid,&rfds);
 		if (select(client->connid + 1, &rfds, NULL, NULL, &tv) < 0)	/*wait for socket data ready*/
 		{
@@ -126,18 +141,18 @@ void *SniClientHandler(void *arg)
 			int sockssocket = -1;
 			if(socks)	/*Set Connect to socks*/
 			{
-				if(!socks5_connect(&sockssocket,socks,HostName,xport.remote_port,false))
+				if(!socks5_connect(&sockssocket,socks,HostName,xport.remote_port,false, timeout))
 					break;
 			}
 			else	/*connect directly*/
 			{
-				if(!net_connect(&sockssocket,HostName,xport.remote_port))
+				if(!net_connect(&sockssocket,HostName,xport.remote_port, timeout))
 					break;
 			}
 
 
 			int n;
-			if(!net_write_all(sockssocket,buffer,Windex))
+			if(!net_write_all_ms(sockssocket,buffer,Windex, io_ms))
 			{
 				/*try close upstream socket*/
 				close(sockssocket);
@@ -168,7 +183,7 @@ void *SniClientHandler(void *arg)
 					   (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
 						continue;
 					if(n<1) break;
-					if(!net_write_all(client->connid,buffer,(size_t)n)) break;
+					if(!net_write_all_ms(client->connid,buffer,(size_t)n, io_ms)) break;
 					TotalRx += n;
 				}
 				else if(FD_ISSET( client->connid, &rfds ) )
@@ -178,7 +193,7 @@ void *SniClientHandler(void *arg)
 					   (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
 						continue;
 					if(n<1) break;
-					if(!net_write_all(sockssocket,buffer,(size_t)n)) break;
+					if(!net_write_all_ms(sockssocket,buffer,(size_t)n, io_ms)) break;
 					TotalTx += n;
 				}
 				else
