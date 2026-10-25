@@ -33,6 +33,6 @@ typedef struct
 	uint32_t	  timeout;
 }dnshost_t;
 
-void dnsserver_init(dnshost_t *config);
+bool dnsserver_init(dnshost_t *config);
 
 #endif /* DNSSERVER_H_ */

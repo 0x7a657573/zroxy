@@ -75,8 +75,14 @@ int main(int argc, const char **argv)
 	/*check Monitor*/
 	if(prg_setting.monitorPort)
 	{
-		log_info("enable monitor on port %i",*prg_setting.monitorPort);
-		monitor = monitor_Init(prg_setting.monitorPort);
+		const char *bind_ip = prg_setting.monitor_bind[0] ? prg_setting.monitor_bind : "127.0.0.1";
+		log_info("enable monitor on %s:%i", bind_ip, *prg_setting.monitorPort);
+		monitor = monitor_Init(*prg_setting.monitorPort, bind_ip, prg_setting.monitor_token, prg_setting.monitor_header_timeout);
+		if (!monitor)
+		{
+			log_error("monitor failed to start");
+			return 1;
+		}
 	}
 
 
@@ -89,7 +95,11 @@ int main(int argc, const char **argv)
 		prg_setting.dnsserver->whitelist = whitelist;
 
 		log_info("start dns server ...");
-		dnsserver_init(prg_setting.dnsserver);
+		if (!dnsserver_init(prg_setting.dnsserver))
+		{
+			log_error("dns server failed to start");
+			return 1;
+		}
 	}
 
 	lport_t *p=prg_setting.ports;
@@ -108,7 +118,11 @@ int main(int argc, const char **argv)
 	while(p)
 	{
 		Xconf.Port = *p;
-		SniProxy_Start(&Xconf);
+		if (!SniProxy_Start(&Xconf))
+		{
+			log_error("sni listener failed on %s:%u", Xconf.Port.bindip, (unsigned)Xconf.Port.local_port);
+			return 1;
+		}
 
 		p=p->next;
 	}

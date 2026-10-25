@@ -16,35 +16,43 @@
 #include <string.h>
 #include "dns.h"
 
-void *dnsserver_HandleIncomingConnection(void *vargp);
-
-void dnsserver_init(dnshost_t *config)
+struct dns_boot
 {
-	/*make thread for dns server*/
-	pthread_t thread_id;
-	if (pthread_create(&thread_id, NULL, dnsserver_HandleIncomingConnection, (void*)config) != 0)
-	{
-		log_error("dns server thread create failed");
-		return;
-	}
-	pthread_detach(thread_id);
+	dnshost_t *conf;
+	bool ok;
+	bool ready;
+	pthread_mutex_t mu;
+	pthread_cond_t cv;
+};
+
+static void dns_boot_signal(struct dns_boot *boot, bool ok)
+{
+	pthread_mutex_lock(&boot->mu);
+	boot->ok = ok;
+	boot->ready = true;
+	pthread_cond_signal(&boot->cv);
+	pthread_mutex_unlock(&boot->mu);
 }
 
-void *dnsserver_HandleIncomingConnection(void *vargp)
+static void *dnsserver_HandleIncomingConnection(void *vargp)
 {
-	dnshost_t *conf = (dnshost_t*)vargp;
+	struct dns_boot *boot = (struct dns_boot *)vargp;
+	dnshost_t *conf = boot->conf;
+	dnsserver_t *dns;
 
-	dnsserver_t *dns = localdns_init_config(conf);
+	dns = localdns_init_config(conf);
 	if(!dns)
 	{
 		log_error("dns server config error...");
-		pthread_exit(0);
+		dns_boot_signal(boot, false);
+		return NULL;
 	}
 
 	if(!localdns_init_sockets(dns))
 	{
 		localdns_free(dns);
 		log_error("dns server socket error.");
+		dns_boot_signal(boot, false);
 		return NULL;
 	}
 
@@ -52,8 +60,11 @@ void *dnsserver_HandleIncomingConnection(void *vargp)
 	{
 		localdns_free(dns);
 		log_error("dns server worker error.");
+		dns_boot_signal(boot, false);
 		return NULL;
 	}
+
+	dns_boot_signal(boot, true);
 
 	log_info("dns server start on %s:%d",conf->Local.ip,conf->Local.port);
 
@@ -65,7 +76,42 @@ void *dnsserver_HandleIncomingConnection(void *vargp)
 
 	log_error("dns server crashed.");
 	localdns_free(dns);
-	pthread_exit(0);
+	return NULL;
 }
 
+bool dnsserver_init(dnshost_t *config)
+{
+	struct dns_boot boot;
+	pthread_t thread_id;
 
+	memset(&boot, 0, sizeof(boot));
+	boot.conf = config;
+	if (pthread_mutex_init(&boot.mu, NULL) != 0)
+	{
+		log_error("dns server mutex init failed");
+		return false;
+	}
+	if (pthread_cond_init(&boot.cv, NULL) != 0)
+	{
+		log_error("dns server condition init failed");
+		pthread_mutex_destroy(&boot.mu);
+		return false;
+	}
+	if (pthread_create(&thread_id, NULL, dnsserver_HandleIncomingConnection, &boot) != 0)
+	{
+		log_error("dns server thread create failed");
+		pthread_cond_destroy(&boot.cv);
+		pthread_mutex_destroy(&boot.mu);
+		return false;
+	}
+	pthread_detach(thread_id);
+
+	pthread_mutex_lock(&boot.mu);
+	while (!boot.ready)
+		pthread_cond_wait(&boot.cv, &boot.mu);
+	pthread_mutex_unlock(&boot.mu);
+
+	pthread_cond_destroy(&boot.cv);
+	pthread_mutex_destroy(&boot.mu);
+	return boot.ok;
+}
