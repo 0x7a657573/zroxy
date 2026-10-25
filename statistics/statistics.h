@@ -36,6 +36,7 @@ void state_init(statistics_t **self,char *name);
 
 void state_RxTxClose(statistics_t *self,uint32_t rx,uint32_t tx);
 void state_IncConnection(statistics_t *self);
+void state_abandon(statistics_t *self);
 
 void state_get(statistics_t *self,stat_t *st);
 
