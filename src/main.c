@@ -57,20 +57,26 @@ int main(int argc, const char **argv)
 	}
 	
 	mon_t *monitor = NULL;
-	/*check Monitor*/
-	if(prg_setting.monitorPort)
-	{
-		log_info("enable monitor on port %i",*prg_setting.monitorPort);
-		monitor = monitor_Init(prg_setting.monitorPort);
-	}
-
-	/*chack white list*/
+	/*chack white list before listeners so a bad file does not become an open proxy*/
 	filter_t *whitelist = NULL;
 	if(prg_setting.WhitePath)
 	{
 		log_info("load white list from %s",prg_setting.WhitePath);
 		whitelist = filter_init(prg_setting.WhitePath);
 		free(prg_setting.WhitePath);
+		prg_setting.WhitePath = NULL;
+		if (!whitelist)
+		{
+			log_error("whitelist load failed");
+			return 1;
+		}
+	}
+
+	/*check Monitor*/
+	if(prg_setting.monitorPort)
+	{
+		log_info("enable monitor on port %i",*prg_setting.monitorPort);
+		monitor = monitor_Init(prg_setting.monitorPort);
 	}
 
 

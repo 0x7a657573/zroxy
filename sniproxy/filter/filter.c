@@ -17,9 +17,30 @@
 #include <unistd.h>
 #endif
 #include <unistd.h>
+#include <errno.h>
 
 void filter_Remove(filter_t *self);
 void filter_Remove_Itemlist(item_t *ptr);
+
+static bool filter_store_line(char *dst, size_t dstsz, char *line, ssize_t read)
+{
+	size_t n;
+	if (read < 0 || (size_t)read >= _MaxHostName_ || (size_t)read >= dstsz)
+		return false;
+	n = (size_t)read;
+	if (n > 0 && line[n - 1] == '\n')
+	{
+		line[--n] = '\0';
+	}
+	if (n > 0 && line[n - 1] == '\r')
+	{
+		line[--n] = '\0';
+	}
+	if (n >= dstsz)
+		return false;
+	memcpy(dst, line, n + 1);
+	return true;
+}
 
 void filter_Reload(filter_t *self)
 {
@@ -42,11 +63,13 @@ void filter_Reload(filter_t *self)
 	size_t len = 0;
 	ssize_t read;
 	int num = 0;
+	bool failed = false;
 	while ((read = getline(&line, &len, FilterFile)) != -1)
 	{
-		if(read>=_MaxHostName_)
+		if (read > _MaxConfigLine_)
 		{
 			log_error("Filter Item Len Bigest Buffer");
+			failed = true;
 			break;
 		}
 
@@ -54,16 +77,22 @@ void filter_Reload(filter_t *self)
 	    if(NewList==NULL)
 	    {
 	    	filter_Remove_Itemlist(Pvitem);
+	    	Pvitem = NULL;
+	    	failed = true;
 	    	break;
 	    }
 
 	    memset(NewList,0,sizeof(item_t));
 
-	    char *pos;	/*remove new line*/
-	    if ((pos=strchr(line, '\n')) != NULL)
-	        *pos = '\0';
-
-	    strcpy(NewList->Rec,line);
+	    if (!filter_store_line(NewList->Rec, sizeof(NewList->Rec), line, read))
+	    {
+	    	log_error("Filter Item Len Bigest Buffer");
+	    	free(NewList);
+	    	filter_Remove_Itemlist(Pvitem);
+	    	Pvitem = NULL;
+	    	failed = true;
+	    	break;
+	    }
 
 	    NewList->Next = Pvitem;
 	    Pvitem = NewList;
@@ -72,6 +101,13 @@ void filter_Reload(filter_t *self)
 
 	/*free getline buffer*/
 	free(line);
+	fclose(FilterFile);
+
+	if (failed)
+	{
+		log_error("Reload filter failed; keeping previous list");
+		return;
+	}
 
 	/*replace new list with old one*/
 	pthread_mutex_lock(&self->Lock);
@@ -93,14 +129,15 @@ void *filter_Handlefilewatcher(void *vargp)
     if ( fd < 0 ) 
 	{
         log_error("Couldn't initialize inotify");
-		return false;
+		return NULL;
     }
 
 	wd = inotify_add_watch(fd, self->filepath, IN_MODIFY); 
     if (wd == -1) 
 	{
         log_error("Couldn't add watch to %s\n",self->filepath);
-		return false;
+		close(fd);
+		return NULL;
     }
 	else 
 	{
@@ -115,23 +152,34 @@ void *filter_Handlefilewatcher(void *vargp)
 		len = read(fd, buf, sizeof(buf));
         if (len < 0) 
 		{
+			if (errno == EINTR)
+				continue;
             log_error("filter watcher crash");
             break;
         }
+		if (len == 0)
+			break;
 
-		for (char *ptr = buf; ptr < buf + len;
-            ptr += sizeof(struct inotify_event) + event->len)
+		char *ptr = buf;
+		char *buf_end = buf + len;
+		while (ptr + sizeof(struct inotify_event) <= buf_end)
 		{
+			size_t evsz;
 			event = (const struct inotify_event *) ptr;
+			if ((size_t)event->len > (size_t)(buf_end - ptr) - sizeof(*event))
+				break;
+			evsz = sizeof(*event) + (size_t)event->len;
 			if ( event->mask & IN_MODIFY) 
 			{
 				log_info( "file %s was modified", self->filepath);
 				filter_Reload(self);
 			}
+			ptr += evsz;
 		}
 	}
 
-	pthread_exit(0);
+	close(fd);
+	return NULL;
 }
 #elif __FreeBSD__
 void *filter_Handlefilewatcher(void *vargp)
@@ -151,6 +199,7 @@ void *filter_Handlefilewatcher(void *vargp)
     if (fd == -1) 
 	{
 		log_error("Couldn't add open %s\n",filename);
+		close(kq);
         return NULL;
     }
 
@@ -167,8 +216,10 @@ void *filter_Handlefilewatcher(void *vargp)
 
         if (nev == -1) 
 		{
+			if (errno == EINTR)
+				continue;
             log_error("kevent event error");
-            exit(EXIT_FAILURE);
+            break;
         }
 		else if (nev > 0) 
 		{
@@ -208,27 +259,39 @@ filter_t *filter_init(char *filename)
 	}
 
 	self = malloc(sizeof(filter_t));
+	if (!self)
+	{
+		free(line);
+		fclose(FilterFile);
+		return NULL;
+	}
 	memset(self,0,sizeof(filter_t));
 	if(pthread_mutex_init(&self->Lock, NULL) != 0)
 	{
 	    log_error("filter mutex init has failed");
-	    exit(0);
+	    free(self);
+	    free(line);
+	    fclose(FilterFile);
+	    return NULL;
 	}
 
 	self->filepath = malloc(strlen(filename)+1);
 	if(!self->filepath)
 	{
 		log_error("filter filename malloc error");
-	    exit(0);
+		pthread_mutex_destroy(&self->Lock);
+		free(self);
+		free(line);
+		fclose(FilterFile);
+		return NULL;
 	}
-	bzero(self->filepath,strlen(filename)+1);
-	strcpy(self->filepath,filename);
+	memcpy(self->filepath, filename, strlen(filename) + 1);
 
 	item_t *Pvitem = NULL;
 	int num = 0;
 	while ((read = getline(&line, &len, FilterFile)) != -1)
 	{
-		if(read>=_MaxHostName_)
+		if(read > _MaxConfigLine_)
 		{
 			log_error("Filter Item Len Bigest Buffer");
 			filter_Remove(self);
@@ -246,11 +309,15 @@ filter_t *filter_init(char *filename)
 
 	    memset(self->item,0,sizeof(item_t));
 
-	    char *pos;	/*remove new line*/
-	    if ((pos=strchr(line, '\n')) != NULL)
-	        *pos = '\0';
-
-	    strcpy(self->item->Rec,line);
+	    if (!filter_store_line(self->item->Rec, sizeof(self->item->Rec), line, read))
+	    {
+	    	log_error("Filter Item Len Bigest Buffer");
+	    	free(self->item);
+	    	self->item = Pvitem;
+	    	filter_Remove(self);
+	    	self = NULL;
+	    	break;
+	    }
 
 	    self->item->Next = Pvitem;
 	    Pvitem = self->item;
@@ -266,7 +333,10 @@ filter_t *filter_init(char *filename)
 	if(self)
 	{
 		pthread_t thread_id;
-		pthread_create(&thread_id, NULL, filter_Handlefilewatcher, (void*)self);
+		if (pthread_create(&thread_id, NULL, filter_Handlefilewatcher, (void*)self) == 0)
+			pthread_detach(thread_id);
+		else
+			log_error("whitelist watcher thread failed");
 	}
 
 	return self;
@@ -289,6 +359,7 @@ void filter_Remove(filter_t *self)
 
 	filter_Remove_Itemlist(self->item);
 	free(self->filepath);
+	pthread_mutex_destroy(&self->Lock);
 	free(self);
 }
 
