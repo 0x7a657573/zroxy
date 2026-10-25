@@ -16,6 +16,7 @@ typedef struct
 	int fd;
 	uint16_t Port;
 	statistics_t *state;
+	pthread_mutex_t state_lock; /* guards the state list head only */
 }mon_t;
 
 typedef struct
@@ -23,7 +24,7 @@ typedef struct
 	int		 			connid;
 	struct sockaddr_in	cli;
 	socklen_t 			addr_len;
-	statistics_t 		*state;
+	mon_t 			*owner;
 }monclient_t;
 
 typedef struct
