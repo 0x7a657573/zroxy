@@ -239,6 +239,208 @@ static void test_encode_dns_flags(void)
     expect_u8(out[3], 0x80, "flags low byte");
 }
 
+static void test_decode_rejects_truncated_and_loops(void)
+{
+    struct Message msg = {0};
+    static const uint8_t short_header[11] = {0};
+    static const uint8_t truncated_label[] = {
+        0x00, 0x01, 0x01, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x05, 'a', 'b'
+    };
+    static const uint8_t pointer_loop[] = {
+        0x00, 0x01, 0x01, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xC0, 0x0C,
+        0x00, 0x01, 0x00, 0x01
+    };
+    static const uint8_t pointer_oob[] = {
+        0x00, 0x01, 0x01, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xC0, 0x40,
+        0x00, 0x01, 0x00, 0x01
+    };
+
+    expect_true(!dns_decode_msg(&msg, short_header, (int)sizeof(short_header)), "reject short header");
+    free_msg(&msg);
+    expect_true(!dns_decode_msg(&msg, truncated_label, (int)sizeof(truncated_label)), "reject truncated label");
+    free_msg(&msg);
+    expect_true(!dns_decode_msg(&msg, pointer_loop, (int)sizeof(pointer_loop)), "reject compression loop");
+    free_msg(&msg);
+    expect_true(!dns_decode_msg(&msg, pointer_oob, (int)sizeof(pointer_oob)), "reject compression pointer past packet");
+    free_msg(&msg);
+}
+
+static void test_decode_valid_compression_pointer(void)
+{
+    struct Message msg = {0};
+    static const uint8_t compressed[] = {
+        0x12, 0x34,
+        0x01, 0x00,
+        0x00, 0x01,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0xC0, 0x12,
+        0x00, 0x01,
+        0x00, 0x01,
+        0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+        0x03, 'c', 'o', 'm',
+        0x00
+    };
+
+    expect_true(dns_decode_msg(&msg, compressed, (int)sizeof(compressed)), "decode compressed question");
+    if (msg.questions && msg.questions->qName)
+        expect_string(msg.questions->qName, "example.com", "compressed question name");
+    else
+    {
+        fprintf(stderr, "FAIL: compressed question missing name\n");
+        failures++;
+    }
+    free_msg(&msg);
+}
+
+static void put_query_header(uint8_t *pkt, uint16_t qdcount)
+{
+    memset(pkt, 0, 12);
+    pkt[2] = 0x01;
+    pkt[4] = (uint8_t)(qdcount >> 8);
+    pkt[5] = (uint8_t)qdcount;
+}
+
+static void test_decode_more_malformed(void)
+{
+    struct Message msg;
+    uint8_t pkt[512];
+    int pos;
+    int lab;
+    int off;
+
+    memset(&msg, 0, sizeof(msg));
+    memset(pkt, 0, sizeof(pkt));
+    put_query_header(pkt, 1);
+    pkt[12] = 0x40;
+    pkt[13] = 'a';
+    pkt[14] = 0x00;
+    pkt[15] = 0x00;
+    pkt[16] = 0x01;
+    pkt[17] = 0x00;
+    pkt[18] = 0x01;
+    expect_true(!dns_decode_msg(&msg, pkt, 19), "reject reserved label type");
+    free_msg(&msg);
+
+    memset(pkt, 0, sizeof(pkt));
+    put_query_header(pkt, 1);
+    pkt[12] = 63;
+    pkt[13] = 'a';
+    pkt[14] = 'b';
+    expect_true(!dns_decode_msg(&msg, pkt, 15), "reject label longer than remaining bytes");
+    free_msg(&msg);
+
+    memcpy(pkt, k_query_example_com, sizeof(k_query_example_com));
+    pkt[5] = 2;
+    expect_true(!dns_decode_msg(&msg, pkt, (int)sizeof(k_query_example_com)), "reject qdcount past the packet");
+    free_msg(&msg);
+
+    memset(pkt, 0, sizeof(pkt));
+    put_query_header(pkt, 1);
+    pkt[12] = 0x00;
+    pkt[13] = 0x00;
+    pkt[14] = 0x01;
+    pkt[15] = 0x00;
+    pkt[16] = 0x01;
+    expect_true(!dns_decode_msg(&msg, pkt, 17), "reject empty DNS name");
+    free_msg(&msg);
+
+    /* 17 compression jumps: the decoder allows 16. */
+    memset(pkt, 0, sizeof(pkt));
+    put_query_header(pkt, 1);
+    pkt[12] = 0xC0;
+    pkt[13] = 18;
+    pkt[14] = 0x00;
+    pkt[15] = 0x01;
+    pkt[16] = 0x00;
+    pkt[17] = 0x01;
+    for (off = 18; off <= 46; off += 2)
+    {
+        pkt[off] = 0xC0;
+        pkt[off + 1] = (uint8_t)(off + 2);
+    }
+    pkt[48] = 0xC0;
+    pkt[49] = 50;
+    pkt[50] = 0xC0;
+    pkt[51] = 0x00;
+    expect_true(!dns_decode_msg(&msg, pkt, 52), "reject pointer chain over the jump limit");
+    free_msg(&msg);
+
+    /* 16 jumps, then a one-letter name. This must still decode. */
+    memset(pkt, 0, sizeof(pkt));
+    put_query_header(pkt, 1);
+    pkt[12] = 0xC0;
+    pkt[13] = 18;
+    pkt[14] = 0x00;
+    pkt[15] = 0x01;
+    pkt[16] = 0x00;
+    pkt[17] = 0x01;
+    for (off = 18; off <= 44; off += 2)
+    {
+        pkt[off] = 0xC0;
+        pkt[off + 1] = (uint8_t)(off + 2);
+    }
+    pkt[46] = 0xC0;
+    pkt[47] = 48;
+    pkt[48] = 1;
+    pkt[49] = 'a';
+    pkt[50] = 0;
+    expect_true(dns_decode_msg(&msg, pkt, 51), "accept pointer chain at the jump limit");
+    if (msg.questions && msg.questions->qName)
+        expect_string(msg.questions->qName, "a", "jump-limit name");
+    else
+    {
+        fprintf(stderr, "FAIL: jump-limit name missing\n");
+        failures++;
+    }
+    free_msg(&msg);
+
+    /* Four 63-byte labels do not fit the 255-byte presentation buffer. */
+    memset(pkt, 0, sizeof(pkt));
+    put_query_header(pkt, 1);
+    pos = 12;
+    for (lab = 0; lab < 4; lab++)
+    {
+        pkt[pos++] = 63;
+        memset(pkt + pos, 'a' + lab, 63);
+        pos += 63;
+    }
+    pkt[pos++] = 0;
+    pkt[pos++] = 0x00;
+    pkt[pos++] = 0x01;
+    pkt[pos++] = 0x00;
+    pkt[pos++] = 0x01;
+    expect_true(!dns_decode_msg(&msg, pkt, pos), "reject DNS name longer than the hostname buffer");
+    free_msg(&msg);
+}
+
+static void test_encode_rejects_short_buffer(void)
+{
+    struct Question q = {0};
+    struct Message msg = {0};
+    uint8_t tiny[8];
+    uint8_t enough[64];
+    size_t written = 0;
+
+    q.qName = "example.com";
+    q.qType = A_Resource_RecordType;
+    q.qClass = 1;
+    msg.id = 0x1234;
+    msg.qdCount = 1;
+    msg.questions = &q;
+
+    expect_true(!dns_encode_msg_n(&msg, tiny, sizeof(tiny), &written), "bounded encode rejects short buffer");
+    expect_true(dns_encode_msg_n(&msg, enough, sizeof(enough), &written), "bounded encode accepts fitting buffer");
+    expect_true(written > sizeof(tiny) && written <= sizeof(enough), "bounded encode length");
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -248,6 +450,10 @@ int main(void)
     test_decode_rd_ra_preservation();
     test_encode_local_a_response();
     test_encode_dns_flags();
+    test_decode_rejects_truncated_and_loops();
+    test_decode_more_malformed();
+    test_decode_valid_compression_pointer();
+    test_encode_rejects_short_buffer();
 
     return failures == 0 ? 0 : 1;
 }
