@@ -111,6 +111,110 @@ static void test_tls_sni_valid(void)
     expect_string(host, "example.com", "valid TLS SNI value");
 }
 
+static void test_http_host_without_terminator(void)
+{
+    uint8_t request[] = "GET / HTTP/1.1\r\nHost: ";
+    char host[_MaxHostName_];
+    memset(host, 'x', sizeof(host));
+    host[sizeof(host) - 1] = '\0';
+
+    expect_false(net_GetHttpHost(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+                 "HTTP Host without CRLF");
+    expect_string(host, "", "HTTP Host without CRLF clears output");
+}
+
+static void test_tls_sni_truncated_record(void)
+{
+    static const uint8_t client_hello[] = {
+        0x16, 0x03, 0x03, 0x00, 0x43,
+        0x01, 0x00, 0x00, 0x3f,
+        0x03, 0x03
+    };
+    char host[_MaxHostName_];
+    memset(host, 'x', sizeof(host));
+    host[sizeof(host) - 1] = '\0';
+
+    expect_false(net_GetHttpsHost((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
+                 "truncated TLS record");
+    expect_string(host, "", "truncated TLS record clears output");
+}
+
+static void copy_valid_hello(uint8_t *dst)
+{
+    static const uint8_t client_hello[] = {
+        0x16, 0x03, 0x03, 0x00, 0x43,
+        0x01, 0x00, 0x00, 0x3f,
+        0x03, 0x03,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00,
+        0x00, 0x02, 0x13, 0x01,
+        0x01, 0x00,
+        0x00, 0x14,
+        0x00, 0x00, 0x00, 0x10,
+        0x00, 0x0e,
+        0x00,
+        0x00, 0x0b,
+        'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'
+    };
+    memcpy(dst, client_hello, sizeof(client_hello));
+}
+
+static void test_tls_sni_malformed_extensions(void)
+{
+    uint8_t hello[72];
+    char host[_MaxHostName_];
+
+    copy_valid_hello(hello);
+    hello[3] = 0x00;
+    hello[4] = 0x80;
+    memset(host, 'x', sizeof(host));
+    host[sizeof(host) - 1] = '\0';
+    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+                 "TLS record longer than the buffer");
+    expect_string(host, "", "overlong TLS record clears output");
+
+    copy_valid_hello(hello);
+    hello[50] = 0x00;
+    hello[51] = 0x30;
+    memset(host, 'x', sizeof(host));
+    host[sizeof(host) - 1] = '\0';
+    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+                 "TLS extensions length past the record");
+    expect_string(host, "", "overlong extensions clear output");
+
+    copy_valid_hello(hello);
+    hello[59] = 0x00;
+    hello[60] = 0x14;
+    memset(host, 'x', sizeof(host));
+    host[sizeof(host) - 1] = '\0';
+    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+                 "SNI name longer than the server-name list");
+    expect_string(host, "", "overlong SNI name clears output");
+
+    copy_valid_hello(hello);
+    hello[3] = 0x00;
+    hello[4] = 0x38;
+    memset(host, 'x', sizeof(host));
+    host[sizeof(host) - 1] = '\0';
+    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+                 "SNI name sitting past the TLS record");
+    expect_string(host, "", "name past the record is not accepted");
+
+    copy_valid_hello(hello);
+    memset(host, 'x', sizeof(host));
+    host[sizeof(host) - 1] = '\0';
+    expect_false(net_GetHttpsHost(hello, 61, host, sizeof(host)),
+                 "ClientHello cut off inside the SNI name");
+    expect_string(host, "", "cut-off SNI name clears output");
+}
+
 static void test_net_connect_failure_sets_invalid_fd(void)
 {
     int fd = 12345;
@@ -170,7 +274,10 @@ int main(void)
     test_http_host_valid();
     test_http_without_host();
     test_http_host_with_port();
+    test_http_host_without_terminator();
     test_tls_sni_valid();
+    test_tls_sni_truncated_record();
+    test_tls_sni_malformed_extensions();
     test_net_connect_failure_sets_invalid_fd();
     test_net_connect_success_loopback();
 
