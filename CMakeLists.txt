@@ -10,6 +10,10 @@ set(EXECUTABLE_NAME zroxy)
 project (${EXECUTABLE_NAME} C)
 include(CTest)
 
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra -Wno-unused-parameter)
+endif()
+
 # Platform-specific configurations
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(STATUS "Configuring for Linux")
@@ -71,6 +75,7 @@ if(BUILD_TESTING)
     add_executable(test_net_host_extract
         tests/test_net_host_extract.c
         network/net.c
+        network/net_io.c
         log/log.c
     )
 
@@ -251,7 +256,7 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME io_limits COMMAND test_io_limits)
-    set_tests_properties(io_limits PROPERTIES TIMEOUT 60)
+    set_tests_properties(io_limits PROPERTIES TIMEOUT 20)
 
     add_executable(test_process
         tests/test_process.c
@@ -264,7 +269,7 @@ if(BUILD_TESTING)
 
     add_dependencies(test_process zroxy)
     add_test(NAME process_limits COMMAND test_process)
-    set_tests_properties(process_limits PROPERTIES TIMEOUT 60)
+    set_tests_properties(process_limits PROPERTIES TIMEOUT 45)
 
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)

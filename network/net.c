@@ -16,6 +16,10 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <poll.h>
+#include "net_io.h"
 
 void *MemSearch(const void *haystack_start, size_t haystack_len,
         		const void *needle_start, size_t needle_len);
@@ -41,9 +45,56 @@ bool net_enable_keepalive(int sock)
     return true;
 }
 
-bool net_connect(int *sockfd,const char *hostname, uint16_t port)
+static bool net_connect_one(int sfd, const struct sockaddr *addr, socklen_t len, int64_t deadline_ms)
 {
+    int flags;
+    int rc;
+
+    flags = fcntl(sfd, F_GETFL, 0);
+    if (flags < 0)
+        return false;
+    if (fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0)
+        return false;
+
+    do
+    {
+        rc = connect(sfd, addr, len);
+    } while (rc < 0 && errno == EINTR);
+
+    if (rc < 0 && errno != EINPROGRESS && errno != EALREADY)
+    {
+        fcntl(sfd, F_SETFL, flags);
+        return false;
+    }
+
+    if (rc < 0)
+    {
+        int err = 0;
+        socklen_t elen = sizeof(err);
+        if (!net_wait_fd(sfd, POLLOUT, deadline_ms) ||
+            getsockopt(sfd, SOL_SOCKET, SO_ERROR, &err, &elen) != 0 ||
+            err != 0)
+        {
+            fcntl(sfd, F_SETFL, flags);
+            return false;
+        }
+    }
+
+    if (fcntl(sfd, F_SETFL, flags) < 0)
+        return false;
+    return true;
+}
+
+bool net_connect(int *sockfd,const char *hostname, uint16_t port, int timeout_sec)
+{
+    int64_t deadline;
+    int64_t now;
+
     *sockfd = -1;
+    now = net_mono_ms();
+    if (now < 0)
+        return false;
+    deadline = now + net_timeout_ms(timeout_sec);
 
     /*check Hostname is IP or Domain*/
     if(isTrueIpAddress(hostname))
@@ -66,7 +117,7 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port)
 			return false;
 		}
 
-		if(connect(sfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+		if(!net_connect_one(sfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr), deadline))
 		{
 			log_error("net_connect Error : Connect Failed");
             close(sfd);
@@ -104,7 +155,14 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port)
             continue;
         }
 
-        if (connect(sfd, addr->ai_addr, addr->ai_addrlen) != -1)
+        if (net_mono_ms() >= deadline)
+        {
+            close(sfd);
+            sfd = -1;
+            break;
+        }
+
+        if (net_connect_one(sfd, addr->ai_addr, addr->ai_addrlen, deadline))
         {
             *sockfd = sfd;
             freeaddrinfo(addrs);
