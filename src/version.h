@@ -8,7 +8,14 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.2.7"
+#define version	 "1.3.0"
+/*
+* sni : replace one pthread per client with one event loop per listener
+* sni : move hostname resolution to a bounded process-wide resolver pool
+* sni : add per-listener quotas, completion pipes, and resolver hardening
+* dns : bind IPv4 listen addresses without a resolver lookup
+*/
+//#define version	 "1.2.7"
 /*
 * sni : fix bug in bsd
 * sni : add white list watch for bsd system
