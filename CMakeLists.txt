@@ -33,6 +33,8 @@ set(SOURCES
     
     sniproxy/sniproxy.c
     sniproxy/sniclient.c
+    sniproxy/sni_event_loop.c
+    sniproxy/sni_resolver.c
     log/loglock.c
     log/log.c
     network/net.c
@@ -167,6 +169,8 @@ if(BUILD_TESTING)
     add_executable(test_sni_forwarding
         tests/test_sni_forwarding.c
         sniproxy/sniclient.c
+        sniproxy/sni_event_loop.c
+    sniproxy/sni_resolver.c
         sniproxy/filter/filter.c
         network/net.c
         network/net_io.c
@@ -191,6 +195,47 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME sni_forwarding COMMAND test_sni_forwarding)
+
+    set(SNI_ENGINE_SOURCES
+        tests/test_sni_engine.c
+        sniproxy/sniproxy.c
+        sniproxy/sniclient.c
+        sniproxy/sni_event_loop.c
+    sniproxy/sni_resolver.c
+        sniproxy/filter/filter.c
+        network/net.c
+        network/net_io.c
+        statistics/statistics.c
+        log/log.c
+    )
+
+    add_executable(test_sni_engine ${SNI_ENGINE_SOURCES})
+    target_include_directories(test_sni_engine PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/log
+        ${PROJECT_SOURCE_DIR}/sniproxy
+        ${PROJECT_SOURCE_DIR}/network
+        ${PROJECT_SOURCE_DIR}/network/socks
+        ${PROJECT_SOURCE_DIR}/statistics
+    )
+    target_compile_definitions(test_sni_engine PRIVATE SNI_TEST_HOOKS)
+    target_link_libraries(test_sni_engine PRIVATE Threads::Threads)
+    add_test(NAME sni_engine COMMAND test_sni_engine)
+    set_tests_properties(sni_engine PROPERTIES TIMEOUT 180)
+
+    add_executable(test_sni_engine_poll ${SNI_ENGINE_SOURCES})
+    target_include_directories(test_sni_engine_poll PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/log
+        ${PROJECT_SOURCE_DIR}/sniproxy
+        ${PROJECT_SOURCE_DIR}/network
+        ${PROJECT_SOURCE_DIR}/network/socks
+        ${PROJECT_SOURCE_DIR}/statistics
+    )
+    target_compile_definitions(test_sni_engine_poll PRIVATE SNI_TEST_HOOKS SNI_FORCE_POLL)
+    target_link_libraries(test_sni_engine_poll PRIVATE Threads::Threads)
+    add_test(NAME sni_engine_poll COMMAND test_sni_engine_poll)
+    set_tests_properties(sni_engine_poll PROPERTIES TIMEOUT 180)
 
     add_executable(test_dnsproxy_tcp_io
         tests/test_dnsproxy_tcp_io.c
@@ -233,6 +278,8 @@ if(BUILD_TESTING)
         dnsproxy/dns.c
         fifo/fifo.c
         sniproxy/sniclient.c
+        sniproxy/sni_event_loop.c
+    sniproxy/sni_resolver.c
         sniproxy/filter/filter.c
         statistics/statistics.c
         log/log.c
