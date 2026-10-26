@@ -98,7 +98,7 @@ def test_monitor_after_traffic():
         if not fetched["closed"]:
             raise AssertionError("monitor did not close the connection")
         doc = fetched["json"]
-        if doc.get("ZroxyVersion") != "1.2.7":
+        if doc.get("ZroxyVersion") != "1.3.0":
             raise AssertionError("unexpected version %r" % doc.get("ZroxyVersion"))
         _number(doc.get("CountOfOpenFile"), "CountOfOpenFile")
         for name in ("SNI_Server", "DNS_Server"):

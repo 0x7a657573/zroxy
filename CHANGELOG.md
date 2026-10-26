@@ -1,8 +1,8 @@
 # Changelog
 
-The version string in `src/version.h` is still `1.2.7`. The notes below are unreleased relative to that string. Nothing here says the result is production-ready.
+These notes describe the `1.3.0` release. Nothing here says the result is production-ready.
 
-## Unreleased
+## 1.3.0 - 2026-10-26
 
 ### SNI data plane
 
