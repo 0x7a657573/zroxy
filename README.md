@@ -21,6 +21,19 @@ This project implements a transparent proxy that accepts TLS connections, parses
 
 When connecting to a domain through TLS/HTTPS, the initial TCP session contains the domain name **un-encrypted**, and thus zroxy can redirect a TLS connection based on that initial negotiation without decrypting the traffic or needing a private key. This technique requires a custom DNS server that redirects the targeted domains to our zroxy server (e.g., Unbound, Bind, or PowerDNS).
 
+## Alternatives
+
+The following projects use the same general idea as zroxy: inspect an initial
+unencrypted protocol header, route by hostname, and forward the original
+connection without terminating TLS.
+
+* [SNI-SSL-Proxy](https://github.com/Intika-Linux-Proxy/SNI-SSL-Proxy) — the closest alternative. It supports HTTP/HTTPS/IMAPS/POP3S/SMTPS and an upstream SOCKS5 proxy.
+* [sniproxy](https://github.com/dlundquist/sniproxy) — the original lightweight SNI proxy for HTTP and TLS. The upstream project is deprecated, but it remains an important reference implementation for this design.
+* [sniproxy](https://github.com/renaudallard/sniproxy) — an actively maintained, hardened continuation of sniproxy with broader protocol support, including TLS, DTLS, HTTP/1, HTTP/2, XMPP, and Minecraft.
+* [SNIProxy](https://github.com/atenart/sniproxy) — a small Rust-based TLS SNI proxy that routes connections to configured backends without needing TLS keys.
+* [sni-proxy](https://github.com/igorhakk/sni-proxy) — a small Go TCP proxy for sharing one TLS port between services based on the requested SNI hostname.
+* [sni-router](https://github.com/Ashteeer/sni-router) — a more feature-rich SNI router supporting TCP, UDP, and QUIC, with TLS passthrough as well as optional termination.
+
 ## Features
 
 *   Supports incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs
