@@ -4,11 +4,18 @@ The version string in `src/version.h` is still `1.2.7`. The notes below are unre
 
 ## Unreleased
 
+### SNI data plane
+
+- An accepted SNI client is no longer a detached pthread. Each listener runs one event-loop thread. Linux uses epoll; other builds, and a Linux build with `SNI_FORCE_POLL`, use poll. Client and upstream sockets stay non-blocking.
+- The 1024 limit is still the number of SNI connections that may be open at once. It is not a thread count. The initial read and each relay direction use a fixed 8KB buffer. A clean EOF is forwarded with `shutdown(SHUT_WR)` after that direction's buffer drains.
+- `getaddrinfo()` for a non-numeric upstream name runs on a fixed pool of 4 resolver threads and 128 slots. The SNI event loop does not call it. Each listener has its own completion pipe and slot quota. The SOCKS hostname is cached and refreshed off the loop. Loopback results that point at a listener, and `::ffff:127.0.0.1` rewritten to that loopback address, are not dialed.
+- The DNS listen socket is bound with `inet_pton` on the configured IPv4 literal. That avoids a glibc resolver allocation that LeakSanitizer reported when a DNS bind failed and the process exited immediately. Listen addresses are still IPv4 literals.
+
 ### Verification
 
-- Added regression coverage for malformed DNS names and compression chains, truncated TLS ClientHello and SNI lengths, malformed SOCKS5 replies, partial `net_read_exact` / `net_write_all`, `EINTR` during read and `recvfrom`, `recvfrom` failure, a missing whitelist, invalid process configuration, monitor input without a finished HTTP header, the SNI worker cap, the monitor worker cap, and `SIGPIPE` on a closed upstream.
-- Built with `-Wall -Wextra -Wno-unused-parameter`, debug symbols, AddressSanitizer, and UndefinedBehaviorSanitizer. The warning rebuild printed no warnings. With leak detection enabled, `ctest` reported 9/9 passed. AddressSanitizer's link-order check was disabled for that run because another shared object is mapped first in this environment. Leak and undefined-behavior detection stayed on.
-- `musl-gcc` is not available on this host, so no musl build was run.
+- `tests/test_sni_engine.c` covers split HTTP Host and TLS ClientHello reads, partial writes, `EAGAIN`, `EINTR`, SOCKS5 success and failure, connect failure, handshake and idle timeouts, EOF and half-close, an oversized hello, allocation failure, exactly-once statistics, whitelist allow/deny, IP literals, two listeners, 1/10/100/1000 short connections, 1024 held connections, a stalled upstream beside short connections, and repeated connect/close cycles. It also covers resolver results, quota and cancellation, stale completions, SOCKS cache refresh, self-connect rejection, and a resolver worker that does not return before shutdown times out. The same binary is built with `SNI_FORCE_POLL`.
+- Plain `ctest --test-dir build` passed 14/14 executed tests, including `sni_e2e`. `test_sni_engine` and `test_sni_engine_poll` also passed under `-fsanitize=address,undefined` (`ASAN_OPTIONS=verify_asan_link_order=0:detect_leaks=1:halt_on_error=1`, `UBSAN_OPTIONS=halt_on_error=1`) and, separately, under `-fsanitize=thread` (`TSAN_OPTIONS=halt_on_error=1`). `zroxy_benchmark` remains disabled and was not run. `musl-gcc` is not on this host.
+- Earlier regression coverage remains: malformed DNS names and compression chains, truncated TLS ClientHello and SNI lengths, malformed SOCKS5 replies, partial `net_read_exact` / `net_write_all`, `EINTR` during read and `recvfrom`, `recvfrom` failure, a missing whitelist, invalid process configuration, monitor input without a finished HTTP header, the SNI connection cap, the monitor worker cap, and `SIGPIPE` on a closed upstream.
 
 ### Correctness fix found by those tests
 
@@ -19,7 +26,7 @@ The version string in `src/version.h` is still `1.2.7`. The notes below are unre
 - DNS, TLS SNI, SOCKS5, and config parsers reject truncated or oversized input instead of reading off the end of the buffer.
 - A missing whitelist file aborts startup. A bad reload keeps the previous list.
 - `SIGPIPE` is ignored. Exact reads and writes retry `EINTR`. A failed `recvfrom` does not enqueue work.
-- SNI, DNS, and monitor accept paths cap detached workers.
+- DNS and monitor accept paths cap detached workers. SNI caps concurrent connections on its event-loop threads.
 - SOCKS and DNS close descriptors through helpers that store `-1`, so a later cleanup does not close the same descriptor again.
 - Config errors do not log the raw value.
 

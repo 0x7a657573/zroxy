@@ -22,14 +22,14 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 
 ## Resource limits
 
-- SNI accept stops creating workers at 1024. The monitor stops at 32 and closes the extra accepted socket. DNS query workers stop at 128. The DNS cap is inside `dnsproxy.c` and was not driven by a live flood in this pass.
+- SNI keeps at most 1024 connections at once, on one event-loop thread per listener. It does not create a pthread per client, and it does not use `select`. The 1025th accepted socket is closed immediately. Relay buffers are fixed at 8KB per direction. The monitor stops at 32 workers and closes the extra accepted socket. DNS query workers stop at 128. The DNS cap is inside `dnsproxy.c` and was not driven by a live flood in this pass.
 - A configured whitelist that cannot be opened aborts process startup. A failed whitelist reload keeps the previous list. Invalid ports, addresses, and empty config values are rejected instead of truncated.
 
 ## What was run
 
-On this Linux host, with gcc, the tree was built with `-Wall -Wextra -Wno-unused-parameter -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all`. The compiler printed no warnings. `ctest` reported 9/9 passed when AddressSanitizer was allowed to start behind the process preload (`ASAN_OPTIONS=verify_asan_link_order=0`) with `detect_leaks=1` and UBSan `halt_on_error=1`. No AddressSanitizer, LeakSanitizer, or UndefinedBehaviorSanitizer report was produced by that run.
+On this Linux host, with gcc, the SNI targets were built with `-Wall -Wextra -Wno-unused-parameter -Wconversion -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all`. The compiler printed conversion warnings in older non-SNI files, but none in the SNI event-loop or resolver sources. `test_sni_engine` and `test_sni_engine_poll` passed under AddressSanitizer and UndefinedBehaviorSanitizer when AddressSanitizer was allowed to start behind the process preload (`ASAN_OPTIONS=verify_asan_link_order=0`) with leak detection and UBSan `halt_on_error=1`. No AddressSanitizer, LeakSanitizer, or UndefinedBehaviorSanitizer report was produced by those runs. The same two SNI tests passed under ThreadSanitizer with `TSAN_OPTIONS=halt_on_error=1`. The normal build passed 14/14 enabled CTest tests. `zroxy_stress` and `zroxy_benchmark` stay disabled in a plain `ctest` run. `musl-gcc` is not installed here, so no musl build was performed.
 
-`musl-gcc` is not installed here (`musl-dev` is not installed). No musl build was performed.
+The SNI sources also compile with `-Wconversion -Werror`. `dnsproxy.c` still has conversion warnings in older functions that this change did not edit.
 
 ## Remaining risk
 
@@ -37,5 +37,6 @@ On this Linux host, with gcc, the tree was built with `-Wall -Wextra -Wno-unused
 - Startup errors return from `main` without a single cleanup of every config allocation. The missing-whitelist and bad-config process tests exited 1 with no LeakSanitizer text. Other failure orders were not exhaustively instrumented. The long-running loop never reaches `Free_DnsServer`; process exit reclaims that memory.
 - `localdns_pull` currently always returns true, so the free after that loop does not run while the detached DNS worker is blocked on the queue. Freeing that queue while the worker is alive would be a use-after-free. That path was not executed.
 - The DNS worker cap was reviewed and not load-tested. SNI and monitor caps were.
-- Inotify whitelist reload and a musl build were not executed. `getaddrinfo()` for a non-numeric upstream name can still block a worker.
+- Inotify whitelist reload and a musl build were not executed. SNI name lookup runs on a fixed pool of 4 threads. The event-loop thread does not call `getaddrinfo()`. DNS still blocks one worker thread on its own lookup.
+- A resolved address is not dialed when it is the listener itself, an unspecified address, link-local, or multicast. IPv4-mapped IPv6 is rewritten to IPv4 before that check, so `::ffff:127.0.0.1` is treated as loopback. Private addresses are allowed. A listener bound to `0.0.0.0` rejects every loopback and unspecified result. The whitelist is applied to the normalized hostname before a lookup is submitted.
 - AddressSanitizer's own link-order check fails in this environment because another shared object is mapped before `libasan`. The passing run disabled that one check. It did not disable leak or undefined-behavior detection.

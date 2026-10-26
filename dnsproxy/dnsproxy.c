@@ -5,8 +5,10 @@
  *      Author: zeus
  */
 #include "dnsproxy.h"
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <resolv.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -150,9 +152,9 @@ void localdns_free(dnsserver_t *dns)
 
 bool localdns_init_sockets(dnsserver_t *dns)
 {
-  struct addrinfo hints;
-  struct addrinfo *addr_ip;
-  int r;
+  struct sockaddr_in addr;
+  char *end = NULL;
+  unsigned long port;
 
   dns->local_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (dns->local_sock < 0)
@@ -161,25 +163,30 @@ bool localdns_init_sockets(dnsserver_t *dns)
     return false;
   }
 
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = SOCK_DGRAM;
-  if (0 != (r = getaddrinfo(dns->listen_addr, dns->listen_port, &hints, &addr_ip)))
+  /*
+   * The listen address is an IPv4 literal. inet_pton avoids getaddrinfo, which
+   * on this glibc can leave a resolver allocation behind if the process exits
+   * immediately after a failed bind.
+   */
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  port = strtoul(dns->listen_port, &end, 10);
+  if (dns->listen_port[0] == '\0' || end == NULL || *end != '\0' || port > 65535UL ||
+      inet_pton(AF_INET, dns->listen_addr, &addr.sin_addr) != 1)
   {
-    log_error("%s:%s:%s\n", gai_strerror(r), dns->listen_addr, dns->listen_port);
+    log_error("dns listen address rejected %s:%s", dns->listen_addr, dns->listen_port);
     close_fd(&dns->local_sock);
     return false;
   }
+  addr.sin_port = htons((uint16_t)port);
 
-  if (0 != bind(dns->local_sock, addr_ip->ai_addr, addr_ip->ai_addrlen))
+  if (bind(dns->local_sock, (struct sockaddr *)&addr, sizeof(addr)) != 0)
   {
     log_error("Can't bind address %s:%s\n", dns->listen_addr, dns->listen_port);
-    freeaddrinfo(addr_ip);
     close_fd(&dns->local_sock);
     return false;
   }
 
-  freeaddrinfo(addr_ip);
   return true;
 }
 
