@@ -1,156 +1,340 @@
-
 # zroxy
 
-**zroxy is a simple TLS sni proxy (sniproxy) written in pure C with no dependencies.**
+`zroxy` is a small C-based TCP proxy that routes connections by the hostname
+found in an HTTP `Host` header or a TLS ClientHello SNI extension. It forwards
+the original byte stream without terminating TLS, installing certificates, or
+performing TLS inspection.
 
-This program supports incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs traffic and can upstream to a DIRECT/SOCKS4/SOCKS5 proxy.
+It can connect to upstream servers directly or through a SOCKS5 proxy. An
+optional local DNS service can synthesize answers for whitelisted domains and
+forward other DNS queries upstream over TCP.
 
-## What is SNI?
+> zroxy is a protocol-aware TCP passthrough proxy. It is not a TLS terminator,
+> a general-purpose transparent proxy, or a client-authenticating proxy.
 
-*Server Name Indication* (**SNI**) is an extension to the Transport Layer Security (**TLS**) protocol that allows a client to indicate which hostname it is attempting to connect to at the start of the handshaking process. This allows a server to present multiple certificates on the same IP address and TCP port number, and therefore allows multiple secure (HTTPS) websites (or any other service over TLS) to be served by the same IP address without requiring all of those sites to use the same certificate.
+## Contents
 
-It is the conceptual equivalent to HTTP/1.1 name-based virtual hosting, but for HTTPS.
+- [How it works](#how-it-works)
+- [Supported behavior and limitations](#supported-behavior-and-limitations)
+- [Related projects](#related-projects)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Monitor endpoint](#monitor-endpoint)
+- [DNS forwarding](#dns-forwarding)
+- [Build and install](#build-and-install)
+- [Tests](#tests)
+- [Architecture](#architecture)
+- [Security considerations](#security-considerations)
+- [OpenWrt](#openwrt)
+- [Related documents](#related-documents)
 
-This also allows a proxy to forward client traffic to the right server during the TLS/SSL handshake. The desired hostname is not encrypted in the original SNI extension, so an eavesdropper can see which site is being requested.
+## How it works
 
-For more information, see the [SNI Wikipedia article](https://en.wikipedia.org/wiki/Server_Name_Indication).
+For an SNI listener, zroxy:
 
-## How Does it Work?
+1. accepts a client TCP connection;
+2. reads enough of the initial request to find an HTTP `Host` header or TLS
+   ClientHello SNI name;
+3. normalizes and checks the hostname;
+4. connects to the configured remote port, directly or through SOCKS5; and
+5. forwards the original bytes in both directions.
 
-This project implements a transparent proxy that accepts TLS connections, parses the initial client greeting, and proxies the complete SSL session to the backend corresponding to the server's name (or the default backend if no SNI is specified). This proxy **does NOT** require any cryptographic materials such as private keys, public keys, or certificates. It does not modify the TLS session and does not perform a man-in-the-middle attack. Moreover, it is not even linked with any cryptographic library.
+The TLS session remains between the original client and the upstream server.
+zroxy does not need a private key, certificate, or cryptographic library, and
+it does not decrypt or rewrite the TLS stream.
 
-When connecting to a domain through TLS/HTTPS, the initial TCP session contains the domain name **un-encrypted**, and thus zroxy can redirect a TLS connection based on that initial negotiation without decrypting the traffic or needing a private key. This technique requires a custom DNS server that redirects the targeted domains to our zroxy server (e.g., Unbound, Bind, or PowerDNS).
+The hostname in a traditional TLS ClientHello SNI extension is visible to
+network observers. Encrypted ClientHello (ECH), a TLS ClientHello without a
+usable SNI name, and protocols that do not provide a readable HTTP Host header
+cannot be routed by hostname using this mechanism.
 
-## Alternatives
+## Supported behavior and limitations
 
-The following projects use the same general idea as zroxy: inspect an initial
-unencrypted protocol header, route by hostname, and forward the original
-connection without terminating TLS.
+### Supported
 
-* [SNI-SSL-Proxy](https://github.com/Intika-Linux-Proxy/SNI-SSL-Proxy) — the closest alternative. It supports HTTP/HTTPS/IMAPS/POP3S/SMTPS and an upstream SOCKS5 proxy.
-* [sniproxy](https://github.com/dlundquist/sniproxy) — the original lightweight SNI proxy for HTTP and TLS. The upstream project is deprecated, but it remains an important reference implementation for this design.
-* [sniproxy](https://github.com/renaudallard/sniproxy) — an actively maintained, hardened continuation of sniproxy with broader protocol support, including TLS, DTLS, HTTP/1, HTTP/2, XMPP, and Minecraft.
-* [SNIProxy](https://github.com/atenart/sniproxy) — a small Rust-based TLS SNI proxy that routes connections to configured backends without needing TLS keys.
-* [sni-proxy](https://github.com/igorhakk/sni-proxy) — a small Go TCP proxy for sharing one TLS port between services based on the requested SNI hostname.
-* [sni-router](https://github.com/Ashteeer/sni-router) — a more feature-rich SNI router supporting TCP, UDP, and QUIC, with TLS passthrough as well as optional termination.
+| Area | Behavior |
+| --- | --- |
+| Routing | Hostname routing from HTTP `Host` or TLS ClientHello SNI |
+| Upstream | Direct TCP connection or SOCKS5 |
+| SOCKS5 | Optional username/password authentication (RFC 1929) |
+| Listeners | Multiple listeners with independent local and remote ports |
+| Whitelist | Host patterns with `*` and `?` matching, plus automatic reload |
+| DNS | Local UDP listener; upstream DNS over TCP, directly or through SOCKS5 |
+| Monitor | Local HTTP JSON statistics endpoint with optional Bearer token |
+| SNI data plane | Non-blocking event loop per listener; epoll on Linux and poll elsewhere |
 
-## Features
+### Not provided
 
-*   Supports incoming HTTP/HTTPS/IMAPs/POP3s/SMTPs
-*   Supports upstream DIRECT/SOCKS5 proxy
-*   Supports SOCKS5 user/pass authentication (RFC 1929)
-*   Supports independent ports for each service (src/dst)
-*   Name-based proxying of HTTPS without decrypting traffic
-*   Supports both TLS and HTTP protocols
-*   Traffic monitor with a web user interface
-*   Forwards DNS requests (**UDP**) from SOCKS5 (**TCP**)
-*   Supports domain whitelisting
-*   Automatically reloads the whitelist
-*   Multi-threaded
-*   And more!
+- TLS termination, certificate management, or man-in-the-middle inspection;
+- SOCKS4 support;
+- authentication of clients connecting to SNI listeners;
+- general UDP proxying or arbitrary DNS-over-HTTPS/DNS-over-TLS support;
+- hostname routing when no usable SNI or HTTP Host value is available;
+- a fallback or default upstream for a connection whose hostname cannot be
+  extracted;
+- a guarantee of production readiness or security audit status.
 
-## Usage
+The proxy accepts private upstream addresses, but rejects unsafe destinations
+such as loopback, unspecified, link-local, and multicast results where they
+would point back to the listener or an unsuitable local address. See
+[`SECURITY.md`](SECURITY.md) for the current security model and known risks.
 
-### Command Details (`./build/zroxy -h`)
+## Related projects
 
-Current binary version in help output: `zroxy v1.2.7`
+These projects explore related forms of hostname-aware TCP routing or TLS
+passthrough. They are references and alternatives, not dependencies of zroxy.
 
-```
-Usage: zroxy [OPTION...]
-  -c, --config <path>          path to config file
-  -p, --port <listeners>       SNI listeners: <bind ip>:<local>@<remote>,...
-  -s, --socks <spec>           upstream SOCKS5 for SNI forwarding
-  -m, --monitor <[ip:]port>    monitor HTTP port (default bind 127.0.0.1)
-  -k, --monitortoken <token>   bearer token required by the monitor
-  -a, --monitortimeout <sec>   incomplete monitor header timeout (1..60, default 5)
-  -o, --snitimeout <sec>       SNI socket timeout in seconds
-  -w, --white <path>           whitelist file path
-  -d, --ldns <bind:port>       local DNS UDP listener
-  -u, --dns <host[:port]>      upstream DNS-over-TCP server
-  -x, --dsocks <spec>          SOCKS5 for DNS upstream connection
-  -t, --dtimeout <sec>         DNS upstream socket timeout
-  -i, --snip <ipv4>            synthesized A/AAAA target IP for local DNS replies
-  -l, --log <0..5>             log level
-  -h, --help                   show help
-```
+- [SNI-SSL-Proxy](https://github.com/Intika-Linux-Proxy/SNI-SSL-Proxy) — an SNI
+  proxy with HTTP/TLS service support and SOCKS5 upstream support.
+- [sniproxy](https://github.com/dlundquist/sniproxy) — an original lightweight
+  SNI proxy implementation and an important reference for this design.
+- [sniproxy](https://github.com/renaudallard/sniproxy) — a continuation of the
+  sniproxy idea with broader protocol coverage.
+- [SNIProxy](https://github.com/atenart/sniproxy) — a small Rust-based TLS SNI
+  passthrough proxy.
+- [sni-proxy](https://github.com/igorhakk/sni-proxy) — a small Go TCP proxy
+  that shares a TLS port between services using SNI.
+- [sni-router](https://github.com/Ashteeer/sni-router) — a broader SNI routing
+  project with TCP/UDP/QUIC and optional TLS termination features.
 
-### Config Behavior
+## Quick start
 
-- Default config path (when no CLI args are passed): `zroxy.conf`.
-- Config keys are case-insensitive.
-- Config values are trimmed but preserved (not lowercased).
-- Listener syntax: `port = <bind ip>:<local port>@<remote port>` with comma-separated entries.
-  - Example: `PORT = 127.0.0.1:8080@80,4433@443`
-- SOCKS syntax for `SOCKS` and `DSOCKS`:
-  - `<host>:<port>`
-  - `<user>:<pass>@<host>:<port>`
-- Whitelist file (`WHITE`) format:
-  - One host pattern per line.
-  - `*` and `?` wildcard matching is supported by current filter logic.
-- DNS options:
-  - `LDNS`: local UDP bind endpoint.
-  - `DNS`: upstream resolver endpoint (`host[:port]`, default port `53` when omitted).
-  - `DSOCKS`: optional SOCKS5 tunnel for upstream DNS TCP connection.
-  - `DTIMEOUT`: DNS upstream socket timeout in seconds.
-  - `SNIP`: IPv4 returned for locally-resolved whitelist A records.
+### 1. Install build tools
 
-### Monitor Endpoint
+On Debian or Ubuntu:
 
-When enabled (`-m` / `MONITOR`), zroxy serves `GET /` and returns JSON statistics
-(`ZroxyVersion`, connection counters, rx/tx totals, open-file count). A bare port binds
-`127.0.0.1`. `MONITOR = 0.0.0.0:8123` (or `-m 0.0.0.0:8123`) listens on all interfaces.
-`MONITORTOKEN` (`-k`) requires `Authorization: Bearer <token>`. `MONITORTIMEOUT` (`-a`)
-is an absolute deadline, in seconds, for the client to finish the header. Later bytes do not
-extend it. Other methods, other paths, and a missing or wrong token do not receive the counters.
-
-### DNS Proxy Notes
-
-If DNS forwarding is enabled, zroxy accepts UDP DNS locally and forwards upstream over TCP
-(direct or via SOCKS5). DNS-over-TCP framing uses a 2-byte length prefix and full
-read/write loops for exact transfer.
-
-## Build
-
-To build zroxy, you need `CMake` and `gcc`.
-
-### Install Compile Tools for Debian
-
-```
-	# apt install cmake build-essential git
+```sh
+sudo apt install cmake build-essential git
 ```
 
-### Build (current workflow)
+The build uses CMake, a C compiler, and POSIX threads. It has no third-party
+runtime library dependency beyond the platform's standard C/POSIX facilities.
 
-```
+### 2. Build
+
+From the repository root:
+
+```sh
 cmake -S . -B build
 cmake --build build
 ```
 
-## Tests
+### 3. Create a configuration
 
-Default tests are local only. They use loopback sockets and do not need the public Internet, external DNS, SSH, Tor, curl, dig, or Docker.
+Start with the included example:
 
-The suites are different jobs:
+```sh
+cp simple-zroxy.conf zroxy.conf
+```
 
-- **Unit tests** exercise parsers, limits, and in-process forwarding with the C binaries under `tests/`.
-- **Integration tests** start the real `zroxy` binary and prove an SNI, DNS, or monitor exchange over loopback.
-- **Stress tests** hold a real `zroxy` under concurrent, malformed, slow, and overloaded clients. Intentional capacity rejections are not failures. Crashes, hangs, corruption, and file-descriptor growth are.
-- **Soak tests** are the stress runner with a long `--duration`. They are not part of the default CTest run.
-- **Benchmark tests** measure local throughput and latency. A single JSON file is a baseline. Compare two result files before calling a difference a regression or an improvement.
+Edit at least the listener and upstream settings. For example:
 
-Run the default suite (unit and integration):
+```ini
+PORT = 127.0.0.1:8443@443
+SOCKS = 127.0.0.1:9050
+SNITIMEOUT = 30
+LOG = 2
+```
+
+This listens on `127.0.0.1:8443`, extracts the hostname from each incoming
+connection, and connects to that hostname on remote port `443` through the
+SOCKS5 proxy at `127.0.0.1:9050`.
+
+### 4. Run
+
+```sh
+./build/zroxy -c ./zroxy.conf
+```
+
+When started without command-line arguments, zroxy loads `zroxy.conf` from the
+current working directory. To see the command-line help:
+
+```sh
+./build/zroxy -h
+```
+
+The current source version is `1.3.0`; the authoritative value is defined in
+[`src/version.h`](src/version.h).
+
+## Configuration
+
+Command-line options and configuration keys control the same settings. Command
+line arguments use the short and long forms shown below; configuration files
+use the key names in the last column.
+
+| Option | Argument | Description | Config key |
+| --- | --- | --- | --- |
+| `-c`, `--config` | path | Configuration file | — |
+| `-p`, `--port` | listeners | SNI listener definitions | `PORT` |
+| `-s`, `--socks` | host:port | SOCKS5 for SNI upstreams | `SOCKS` |
+| `-m`, `--monitor` | `[ip:]port` | HTTP monitor listener | `MONITOR` |
+| `-k`, `--monitortoken` | token | Bearer token for the monitor | `MONITORTOKEN` |
+| `-a`, `--monitortimeout` | seconds | Incomplete monitor-header timeout | `MONITORTIMEOUT` |
+| `-o`, `--snitimeout` | seconds | SNI socket timeout | `SNITIMEOUT` |
+| `-w`, `--white` | path | Whitelist file | `WHITE` |
+| `-d`, `--ldns` | bind:port | Local UDP DNS listener | `LDNS` |
+| `-u`, `--dns` | host[:port] | Upstream DNS server | `DNS` |
+| `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP | `DSOCKS` |
+| `-t`, `--dtimeout` | seconds | DNS upstream timeout | `DTIMEOUT` |
+| `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
+| `-l`, `--log` | `0..5` | Log level | `LOG` |
+
+### Configuration-file rules
+
+- Keys are case-insensitive.
+- Values are trimmed but otherwise preserved.
+- Unknown keys, empty values, invalid values, and overlong lines are rejected.
+- A configuration file is required when using `-c`, and `zroxy.conf` is used
+  when no options are supplied.
+- A configured service that cannot start causes process startup to fail. An
+  unconfigured service is skipped.
+
+### Listener syntax
+
+Use one or more comma-separated entries:
+
+```text
+<bind-ip>:<local-port>@<remote-port>
+```
+
+Examples:
+
+```ini
+PORT = 127.0.0.1:8443@443, 127.0.0.1:8080@80
+```
+
+The local port is where zroxy accepts connections. The remote port is used for
+the selected upstream hostname. The listener address is an IPv4 address.
+
+### SOCKS5 syntax
+
+For `SOCKS` and `DSOCKS`, use either:
+
+```text
+<host>:<port>
+<user>:<password>@<host>:<port>
+```
+
+The first form uses an unauthenticated SOCKS5 connection. The second enables
+username/password authentication. Credentials are held in process memory and
+are not intended to be placed in publicly readable configuration files.
+
+### Whitelist syntax
+
+The whitelist contains one host pattern per line. The current matcher supports
+`*` and `?` wildcards. A configured whitelist that cannot be opened prevents
+startup; a failed later reload keeps the previously loaded list.
+
+Example:
+
+```text
+example.com
+*.example.net
+api-?.example.org
+```
+
+## Monitor endpoint
+
+Enable the monitor with `-m` or `MONITOR`. It accepts only `GET /` using
+HTTP/1.0 or HTTP/1.1 and returns JSON containing the zroxy version, connection
+counters, byte totals, and open-file information.
+
+By default, a bare port binds to loopback:
+
+```ini
+MONITOR = 8123
+```
+
+To bind explicitly:
+
+```ini
+MONITOR = 127.0.0.1:8123
+```
+
+Protect a monitor that is reachable by other users or networks:
+
+```ini
+MONITORTOKEN = replace-with-a-secret-token
+MONITORTIMEOUT = 5
+```
+
+Clients must send:
+
+```http
+GET / HTTP/1.1
+Host: localhost
+Authorization: Bearer replace-with-a-secret-token
+Connection: close
 
 ```
+
+The monitor reads at most 4096 header bytes. `MONITORTIMEOUT` is one absolute
+deadline for completing the header; slow-drip input cannot extend it. Do not
+bind the monitor to `0.0.0.0` without a token and appropriate network access
+controls.
+
+## DNS forwarding
+
+When `LDNS` is configured, zroxy listens for DNS over UDP locally. Whitelisted
+names can receive a synthetic A answer using `SNIP`; a matching AAAA query is
+answered with the current zero IPv6 value. Other supported queries are
+forwarded to the configured `DNS` server over TCP, directly or via the
+optional `DSOCKS` SOCKS5 connection.
+
+Example:
+
+```ini
+WHITE = /etc/zroxy/whitelist.txt
+SNIP = 192.0.2.10
+LDNS = 127.0.0.1:5353
+DNS = 1.1.1.1:53
+DSOCKS = 127.0.0.1:9050
+DTIMEOUT = 5
+```
+
+DNS-over-TCP framing uses a two-byte length prefix. DNS is forwarded over TCP
+upstream even though clients use the local UDP listener.
+
+## Build and install
+
+The normal build is:
+
+```sh
+cmake -S . -B build
+cmake --build build
+```
+
+To install the binary under a chosen prefix:
+
+```sh
+cmake --install build --prefix /usr/local
+```
+
+The project also contains a musl-based static-build workflow. On a Debian-like
+Linux system, install the toolchain and configure with:
+
+```sh
+sudo apt install musl-tools cmake build-essential
+CC='musl-gcc -static -Os' cmake -S . -B build-musl
+cmake --build build-musl
+```
+
+The static build and platform-specific behavior should be validated with the
+toolchain used for the target device. A musl build is not implied by a normal
+glibc build.
+
+## Tests
+
+Tests are local and do not require public Internet access, external DNS, SSH,
+Tor, Docker, `curl`, or `dig`.
+
+Configure and build first, then run the default suite:
+
+```sh
 ctest --test-dir build --output-on-failure
 ```
 
-Integration only:
-
-```
-ctest --test-dir build -L integration --output-on-failure
-```
-
-Unit tests:
+The default suite includes unit, process, and loopback integration tests:
 
 - `net_host_extract`
 - `filter_whitelist`
@@ -158,19 +342,26 @@ Unit tests:
 - `args_parse`
 - `socks_handshake`
 - `sni_forwarding`
+- `sni_engine`
+- `sni_engine_poll`
 - `dnsproxy_tcp_io`
 - `io_limits`
 - `process_limits`
-
-Integration tests, registered when Python 3 is available:
-
 - `sni_e2e`
 - `dns_e2e`
 - `monitor_e2e`
 
-Stress:
+Run only integration tests with:
 
+```sh
+ctest --test-dir build -L integration --output-on-failure
 ```
+
+### Stress tests
+
+The stress test exercises concurrent, malformed, slow, and overloaded clients:
+
+```sh
 python3 tests/stress/zroxy_stress.py \
   --duration 30 \
   --connections 100 \
@@ -179,9 +370,11 @@ python3 tests/stress/zroxy_stress.py \
   --output build/stress-result.json
 ```
 
-Benchmark:
+### Benchmarks
 
-```
+Run a local baseline:
+
+```sh
 python3 tests/benchmark/zroxy_benchmark.py \
   --connections 1,10,50,100 \
   --payload-size 1024,65536 \
@@ -189,60 +382,76 @@ python3 tests/benchmark/zroxy_benchmark.py \
   --output build/benchmark-result.json
 ```
 
-Each benchmark scenario runs for `--duration` seconds, so the full matrix takes longer than one interval. Loopback results move with CPU scheduling and machine load. Treat a single file as a baseline. `tests/benchmark/compare_baseline.py` compares two JSON files and fails by default on a throughput drop of 15 percent, a p99 latency increase of 20 percent, an RSS increase of 25 percent, or any persistent file-descriptor increase (`fd_after` above `fd_baseline`).
+Compare two results instead of interpreting one machine-dependent measurement:
 
+```sh
+python3 tests/benchmark/compare_baseline.py \
+  build/baseline.json build/current.json
 ```
-python3 tests/benchmark/compare_baseline.py build/baseline.json build/current.json
-```
 
-Benchmark JSON contains one object per scenario. `latency_ms.p50`, `p95`, and `p99` are rank-interpolated percentiles of successful exchanges, not an average. `throughput_bytes_sec` is bytes sent plus bytes received, divided by the measured duration. `resources` records peak RSS, file descriptors, and threads for that scenario.
+Stress and benchmark tests are registered with CTest but disabled in a plain
+`ctest` run. To include them:
 
-Stress and benchmark targets are registered with CTest labels `stress` and `benchmark` but are disabled in the default run. Include them explicitly:
-
-```
+```sh
 ctest --test-dir build -L stress --include-disabled --output-on-failure
 ctest --test-dir build -L benchmark --include-disabled --output-on-failure
 ```
 
-### Static Build
+Socket-based end-to-end results depend on the execution environment. A focused
+unit-test pass is not evidence of production capacity, Internet compatibility,
+or a security audit.
 
-I use glibc only for zroxy, but glibc uses other libraries that cannot be linked statically, such as `libnss`. This library is used to resolve hostnames to IP addresses, and we need it. To solve this problem, we can use [musl libc](https://musl.libc.org/). **musl** is an implementation of the C standard library built on top of the Linux system call API, including interfaces defined in the base language standard, POSIX, and widely agreed-upon extensions.
+## Architecture
 
-#### Install musl Tools for Debian
+The process starts the configured monitor, DNS listener, and SNI listeners.
+Each SNI listener owns one long-lived event-loop thread. Accepted SNI clients
+are connection objects on that loop, not one pthread per client. Linux uses
+`epoll`; other supported builds use `poll`.
 
-```
-apt install musl-tools cmake git
-```
+Current important bounds include:
 
-#### Static Build on Linux/OS X/FreeBSD
+- up to 1024 concurrent SNI connections;
+- fixed 8 KiB buffers for the initial data and each relay direction;
+- a process-wide resolver pool with 4 threads and 128 resolver slots;
+- up to 32 monitor workers;
+- up to 128 DNS workers.
 
-1.  Clone the project:
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for ownership, locking, resolver,
+connection-state, and data-path details.
 
-    ```
-    git clone https://github.com/0x7a657573/zroxy.git
-    cd zroxy
-    ```
+## Security considerations
 
-2.  Create a build directory:
+zroxy handles untrusted network input. Before exposing it beyond a trusted
+loopback or private network, read [`SECURITY.md`](SECURITY.md).
 
-    ```
-    mkdir build
-    cd build
-    ```
+In particular:
 
-3.  Configure the project and use `musl-gcc` for static linking:
+- SNI listeners do not authenticate clients.
+- The monitor is local by default, but a token is required when it is exposed
+  to a broader network.
+- The whitelist is not a universal default-deny firewall for every protocol.
+- SOCKS credentials are configuration secrets and must be protected accordingly.
+- The project does not claim production readiness or independent security audit
+  status.
 
-    ```
-    export CC="musl-gcc -static -Os"
-    cmake ..
-    ```
+## OpenWrt
 
-4.  Build the project:
+The repository includes an OpenWrt package Makefile and build notes:
 
-    ```
-    make
-    ```
+[`openwrt/README.md`](openwrt/README.md)
 
-## OpenWrt Build
+Cross-compilation must be performed with the toolchain and OpenWrt revision
+used by the target firmware. The OpenWrt document is a build guide, not a
+claim that every router model has sufficient CPU, memory, or protocol support.
 
-See the [`zroxy in openwrt`](openwrt/README.md) document.
+## Related documents
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — current process and data-plane design
+- [`SECURITY.md`](SECURITY.md) — security controls, verification, and remaining risk
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes and validation history
+- [`simple-zroxy.conf`](simple-zroxy.conf) — annotated configuration example
+- [`LICENSE`](LICENSE) — project license
+
+## License
+
+See [`LICENSE`](LICENSE).
