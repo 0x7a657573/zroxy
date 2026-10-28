@@ -12,7 +12,7 @@ add_library(zroxy_build_options INTERFACE)
 target_compile_features(zroxy_build_options INTERFACE c_std_11)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(zroxy_build_options INTERFACE
-        -Wall -Wextra -Wno-unused-parameter)
+        -Wall -Wextra -Wno-unused-parameter -Wshadow -Wconversion)
 endif()
 
 # Public headers: #include <zroxy/...>
