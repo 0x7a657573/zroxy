@@ -47,6 +47,7 @@ typedef struct {
 	int eintr_write;
 	int eintr_connect;
 	int eintr_wait;
+	int fail_wait;      /* forced non-EINTR wait failures (loop exits) */
 	int fail_allocs;
 } sni_test_faults;
 
