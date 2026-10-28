@@ -12,8 +12,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "log.h"
-#include "sniproxy.h"
+#include <zroxy/log.h>
+#include <zroxy/sniproxy.h>
 #include "sniclient.h"
 
 static int failures = 0;

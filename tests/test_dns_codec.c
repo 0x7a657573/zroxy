@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "dns.h"
-#include "log.h"
+#include <zroxy/dns.h>
+#include <zroxy/log.h>
 
 static int failures = 0;
 

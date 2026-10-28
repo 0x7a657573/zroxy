@@ -11,8 +11,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "log.h"
-#include "socks.h"
+#include <zroxy/log.h>
+#include <zroxy/socks.h>
 
 static int failures = 0;
 

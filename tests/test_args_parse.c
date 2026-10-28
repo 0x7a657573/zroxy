@@ -7,8 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "args.h"
-#include "log.h"
+#include <zroxy/args.h>
+#include <zroxy/log.h>
 
 bool Parse_config(zroxy_t *ptr, char *str);
 

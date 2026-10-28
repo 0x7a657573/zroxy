@@ -11,8 +11,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "dnsproxy.h"
-#include "log.h"
+#include <zroxy/dnsproxy.h>
+#include <zroxy/log.h>
 
 void *DNS_HandleIncomingRequset(void *ptr);
 

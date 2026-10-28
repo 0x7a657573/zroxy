@@ -4,14 +4,14 @@
  *  Created on: Feb 16, 2020
  *      Author: zeus
  */
-#include "args.h"
+#include <zroxy/args.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "version.h"
+#include <zroxy/version.h>
 #include <stdbool.h>
 //#include <argp.h>
-#include <log.h>
+#include <zroxy/log.h>
 #include <netdb.h>
 #include <getopt.h>
 #include <ctype.h>

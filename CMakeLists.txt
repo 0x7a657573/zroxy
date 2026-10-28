@@ -15,20 +15,19 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wno-unused-parameter)
 endif()
 
-# config.h, version.h and args.h live in src/.
-add_library(zroxy_config INTERFACE)
-target_include_directories(zroxy_config INTERFACE ${PROJECT_SOURCE_DIR}/src)
+# Public headers: #include <zroxy/...>
+add_library(zroxy_headers INTERFACE)
+target_include_directories(zroxy_headers INTERFACE ${PROJECT_SOURCE_DIR}/include)
 
-# zroxy_add_module(<name> INCLUDE <dir> SOURCES <src>... [DEPS <target>...])
+# zroxy_add_module(<name> SOURCES <src>... [DEPS <target>...] [DEFINES <def>...])
 #
-# One static library per module. INCLUDE is the module's public header
-# directory; DEPS are the modules whose headers or symbols it uses.
+# One static library per module under src/<module>/. DEPS are the modules
+# whose headers or symbols it uses.
 function(zroxy_add_module name)
-    cmake_parse_arguments(ARG "" "INCLUDE" "SOURCES;DEPS;DEFINES" ${ARGN})
+    cmake_parse_arguments(ARG "" "" "SOURCES;DEPS;DEFINES" ${ARGN})
     add_library(${name} STATIC ${ARG_SOURCES})
-    target_include_directories(${name} PUBLIC ${PROJECT_SOURCE_DIR}/${ARG_INCLUDE})
     target_link_libraries(${name}
-        PUBLIC zroxy_config ${ARG_DEPS}
+        PUBLIC zroxy_headers ${ARG_DEPS}
         PRIVATE zroxy_build_options)
     if(ARG_DEFINES)
         target_compile_definitions(${name} PUBLIC ${ARG_DEFINES})
@@ -39,57 +38,51 @@ endfunction()
 # Modules (dependency order)
 # ---------------------------------------------------------------------------
 zroxy_add_module(zroxy_log
-    INCLUDE log
-    SOURCES log/log.c log/loglock.c
+    SOURCES src/log/log.c src/log/loglock.c
     DEPS Threads::Threads)
 
 zroxy_add_module(zroxy_fifo
-    INCLUDE fifo
-    SOURCES fifo/fifo.c
+    SOURCES src/fifo/fifo.c
     DEPS Threads::Threads)
 
 zroxy_add_module(zroxy_net
-    INCLUDE network
-    SOURCES network/net.c network/net_io.c network/socks/socks.c
+    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c
     DEPS zroxy_log)
-target_include_directories(zroxy_net PUBLIC ${PROJECT_SOURCE_DIR}/network/socks)
 
-# Included as <filter/filter.h>, so the public directory is sniproxy/.
 zroxy_add_module(zroxy_filter
-    INCLUDE sniproxy
-    SOURCES sniproxy/filter/filter.c
+    SOURCES src/filter/filter.c
     DEPS zroxy_log Threads::Threads)
 
 zroxy_add_module(zroxy_stats
-    INCLUDE statistics
-    SOURCES statistics/statistics.c
+    SOURCES src/stats/statistics.c
     DEPS zroxy_log Threads::Threads)
 
 zroxy_add_module(zroxy_monitor
-    INCLUDE statistics
-    SOURCES statistics/monitor.c
+    SOURCES src/stats/monitor.c
     DEPS zroxy_stats zroxy_net)
 
 zroxy_add_module(zroxy_dns
-    INCLUDE dnsproxy
-    SOURCES dnsproxy/dns.c dnsproxy/dnsproxy.c dnsproxy/dnsserver.c
+    SOURCES src/dns/dns.c src/dns/dnsproxy.c src/dns/dnsserver.c
     DEPS zroxy_net zroxy_filter zroxy_stats zroxy_monitor zroxy_fifo)
 
+# The SNI engine's own headers (event loop, resolver) stay private to
+# src/sni/; tests that drive the engine directly link zroxy_sni_internal.
+add_library(zroxy_sni_internal INTERFACE)
+target_include_directories(zroxy_sni_internal INTERFACE ${PROJECT_SOURCE_DIR}/src/sni)
+
 set(ZROXY_SNI_SOURCES
-    sniproxy/sniproxy.c
-    sniproxy/sniclient.c
-    sniproxy/sni_event_loop.c
-    sniproxy/sni_resolver.c
+    src/sni/sniproxy.c
+    src/sni/sniclient.c
+    src/sni/sni_event_loop.c
+    src/sni/sni_resolver.c
 )
 set(ZROXY_SNI_DEPS zroxy_net zroxy_filter zroxy_stats)
 
 zroxy_add_module(zroxy_sni
-    INCLUDE sniproxy
     SOURCES ${ZROXY_SNI_SOURCES}
     DEPS ${ZROXY_SNI_DEPS})
 
 zroxy_add_module(zroxy_args
-    INCLUDE src
     SOURCES src/args.c
     DEPS zroxy_log zroxy_sni zroxy_dns)
 
@@ -109,14 +102,12 @@ install(TARGETS zroxy RUNTIME DESTINATION bin)
 if(BUILD_TESTING)
     # SNI engine builds with test hooks, once per event backend.
     zroxy_add_module(zroxy_sni_hooks
-        INCLUDE sniproxy
         SOURCES ${ZROXY_SNI_SOURCES}
-        DEPS ${ZROXY_SNI_DEPS}
+        DEPS ${ZROXY_SNI_DEPS} zroxy_sni_internal
         DEFINES SNI_TEST_HOOKS)
     zroxy_add_module(zroxy_sni_hooks_poll
-        INCLUDE sniproxy
         SOURCES ${ZROXY_SNI_SOURCES}
-        DEPS ${ZROXY_SNI_DEPS}
+        DEPS ${ZROXY_SNI_DEPS} zroxy_sni_internal
         DEFINES SNI_TEST_HOOKS SNI_FORCE_POLL)
 
     # zroxy_add_unit_test(<name> <source> <libs>...)
@@ -136,7 +127,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(dns_codec        tests/test_dns_codec.c        zroxy_dns)
     zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args)
     zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net)
-    zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni)
+    zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)
     zroxy_add_unit_test(dnsproxy_tcp_io  tests/test_dnsproxy_tcp_io.c  zroxy_dns)
     zroxy_add_unit_test(io_limits        tests/test_io_limits.c        zroxy_dns zroxy_sni)
     zroxy_add_unit_test(sni_engine       tests/test_sni_engine.c       zroxy_sni_hooks)

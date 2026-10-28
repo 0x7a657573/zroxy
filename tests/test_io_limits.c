@@ -11,10 +11,10 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-#include "dnsproxy.h"
-#include "log.h"
-#include "net_io.h"
-#include "sniproxy.h"
+#include <zroxy/dnsproxy.h>
+#include <zroxy/log.h>
+#include <zroxy/net_io.h>
+#include <zroxy/sniproxy.h>
 
 static int failures = 0;
 static pthread_t main_thread;
