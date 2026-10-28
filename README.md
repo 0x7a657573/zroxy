@@ -221,17 +221,34 @@ are not intended to be placed in publicly readable configuration files.
 
 ### Whitelist syntax
 
-The whitelist contains one host pattern per line. The current matcher supports
-`*` and `?` wildcards. A configured whitelist that cannot be opened prevents
-startup; a failed later reload keeps the previously loaded list.
+The whitelist contains one host name or pattern per line. Blank lines and
+lines starting with `#` are ignored, and matching is case-insensitive.
+
+- `example.com` matches exactly that name (not `example.com.evil.net`).
+- `*.example.net` matches any name ending in `.example.net`, at any depth.
+- Any other `*` (any run of characters) or `?` (one character) pattern is
+  matched against the whole name.
+
+A configured whitelist that cannot be opened prevents startup. The file is
+reloaded automatically when it is saved (including editors that save by
+renaming a temporary file), or on `SIGHUP`. A failed reload keeps the
+previously loaded list.
 
 Example:
 
 ```text
+# streaming
 example.com
 *.example.net
 api-?.example.org
 ```
+
+### Signals
+
+| Signal | Effect |
+| --- | --- |
+| `SIGHUP` | Reload the whitelist |
+| `SIGINT`, `SIGTERM` | Stop SNI listeners and the DNS service, then exit with status 0 |
 
 ## Monitor endpoint
 
@@ -350,6 +367,7 @@ The default suite includes unit, process, and loopback integration tests:
 - `sni_e2e`
 - `dns_e2e`
 - `monitor_e2e`
+- `lifecycle_e2e`
 
 Run only integration tests with:
 
@@ -414,7 +432,8 @@ Current important bounds include:
 - fixed 8 KiB buffers for the initial data and each relay direction;
 - a process-wide resolver pool with 4 threads and 128 resolver slots;
 - up to 32 monitor workers;
-- up to 128 DNS workers.
+- a fixed pool of 32 DNS workers, each keeping one upstream TCP connection
+  open between queries.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for ownership, locking, resolver,
 connection-state, and data-path details.

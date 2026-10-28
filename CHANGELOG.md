@@ -4,16 +4,41 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 
 ## Unreleased
 
-### Correctness
+### Security
 
-- Dropped DNS requests now abandon their statistics state when worker admission or allocation fails.
-- Whitelist matching is case-insensitive for DNS names and file entries, as required by RFC 4343.
-- Linux and FreeBSD whitelist watchers reload after in-place writes and file replacement.
+- A plain whitelist entry no longer matches longer names that start with it. Before, `example.com` also allowed `example.com.attacker.net` and `example.community`.
+
+### DNS
+
+- A fixed pool of 32 worker threads replaces one detached thread per query. Workers block on the queue's condition variable instead of polling it every 10 ms.
+- Each worker keeps its upstream TCP connection (direct or SOCKS5) open between queries. A connection closed by the server is detected before reuse; a failure on a reused connection is retried once on a fresh one.
+- Upstream reads and writes use monotonic per-call deadlines instead of `SO_RCVTIMEO`/`SO_SNDTIMEO`.
+
+### Process lifecycle
+
+- `SIGINT` and `SIGTERM` stop the SNI listeners and the DNS service, join their threads, and exit with status 0.
+- `SIGHUP` reloads the whitelist.
+
+### Whitelist
+
+- Exact names and `*.suffix` entries are stored in hash sets; other patterns are matched linearly. Lookups take a read lock and no longer scan the whole list.
+- Matching is case-insensitive for DNS names and file entries, as required by RFC 4343. A trailing dot is ignored.
+- Blank lines and `#` comments are skipped; surrounding whitespace is trimmed.
+- Linux and FreeBSD watchers reload after in-place writes and file replacement.
+
+### Code structure
+
+- Public headers live in `include/zroxy/` and are included as `<zroxy/name.h>`. Sources live in `src/<module>/`, each built as one static library.
+- Misspelled and inconsistently cased functions were renamed to `module_snake_case` (for example `fifo_incert` → `fifo_push`, `Minitor_HandelConnection` → `monitor_client_thread`, `state_RxTxClose` → `stats_close_connection`). Helpers used by one file are now `static`; unused functions were removed.
+- Reserved identifiers (`_MaxHostName_`, `__FILENAME__`, ...) were renamed to `ZROXY_MAX_*` and `LOG_FILENAME`.
+- The build enables `-Wshadow -Wconversion`; gcc and clang build the tree without warnings.
 
 ### Test coverage
 
-- Monitor end-to-end tests read the expected version from `src/version.h`.
-- DNS end-to-end tests cover mixed-case whitelist queries and atomic or in-place whitelist saves.
+- Monitor end-to-end tests read the expected version from `include/zroxy/version.h`.
+- DNS end-to-end tests cover mixed-case whitelist queries, atomic or in-place whitelist saves, and upstream connection reuse including server-side close.
+- A new `lifecycle_e2e` test covers `SIGHUP` reload and clean `SIGTERM`/`SIGINT` exit.
+- Whitelist unit tests cover the prefix-match regression, comments, whitespace, generic patterns and a 20,000-entry list.
 
 ## 1.3.1 - 2026-10-28
 

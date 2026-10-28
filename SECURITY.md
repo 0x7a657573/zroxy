@@ -29,14 +29,14 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 
 On this Linux host, with gcc, the SNI targets were built with `-Wall -Wextra -Wno-unused-parameter -Wconversion -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all`. The compiler printed conversion warnings in older non-SNI files, but none in the SNI event-loop or resolver sources. `test_sni_engine` and `test_sni_engine_poll` passed under AddressSanitizer and UndefinedBehaviorSanitizer when AddressSanitizer was allowed to start behind the process preload (`ASAN_OPTIONS=verify_asan_link_order=0`) with leak detection and UBSan `halt_on_error=1`. No AddressSanitizer, LeakSanitizer, or UndefinedBehaviorSanitizer report was produced by those runs. The same two SNI tests passed under ThreadSanitizer with `TSAN_OPTIONS=halt_on_error=1`. The normal build passed 14/14 enabled CTest tests. `zroxy_stress` and `zroxy_benchmark` stay disabled in a plain `ctest` run. `musl-gcc` is not installed here, so no musl build was performed.
 
-The SNI sources also compile with `-Wconversion -Werror`. `dnsproxy.c` still has conversion warnings in older functions that this change did not edit.
+The SNI sources also compile with `-Wconversion -Werror`. Since then the whole tree builds with `-Wshadow -Wconversion` enabled by default and produces no warnings with gcc or clang.
 
 ## Remaining risk
 
 - A monitor started with no token does not check credentials. Binding it to `0.0.0.0` without a token exposes the counters to every reachable client.
-- Startup errors return from `main` without a single cleanup of every config allocation. The missing-whitelist and bad-config process tests exited 1 with no LeakSanitizer text. Other failure orders were not exhaustively instrumented. The long-running loop never reaches `Free_DnsServer`; process exit reclaims that memory.
-- `localdns_pull` currently always returns true, so the free after that loop does not run while the detached DNS worker is blocked on the queue. Freeing that queue while the worker is alive would be a use-after-free. That path was not executed.
-- The DNS worker cap was reviewed and not load-tested. SNI and monitor caps were.
-- Inotify whitelist reload and a musl build were not executed. SNI name lookup runs on a fixed pool of 4 threads. The event-loop thread does not call `getaddrinfo()`. DNS still blocks one worker thread on its own lookup.
+- On `SIGINT`/`SIGTERM` and on a startup failure, `main` stops the SNI listeners and the DNS service (joining their threads) before freeing the configuration they use. The whitelist and monitor are not freed; their threads may run until exit.
+- The DNS worker pool (32 threads) was not load-tested. SNI and monitor caps were.
+- Before this release, a plain whitelist entry also matched any longer name that started with it (`example.com` allowed `example.com.attacker.net`). Lists written against the old behaviour may have relied on that; such names now need an explicit entry or pattern.
+- Inotify whitelist reload is covered by `dns_e2e` on Linux. The FreeBSD kqueue watcher and a musl build were not executed. SNI name lookup runs on a fixed pool of 4 threads. The event-loop thread does not call `getaddrinfo()`. DNS still blocks one worker thread on its own lookup.
 - A resolved address is not dialed when it is the listener itself, an unspecified address, link-local, or multicast. IPv4-mapped IPv6 is rewritten to IPv4 before that check, so `::ffff:127.0.0.1` is treated as loopback. Private addresses are allowed. A listener bound to `0.0.0.0` rejects every loopback and unspecified result. The whitelist is applied to the normalized hostname before a lookup is submitted.
 - AddressSanitizer's own link-order check fails in this environment because another shared object is mapped before `libasan`. The passing run disabled that one check. It did not disable leak or undefined-behavior detection.
