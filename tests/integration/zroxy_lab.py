@@ -832,6 +832,7 @@ class FakeDnsUpstream:
         self._lock = threading.Lock()
         self.queries = []
         self.prefix_bytes = []
+        self.accepted = 0
         self._threads = []
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -860,6 +861,7 @@ class FakeDnsUpstream:
                 break
             worker = threading.Thread(target=self._handle, args=(conn,), name="fake-dns-conn")
             with self._lock:
+                self.accepted += 1
                 self._threads.append(worker)
             worker.start()
 
@@ -869,6 +871,9 @@ class FakeDnsUpstream:
             conn.settimeout(3.0)
             with self._lock:
                 mode = self.mode
+            if mode == "keepalive":
+                self._serve_keepalive(conn)
+                return
             if mode == "incomplete":
                 first = _read_exact(conn, 1, 3.0)
                 with self._lock:
@@ -908,6 +913,30 @@ class FakeDnsUpstream:
             workers = list(self._threads)
         for worker in workers:
             worker.join(timeout=2.0)
+
+    def _serve_keepalive(self, conn):
+        """Answer queries on one connection until the client closes it or the mode changes."""
+        while not self._stop.is_set():
+            with self._lock:
+                if self.mode != "keepalive":
+                    return
+            conn.settimeout(0.2)
+            try:
+                prefix = conn.recv(2, socket.MSG_WAITALL)
+            except socket.timeout:
+                continue
+            if len(prefix) < 2:
+                return
+            length = struct.unpack("!H", prefix)[0]
+            query = _read_exact(conn, length, 3.0) if length else b""
+            with self._lock:
+                self.queries.append(query)
+            body = self.response_fn(query) if self.response_fn else query
+            conn.sendall(struct.pack("!H", len(body)) + body)
+
+    def upstream_connections(self):
+        with self._lock:
+            return self.accepted
 
     def wait_queries(self, n, timeout):
         deadline = time.monotonic() + timeout
