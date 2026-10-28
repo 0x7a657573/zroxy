@@ -122,45 +122,73 @@ void filter_Reload(filter_t *self)
 }
 
 #ifdef __linux__
+/*
+ * Watch the parent directory, not the file. Editors and config tools often
+ * save by writing a temp file and renaming it over the original, which
+ * replaces the inode and silently kills a watch on the file itself.
+ * IN_CLOSE_WRITE also avoids reloading a half-written file.
+ */
 void *filter_Handlefilewatcher(void *vargp)
 {
 	filter_t *self = (filter_t *)vargp;
 	int wd, fd;
-	fd = inotify_init();
-    if ( fd < 0 ) 
-	{
-        log_error("Couldn't initialize inotify");
-		return NULL;
-    }
+	char dir[4096];
+	const char *base;
+	const char *slash = strrchr(self->filepath, '/');
 
-	wd = inotify_add_watch(fd, self->filepath, IN_MODIFY); 
-    if (wd == -1) 
+	if (slash)
 	{
-        log_error("Couldn't add watch to %s\n",self->filepath);
+		size_t dlen = (size_t)(slash - self->filepath);
+		if (dlen == 0)
+			dlen = 1; /* file in "/" */
+		if (dlen >= sizeof(dir))
+		{
+			log_error("whitelist path too long to watch");
+			return NULL;
+		}
+		memcpy(dir, self->filepath, dlen);
+		dir[dlen] = '\0';
+		base = slash + 1;
+	}
+	else
+	{
+		memcpy(dir, ".", 2);
+		base = self->filepath;
+	}
+
+	fd = inotify_init1(IN_CLOEXEC);
+	if ( fd < 0 )
+	{
+		log_error("Couldn't initialize inotify");
+		return NULL;
+	}
+
+	wd = inotify_add_watch(fd, dir, IN_CLOSE_WRITE | IN_MOVED_TO);
+	if (wd == -1)
+	{
+		log_error("Couldn't add watch to %s",dir);
 		close(fd);
 		return NULL;
-    }
-	else 
-	{
-        log_info("Watching::%s\n",self->filepath);
-    }
-	
-	char buf[4096];
+	}
+	log_info("Watching::%s",self->filepath);
+
+	char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
 	const struct inotify_event *event;
-    ssize_t len;
+	ssize_t len;
 	while(1)
 	{
 		len = read(fd, buf, sizeof(buf));
-        if (len < 0) 
+		if (len < 0)
 		{
 			if (errno == EINTR)
 				continue;
-            log_error("filter watcher crash");
-            break;
-        }
+			log_error("filter watcher crash");
+			break;
+		}
 		if (len == 0)
 			break;
 
+		bool changed = false;
 		char *ptr = buf;
 		char *buf_end = buf + len;
 		while (ptr + sizeof(struct inotify_event) <= buf_end)
@@ -170,12 +198,21 @@ void *filter_Handlefilewatcher(void *vargp)
 			if ((size_t)event->len > (size_t)(buf_end - ptr) - sizeof(*event))
 				break;
 			evsz = sizeof(*event) + (size_t)event->len;
-			if ( event->mask & IN_MODIFY) 
+			if (event->len > 0 && strcmp(event->name, base) == 0 &&
+				(event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)))
+				changed = true;
+			if (event->mask & IN_IGNORED)
 			{
-				log_info( "file %s was modified", self->filepath);
-				filter_Reload(self);
+				log_error("whitelist directory watch removed");
+				close(fd);
+				return NULL;
 			}
 			ptr += evsz;
+		}
+		if (changed)
+		{
+			log_info( "file %s was modified", self->filepath);
+			filter_Reload(self);
 		}
 	}
 
@@ -183,63 +220,97 @@ void *filter_Handlefilewatcher(void *vargp)
 	return NULL;
 }
 #elif __FreeBSD__
+#ifdef NOTE_CLOSE_WRITE
+#define FILTER_NOTE_CHANGE	(NOTE_CLOSE_WRITE | NOTE_ATTRIB)
+#else
+#define FILTER_NOTE_CHANGE	(NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB)
+#endif
+
+/* open the whitelist and register it; the old registration goes with close(fd) */
+static int filter_watch_open(int kq, const char *filename)
+{
+	struct kevent change;
+	int fd = open(filename, O_RDONLY | O_CLOEXEC);
+	if (fd == -1)
+		return -1;
+	EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+		FILTER_NOTE_CHANGE | NOTE_DELETE | NOTE_RENAME, 0, NULL);
+	if (kevent(kq, &change, 1, NULL, 0, NULL) == -1)
+	{
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
 void *filter_Handlefilewatcher(void *vargp)
 {
 	filter_t *self = (filter_t *)vargp;
 	const char *filename = self->filepath; // The file to monitor
-    int kq = kqueue(); // Create a new kernel event queue
+	int kq = kqueue(); // Create a new kernel event queue
 
-    if (kq == -1) 
+	if (kq == -1)
 	{
-        log_error("Couldn't initialize kqueue");
-        return NULL;
-    }
+		log_error("Couldn't initialize kqueue");
+		return NULL;
+	}
 
-    // Open the file for event notifications
-    int fd = open(filename, O_RDONLY);
-    if (fd == -1) 
+	int fd = filter_watch_open(kq, filename);
+	if (fd == -1)
 	{
-		log_error("Couldn't add open %s\n",filename);
+		log_error("Couldn't add open %s",filename);
 		close(kq);
-        return NULL;
-    }
+		return NULL;
+	}
 
-    // Register the file descriptor for events
-    struct kevent change;
-    EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_DELETE | NOTE_ATTRIB, 0, NULL);
+	log_info("Watching for changes to %s...", filename);
 
-    log_info("Watching for changes to %s...", filename);
-    
-    while (1) 
+	while (1)
 	{
-        struct kevent event;
-        int nev = kevent(kq, &change, 1, &event, 1, NULL); // Wait for events
+		struct kevent event;
+		int nev = kevent(kq, NULL, 0, &event, 1, NULL); // Wait for events
 
-        if (nev == -1) 
+		if (nev == -1)
 		{
 			if (errno == EINTR)
 				continue;
-            log_error("kevent event error");
-            break;
-        }
-		else if (nev > 0) 
-		{
-            if (event.fflags & NOTE_DELETE) 
-			{
-                log_info("File deleted: %s\n", filename);
-                break; // Exit on file delete
-            }
-            if (event.fflags & NOTE_ATTRIB) 
-			{
-				log_info( "file %s was modified", self->filepath);
-				filter_Reload(self);
-            }
-        }
-    }
+			log_error("kevent event error");
+			break;
+		}
+		if (nev == 0)
+			continue;
 
-    // Cleanup
-    close(fd);
-    close(kq);
+		if (event.fflags & (NOTE_DELETE | NOTE_RENAME))
+		{
+			/* replaced by rename or delete+create: follow the new file */
+			int tries;
+			close(fd);
+			fd = -1;
+			for (tries = 0; tries < 50 && fd == -1; tries++)
+			{
+				usleep(100000);
+				fd = filter_watch_open(kq, filename);
+			}
+			if (fd == -1)
+			{
+				log_error("whitelist %s is gone; stop watching", filename);
+				break;
+			}
+			log_info( "file %s was replaced", self->filepath);
+			filter_Reload(self);
+			continue;
+		}
+		if (event.fflags & FILTER_NOTE_CHANGE)
+		{
+			log_info( "file %s was modified", self->filepath);
+			filter_Reload(self);
+		}
+	}
+
+	// Cleanup
+	if (fd != -1)
+		close(fd);
+	close(kq);
 	return NULL;
 }
 #endif

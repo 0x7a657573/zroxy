@@ -171,11 +171,59 @@ def test_dns_whitelist_synthetic():
         proc.check_alive()
 
 
+def _expect_synthetic(ldns, name, qid, proc):
+    reply = zroxy_lab.udp_exchange(ldns, zroxy_lab.build_dns_query(name, qid=qid), 3.0)
+    if reply is None:
+        raise AssertionError("%s produced no response\n%s" % (name, proc.log_text()))
+    parsed = zroxy_lab.parse_dns_message(reply)
+    if not any(a["type"] == 1 and a["rdata"] == bytes(SYNTHETIC_IP) for a in parsed["answers"]):
+        raise AssertionError("%s did not get the synthetic answer: %r" % (name, parsed))
+
+
+def test_dns_whitelist_reload():
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP),
+                                   fragment=1, fragment_gap=0.0)
+        white = lab.write("white.txt", "first.test\n")
+        ldns = zroxy_lab.free_udp_port()
+        proc = lab.zroxy(
+            [
+                "-l", "0",
+                "-d", "127.0.0.1:%s" % ldns,
+                "-u", "127.0.0.1:%s" % upstream.port,
+                "-t", "1",
+                "-i", "%d.%d.%d.%d" % SYNTHETIC_IP,
+                "-w", white,
+            ],
+            udp_ports=[ldns],
+        )
+        _expect_synthetic(ldns, "first.test", 0x3001, proc)
+        later = zroxy_lab.build_dns_query("later.test", qid=0x3002)
+        _expect_exact(ldns, later, 3.0)
+        if later not in upstream.queries:
+            raise AssertionError("later.test was answered before it was whitelisted")
+
+        # Atomic save: write a temp file and rename it over the whitelist.
+        tmp = lab.write("white.txt.tmp", "later.test\n")
+        os.replace(tmp, white)
+        if not proc.wait_log("Reload filter:", 3.0):
+            raise AssertionError("rename over whitelist did not reload\n%s" % proc.log_text())
+        _expect_synthetic(ldns, "later.test", 0x3003, proc)
+
+        # In-place save: the watch must survive the earlier rename.
+        lab.write("white.txt", "third.test\n")
+        if not proc.wait_log("Reload filter:", 3.0, after=1):
+            raise AssertionError("in-place write did not reload\n%s" % proc.log_text())
+        _expect_synthetic(ldns, "third.test", 0x3004, proc)
+        proc.check_alive()
+
+
 def main():
     tests = [
         test_dns_forward_fragmented,
         test_dns_bounded_failures,
         test_dns_whitelist_synthetic,
+        test_dns_whitelist_reload,
     ]
     failed = 0
     for test in tests:
