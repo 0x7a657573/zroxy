@@ -14,13 +14,22 @@
 #include <zroxy/dnsproxy.h>
 #include <zroxy/log.h>
 
-void *DNS_HandleIncomingRequset(void *ptr);
-
 typedef struct
 {
     dnsserver_t *dns;
     dnsMessage_t msg;
 } dnsThread_test_t;
+
+static void *handle_request_thread(void *arg)
+{
+    dnsThread_test_t *in = (dnsThread_test_t *)arg;
+    int upstream_fd = -1;
+    localdns_handle_request(in->dns, &in->msg, &upstream_fd);
+    if (upstream_fd >= 0)
+        close(upstream_fd);
+    free(in);
+    return NULL;
+}
 
 static int failures = 0;
 
@@ -287,12 +296,12 @@ static bool run_dnsproxy_case(bool close_mid_prefix, bool *server_ok, bool *rece
 
     worker_input->dns = &dns;
     worker_input->msg.len = sizeof(k_dns_query_example_com);
-    worker_input->msg.message[0] = (uint8_t)((worker_input->msg.len >> 8) & 0xff);
-    worker_input->msg.message[1] = (uint8_t)(worker_input->msg.len & 0xff);
+    worker_input->msg.message[0] = (char)((worker_input->msg.len >> 8) & 0xff);
+    worker_input->msg.message[1] = (char)(worker_input->msg.len & 0xff);
     memcpy(worker_input->msg.message + 2, k_dns_query_example_com, sizeof(k_dns_query_example_com));
     worker_input->msg.client = client_addr;
 
-    if (pthread_create(&handler_tid, NULL, DNS_HandleIncomingRequset, worker_input) != 0)
+    if (pthread_create(&handler_tid, NULL, handle_request_thread, worker_input) != 0)
     {
         free(worker_input);
         pthread_join(upstream_tid, NULL);

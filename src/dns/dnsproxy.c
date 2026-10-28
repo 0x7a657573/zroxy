@@ -28,40 +28,7 @@
 #include <zroxy/filter.h>
 #include <time.h>
 #include <zroxy/net_io.h>
-
-void *dnsserver_workerTask(void *vargp);
-
-typedef struct
-{
-	dnsserver_t	*dns;
-	dnsMessage_t msg;
-}dnsThread_t;
-
-#define DNS_MAX_WORKERS 128
-
-static pthread_mutex_t dns_worker_mu = PTHREAD_MUTEX_INITIALIZER;
-static int dns_workers = 0;
-
-static bool dns_thread_acquire(void)
-{
-	bool ok = false;
-	pthread_mutex_lock(&dns_worker_mu);
-	if (dns_workers < DNS_MAX_WORKERS)
-	{
-		dns_workers++;
-		ok = true;
-	}
-	pthread_mutex_unlock(&dns_worker_mu);
-	return ok;
-}
-
-static void dns_thread_release(void)
-{
-	pthread_mutex_lock(&dns_worker_mu);
-	if (dns_workers > 0)
-		dns_workers--;
-	pthread_mutex_unlock(&dns_worker_mu);
-}
+#include <poll.h>
 
 static void close_fd(int *fd)
 {
@@ -79,10 +46,12 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 		return NULL;
 	memset(ptr,0,sizeof(dnsserver_t));
 	ptr->local_sock = -1;
+	ptr->wake[0] = -1;
+	ptr->wake[1] = -1;
 
 	/* fifo init*/
 	ptr->fifo = (fifo_t*)malloc(sizeof(fifo_t));
-	if(!ptr->fifo || !fifo_init(ptr->fifo,D_FIFO_Message_Size,D_FIFO_Item))
+	if(!ptr->fifo || !fifo_init(ptr->fifo,DNS_QUEUE_ITEM_SIZE,DNS_QUEUE_LEN))
 	{
 		log_error("[!] Error DNS fifo not Set");
 		free(ptr->fifo);
@@ -119,16 +88,36 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	return ptr;
 }
 
-bool localdns_start_worker(dnsserver_t *dns)
+static void *localdns_worker(void *arg);
+
+bool localdns_start_workers(dnsserver_t *dns)
 {
-	pthread_t thread_id;
-	if (!dns || dns->worker_started)
+	int i;
+	if (!dns || dns->worker_count != 0)
 		return false;
-	if (pthread_create(&thread_id, NULL, dnsserver_workerTask, dns) != 0)
-		return false;
-	pthread_detach(thread_id);
-	dns->worker_started = true;
+	for (i = 0; i < DNS_WORKER_COUNT; i++)
+	{
+		if (pthread_create(&dns->workers[i], NULL, localdns_worker, dns) != 0)
+		{
+			log_error("can not create dns worker %d", i);
+			localdns_stop_workers(dns);
+			return false;
+		}
+		dns->worker_count++;
+	}
+	log_info("DNS started %d workers", dns->worker_count);
 	return true;
+}
+
+void localdns_stop_workers(dnsserver_t *dns)
+{
+	int i;
+	if (!dns || dns->worker_count == 0)
+		return;
+	fifo_close(dns->fifo);
+	for (i = 0; i < dns->worker_count; i++)
+		pthread_join(dns->workers[i], NULL);
+	dns->worker_count = 0;
 }
 
 void localdns_free(dnsserver_t *dns)
@@ -136,11 +125,9 @@ void localdns_free(dnsserver_t *dns)
 	if (!dns)
 		return;
 	/* socks aliases configuration memory and is not owned here. */
-	if (dns->local_sock >= 0)
-	{
-		close(dns->local_sock);
-		dns->local_sock = -1;
-	}
+	close_fd(&dns->local_sock);
+	close_fd(&dns->wake[0]);
+	close_fd(&dns->wake[1]);
 	if (dns->fifo)
 	{
 		fifo_deinit(dns->fifo);
@@ -220,11 +207,11 @@ bool localdns_pull(dnsserver_t *dns)
 	msg.len = (uint16_t)nread;
 
 	// the tcp query requires the length to precede the packet, so we put the length there
-	msg.message[0] = (msg.len>>8) & 0xFF;
-	msg.message[1] = msg.len & 0xFF;
+	msg.message[0] = (char)((msg.len>>8) & 0xFF);
+	msg.message[1] = (char)(msg.len & 0xFF);
 
 	/*send dns message to dns fifo*/
-	if(fifo_incert(dns->fifo,&msg))
+	if(fifo_push(dns->fifo,&msg))
 	{
 		if(dns->Stat)
 			state_IncConnection(dns->Stat);
@@ -238,7 +225,7 @@ bool localdns_pull(dnsserver_t *dns)
 }
 
 /* Return Len of packet*/
-int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
+static int localdns_answer_local(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 {
 	struct ResourceRecord *rr;
 	size_t written = 0;
@@ -308,7 +295,7 @@ int dns_resolve_query(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 	return (int)written;
 }
 
-const char *DNS_GetType(uint16_t type)
+static const char *dns_type_name(uint16_t type)
 {
   switch(type)
   {
@@ -323,199 +310,162 @@ const char *DNS_GetType(uint16_t type)
   	case SRV_Resource_RecordType: return "SRV";
 	case HTTPS_Resource_RecordType: return "HTTPS";
 	case SVCB_Resource_RecordType: return "SVCB";
-	default:	return "unknow";
+	default:	return "unknown";
   }
   return "";
 }
 
-uint64_t timeInMilliseconds(void) 
-{
-    struct timeval tv;
 
-    gettimeofday(&tv,NULL);
-    return (((uint64_t)tv.tv_sec)*1000)+(tv.tv_usec/1000);
+
+/*
+ * Drop an idle upstream connection if the server already closed it (or sent
+ * something unsolicited). Catches the common "server closes idle TCP" case
+ * before a query is written into a dead socket.
+ */
+static void upstream_drop_if_stale(int *fd)
+{
+	struct pollfd p;
+	if (*fd < 0)
+		return;
+	p.fd = *fd;
+	p.events = POLLIN;
+	p.revents = 0;
+	if (poll(&p, 1, 0) != 0)
+		close_fd(fd);
 }
 
-
-void *DNS_HandleIncomingRequset(void *ptr)
+static bool upstream_connect(dnsserver_t *dns, int *fd)
 {
+	if (dns->socks)
+		return socks5_connect(fd, dns->socks, dns->upstream.ip, dns->upstream.port, true, (int)dns->timeout);
+	return net_connect(fd, dns->upstream.ip, dns->upstream.port, (int)dns->timeout);
+}
 
-	dnsserver_t *dns = ((dnsThread_t*)ptr)->dns;
-	dnsMessage_t *msg = &((dnsThread_t*)ptr)->msg;
-	
-	
-	char domain_resolve[1024] = {0};
-	
+/* One length-prefixed query/response. Returns the response length, or 0. */
+static uint16_t upstream_exchange(dnsserver_t *dns, int fd, const dnsMessage_t *msg, uint8_t *resp)
+{
+	int timeout_ms = net_timeout_ms((int)dns->timeout);
+	uint8_t prefix[2];
+	uint16_t response_len;
 
-	uint64_t start_time = timeInMilliseconds(); 
-	int rlen = 0;
-	int sockssocket = -1;
-	bool handled_local = false;
-	do
+	if (!net_write_all_ms(fd, msg->message, (size_t)msg->len + 2u, timeout_ms))
+		return 0;
+	if (!net_read_exact_ms(fd, prefix, sizeof(prefix), timeout_ms))
+		return 0;
+
+	response_len = (uint16_t)((prefix[0] << 8) | prefix[1]);
+	if (response_len == 0 || response_len > DNS_MSG_SIZE - 2)
 	{
-		/*Check and Print DNS Question*/
-		struct Message dns_msg = {0};
-		if(dns_decode_msg(&dns_msg,(const uint8_t *) &msg->message[2], msg->len))
+		log_error("DNS: upstream response length rejected: %u", response_len);
+		return 0;
+	}
+	if (!net_read_exact_ms(fd, resp, response_len, timeout_ms))
+		return 0;
+	return response_len;
+}
+
+/*
+ * Forward over the worker's persistent connection, opening one if needed.
+ * A failure on a reused connection is retried once on a fresh one; a failure
+ * on a fresh connection is final.
+ */
+static uint16_t upstream_forward(dnsserver_t *dns, const dnsMessage_t *msg, int *upstream_fd, uint8_t *resp)
+{
+	int attempt;
+
+	upstream_drop_if_stale(upstream_fd);
+	for (attempt = 0; attempt < 2; attempt++)
+	{
+		bool reused = *upstream_fd >= 0;
+		uint16_t n;
+
+		if (!reused && !upstream_connect(dns, upstream_fd))
+			return 0;
+		n = upstream_exchange(dns, *upstream_fd, msg, resp);
+		if (n > 0)
+			return n;
+		close_fd(upstream_fd);
+		if (!reused)
+			return 0;
+	}
+	return 0;
+}
+
+void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *upstream_fd)
+{
+	char domain_resolve[1024] = {0};
+	int64_t start_time = net_mono_ms();
+	uint16_t rlen = 0;
+	bool handled_local = false;
+	struct Message dns_msg = {0};
+
+	/*Check and Print DNS Question*/
+	if(dns_decode_msg(&dns_msg,(const uint8_t *) &msg->message[2], msg->len))
+	{
+		struct Question *q = dns_msg.questions;
+		if (q && q->qName)
 		{
-			struct Question *q;
-			q = dns_msg.questions;
-			if (q && q->qName)
+			snprintf(domain_resolve,sizeof(domain_resolve),"resolve { (%s) qName '%s'} ",dns_type_name(q->qType),q->qName);
+
+			/*try make replay*/
+			if(dns->whitelist && filter_IsWhite(dns->whitelist,q->qName))
 			{
-				snprintf(domain_resolve,sizeof(domain_resolve),"resolve { (%s) qName '%s'} ",DNS_GetType(q->qType),q->qName);
-
-				/*try make replay*/
-				if(dns->whitelist && /*q->qType == A_Resource_RecordType &&*/
-					filter_IsWhite(dns->whitelist,q->qName))
+				uint8_t buffer[DNS_MSG_SIZE];
+				int len = localdns_answer_local(dns,&dns_msg,buffer);
+				handled_local = true;
+				/*if packet fill send to network*/
+				if(len > 0)
 				{
-					uint8_t buffer[DNS_MSG_SIZE];
-					int len = dns_resolve_query(dns,&dns_msg,buffer);
-					handled_local = true;
-					/*if packet fill send to network*/
-					if(len > 0)
-					{
-						// send the reply back to the client
-						sendto(dns->local_sock, buffer, len, 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
+					// send the reply back to the client
+					sendto(dns->local_sock, buffer, (size_t)len, 0, (const struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
 
-						uint64_t End_Time = timeInMilliseconds() - start_time;
-						double time_taken = ((double)End_Time)/(1000); // convert to sec
-						log_trace("%s in %0.3fs Local replay",domain_resolve,time_taken);
-					}
+					int64_t End_Time = net_mono_ms() - start_time;
+					double time_taken = ((double)End_Time)/(1000); // convert to sec
+					log_trace("%s in %0.3fs Local reply",domain_resolve,time_taken);
 				}
 			}
 		}
-		free_msg(&dns_msg);
-		if (handled_local)
-			break;
+	}
+	dns_free_msg(&dns_msg);
 
+	if (!handled_local)
+	{
+		uint8_t resp[DNS_MSG_SIZE];
+		int64_t End_Time;
+		double time_taken;
 
-		/*forward packet to server via socks*/
-		int trysend = 2;
-		while (trysend--)
-		{
-			if(dns->socks)
-			{
-				// make socks5 socket
-				if(!socks5_connect(&sockssocket,dns->socks, dns->upstream.ip, dns->upstream.port,true, (int)dns->timeout))
-					break;
-			}
-			else
-			{
-				/*direct connect to dns server*/
-				if(!net_connect(&sockssocket, dns->upstream.ip, dns->upstream.port, (int)dns->timeout))
-					break;
-			}
-			
-			/*set socket timeout*/
-			if(!net_socket_timeout(sockssocket,dns->timeout,dns->timeout))
-			{
-				log_error("DNS: can not set socket timeout");
-			}
-
-			// forward dns query
-			if(!net_write_all(sockssocket, msg->message, msg->len + 2))
-			{
-				break;
-			}
-
-			if(!net_read_exact(sockssocket, msg->message, 2))
-			{
-				break;
-			}
-
-			uint16_t response_len = ((uint8_t)msg->message[0] << 8) | (uint8_t)msg->message[1];
-			if(response_len > DNS_MSG_SIZE - 2)
-			{
-				log_error("DNS: upstream response too large: %u", response_len);
-				break;
-			}
-
-			if(!net_read_exact(sockssocket, msg->message + 2, response_len))
-			{
-				break;
-			}
-
-			rlen = response_len + 2;
-			break;
-		}
-
-		/*close sockst*/
-		close_fd(&sockssocket);
-
+		rlen = upstream_forward(dns, msg, upstream_fd, resp);
+		End_Time = net_mono_ms() - start_time;
+		time_taken = ((double)End_Time)/(1000); // convert to sec
 		if(rlen>0)
 		{
-			// forward the packet to the tcp dns server
-			// send the reply back to the client (minus the length at the beginning)
-			sendto(dns->local_sock, msg->message + 2, rlen - 2 , 0, (struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
-
-			uint64_t End_Time = timeInMilliseconds() - start_time;
-					double time_taken = ((double)End_Time)/(1000); // convert to sec
-			log_info("%s in %0.3fs txrx(%i/%i)",domain_resolve,time_taken,msg->len,rlen);
+			// send the reply back to the client
+			sendto(dns->local_sock, resp, rlen, 0, (const struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
+			log_info("%s in %0.3fs txrx(%i/%i)",domain_resolve,time_taken,msg->len,rlen + 2);
 		}
 		else
 		{
-			uint64_t End_Time = timeInMilliseconds() - start_time;
-			double time_taken = ((double)End_Time)/(1000); // convert to sec
 			log_error("NO DATA %s in %0.3fs",domain_resolve,time_taken);
 		}
-
-	}while(0);
+	}
 
 	//Update statistics
 	if(dns->Stat)
 	{
-		state_RxTxClose(dns->Stat, (uint32_t)(rlen < 0 ? 0 : rlen), (uint32_t)msg->len + 2u);
+		state_RxTxClose(dns->Stat, rlen > 0 ? (uint32_t)rlen + 2u : 0u, (uint32_t)msg->len + 2u);
 	}
-
-	dns_thread_release();
-	free(ptr);
-	return NULL;
 }
 
-void *dnsserver_workerTask(void *vargp)
+/* Fixed pool member: one query at a time over its own upstream connection. */
+static void *localdns_worker(void *arg)
 {
-	dnsserver_t *dns = (dnsserver_t*) vargp;
+	dnsserver_t *dns = (dnsserver_t*) arg;
 	dnsMessage_t msg;
-	
-	log_info("DNS Worker Started");
-	while(1)
-	{
-		if(!fifo_Read(dns->fifo,&msg))
-		{
-			usleep(10000);
-			continue;
-		}
-		
-		
-		
-		/*clone message*/
-		dnsThread_t *newmsg;
-		pthread_t thread_id;
-		if (!dns_thread_acquire())
-		{
-			log_error("dns worker limit reached");
-			state_abandon(dns->Stat);
-			continue;
-		}
-		newmsg = malloc(sizeof(dnsThread_t));
-		if (!newmsg)
-		{
-			dns_thread_release();
-			state_abandon(dns->Stat);
-			continue;
-		}
-		memcpy(&newmsg->msg,&msg,sizeof(dnsMessage_t));
-		newmsg->dns = dns;
-		/*Process incoming dns message*/
-		if(pthread_create(&thread_id, NULL, DNS_HandleIncomingRequset, (void*)newmsg) != 0)
-		{
-			log_error("can not create thread for new dns request");
-			free(newmsg);
-			dns_thread_release();
-			state_abandon(dns->Stat);
-			continue;
-		}
-		pthread_detach(thread_id);
-	}
+	int upstream_fd = -1;
 
+	while (fifo_pop_wait(dns->fifo, &msg))
+		localdns_handle_request(dns, &msg, &upstream_fd);
+
+	close_fd(&upstream_fd);
 	return NULL;
 }

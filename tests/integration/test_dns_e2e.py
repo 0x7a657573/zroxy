@@ -218,12 +218,42 @@ def test_dns_whitelist_reload():
         proc.check_alive()
 
 
+def test_dns_upstream_reuse():
+    # Each DNS worker keeps its upstream connection, so once every worker has
+    # connected, further queries must not open new connections.
+    workers = 32
+    queries = workers + 16
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="keepalive", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns)
+        for i in range(queries):
+            _expect_exact(ldns, zroxy_lab.build_dns_query("reuse%d.test" % i, qid=0x4000 + i), 3.0)
+        if upstream.query_count() != queries:
+            raise AssertionError("upstream saw %d of %d queries" % (upstream.query_count(), queries))
+        if upstream.upstream_connections() > workers:
+            raise AssertionError("upstream connections not reused: %d connections for %d queries"
+                                 % (upstream.upstream_connections(), queries))
+
+        # The server now closes every idle kept connection. Each worker must
+        # notice its stale connection and reconnect instead of failing.
+        upstream.set_mode("reply")
+        time.sleep(0.5)
+        errors = proc.count_log("NO DATA")
+        for i in range(queries):
+            _expect_exact(ldns, zroxy_lab.build_dns_query("after%d.test" % i, qid=0x4100 + i), 3.0)
+        if proc.count_log("NO DATA") != errors:
+            raise AssertionError("stale upstream connection caused a failed query\n%s" % proc.log_text())
+        proc.check_alive()
+
+
 def main():
     tests = [
         test_dns_forward_fragmented,
         test_dns_bounded_failures,
         test_dns_whitelist_synthetic,
         test_dns_whitelist_reload,
+        test_dns_upstream_reuse,
     ]
     failed = 0
     for test in tests:

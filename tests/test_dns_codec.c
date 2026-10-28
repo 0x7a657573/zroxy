@@ -78,7 +78,7 @@ static void test_decode_basic_a_query(void)
         failures++;
     }
 
-    free_msg(&msg);
+    dns_free_msg(&msg);
 }
 
 static void test_transaction_id_preserved_on_encode(void)
@@ -100,7 +100,7 @@ static void test_transaction_id_preserved_on_encode(void)
         }
     }
 
-    free_msg(&msg);
+    dns_free_msg(&msg);
 }
 
 static void test_decode_rd_ra_preservation(void)
@@ -138,14 +138,14 @@ static void test_decode_rd_ra_preservation(void)
                 "decode RD query");
     expect_u16(msg_query.rd, 1, "query RD decoded");
     expect_u16(msg_query.ra, 0, "query RA decoded");
-    free_msg(&msg_query);
+    dns_free_msg(&msg_query);
 
     expect_true(dns_decode_msg(&msg_response, k_response_rd_ra_set, (int)sizeof(k_response_rd_ra_set)),
                 "decode RD/RA response");
     expect_u16(msg_response.qr, 1, "response QR decoded");
     expect_u16(msg_response.rd, 1, "response RD decoded");
     expect_u16(msg_response.ra, 1, "response RA decoded");
-    free_msg(&msg_response);
+    dns_free_msg(&msg_response);
 }
 
 static void test_encode_local_a_response(void)
@@ -262,13 +262,13 @@ static void test_decode_rejects_truncated_and_loops(void)
     };
 
     expect_true(!dns_decode_msg(&msg, short_header, (int)sizeof(short_header)), "reject short header");
-    free_msg(&msg);
+    dns_free_msg(&msg);
     expect_true(!dns_decode_msg(&msg, truncated_label, (int)sizeof(truncated_label)), "reject truncated label");
-    free_msg(&msg);
+    dns_free_msg(&msg);
     expect_true(!dns_decode_msg(&msg, pointer_loop, (int)sizeof(pointer_loop)), "reject compression loop");
-    free_msg(&msg);
+    dns_free_msg(&msg);
     expect_true(!dns_decode_msg(&msg, pointer_oob, (int)sizeof(pointer_oob)), "reject compression pointer past packet");
-    free_msg(&msg);
+    dns_free_msg(&msg);
 }
 
 static void test_decode_valid_compression_pointer(void)
@@ -297,7 +297,7 @@ static void test_decode_valid_compression_pointer(void)
         fprintf(stderr, "FAIL: compressed question missing name\n");
         failures++;
     }
-    free_msg(&msg);
+    dns_free_msg(&msg);
 }
 
 static void put_query_header(uint8_t *pkt, uint16_t qdcount)
@@ -327,7 +327,7 @@ static void test_decode_more_malformed(void)
     pkt[17] = 0x00;
     pkt[18] = 0x01;
     expect_true(!dns_decode_msg(&msg, pkt, 19), "reject reserved label type");
-    free_msg(&msg);
+    dns_free_msg(&msg);
 
     memset(pkt, 0, sizeof(pkt));
     put_query_header(pkt, 1);
@@ -335,12 +335,12 @@ static void test_decode_more_malformed(void)
     pkt[13] = 'a';
     pkt[14] = 'b';
     expect_true(!dns_decode_msg(&msg, pkt, 15), "reject label longer than remaining bytes");
-    free_msg(&msg);
+    dns_free_msg(&msg);
 
     memcpy(pkt, k_query_example_com, sizeof(k_query_example_com));
     pkt[5] = 2;
     expect_true(!dns_decode_msg(&msg, pkt, (int)sizeof(k_query_example_com)), "reject qdcount past the packet");
-    free_msg(&msg);
+    dns_free_msg(&msg);
 
     memset(pkt, 0, sizeof(pkt));
     put_query_header(pkt, 1);
@@ -350,7 +350,7 @@ static void test_decode_more_malformed(void)
     pkt[15] = 0x00;
     pkt[16] = 0x01;
     expect_true(!dns_decode_msg(&msg, pkt, 17), "reject empty DNS name");
-    free_msg(&msg);
+    dns_free_msg(&msg);
 
     /* 17 compression jumps: the decoder allows 16. */
     memset(pkt, 0, sizeof(pkt));
@@ -371,7 +371,7 @@ static void test_decode_more_malformed(void)
     pkt[50] = 0xC0;
     pkt[51] = 0x00;
     expect_true(!dns_decode_msg(&msg, pkt, 52), "reject pointer chain over the jump limit");
-    free_msg(&msg);
+    dns_free_msg(&msg);
 
     /* 16 jumps, then a one-letter name. This must still decode. */
     memset(pkt, 0, sizeof(pkt));
@@ -400,7 +400,7 @@ static void test_decode_more_malformed(void)
         fprintf(stderr, "FAIL: jump-limit name missing\n");
         failures++;
     }
-    free_msg(&msg);
+    dns_free_msg(&msg);
 
     /* Four 63-byte labels do not fit the 255-byte presentation buffer. */
     memset(pkt, 0, sizeof(pkt));
@@ -418,7 +418,7 @@ static void test_decode_more_malformed(void)
     pkt[pos++] = 0x00;
     pkt[pos++] = 0x01;
     expect_true(!dns_decode_msg(&msg, pkt, pos), "reject DNS name longer than the hostname buffer");
-    free_msg(&msg);
+    dns_free_msg(&msg);
 }
 
 static void test_encode_rejects_short_buffer(void)

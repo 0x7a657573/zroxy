@@ -28,11 +28,17 @@ bool fifo_init(fifo_t *self,uint16_t MessageSize,uint16_t ItemNumber)
 		return false;
 
 	memset(self, 0, sizeof(*self));
-	if(fifo_CreateMutex(self->Mutex_Id)!=0)
+	if(fifo_mutex_init(self->Mutex_Id)!=0)
 		return false;
+	if(fifo_cond_init(self->NotEmpty)!=0)
+	{
+		pthread_mutex_destroy(&self->Mutex_Id);
+		return false;
+	}
 
 	if((size_t)MessageSize > SIZE_MAX / (size_t)ItemNumber)
 	{
+		fifo_cond_destroy(self->NotEmpty);
 		pthread_mutex_destroy(&self->Mutex_Id);
 		return false;
 	}
@@ -40,13 +46,14 @@ bool fifo_init(fifo_t *self,uint16_t MessageSize,uint16_t ItemNumber)
 
 	self->MessageSize = MessageSize;
 	self->MessageItem = ItemNumber;
-	self->Buffer = fifo_maloc(bytes);
+	self->Buffer = fifo_malloc(bytes);
 	self->wr_index = 0;
 	self->rd_index = 0;
 	self->counter = 0;
 	
 	if(self->Buffer==0)
 	{
+		fifo_cond_destroy(self->NotEmpty);
 		pthread_mutex_destroy(&self->Mutex_Id);
 		return false;
 	}
@@ -63,26 +70,18 @@ void fifo_deinit(fifo_t *self)
 		fifo_free(self->Buffer);
 		self->Buffer = NULL;
 	}
+	fifo_cond_destroy(self->NotEmpty);
 	pthread_mutex_destroy(&self->Mutex_Id);
 }
 
-void fifo_Remove(fifo_t *self)
-{
-	if(self==NULL)
-		return;
-
-	fifo_deinit(self);
-	fifo_free(self);
-}
-
-bool fifo_incert(fifo_t *self,void *data)
+bool fifo_push(fifo_t *self,void *data)
 {
 	if(self==NULL)
 		return false;
 
 	fifo_lock(self->Mutex_Id);
 
-	if (self->counter == self->MessageItem)
+	if (self->closed || self->counter == self->MessageItem)
 	{
 		  fifo_unlock(self->Mutex_Id);
 		  return false;
@@ -94,11 +93,21 @@ bool fifo_incert(fifo_t *self,void *data)
    	if (self->wr_index == self->MessageItem) self->wr_index=0;
    		self->counter++;
 
+   fifo_signal(self->NotEmpty);
    fifo_unlock(self->Mutex_Id);
    return true;
 }
 
-bool fifo_Read(fifo_t *self,void *data)
+/* caller holds the lock and has checked counter > 0 */
+static void fifo_take_locked(fifo_t *self,void *data)
+{
+	fifo_memcpy(data,&self->Buffer[self->rd_index*self->MessageSize],self->MessageSize);
+	self->rd_index++;
+	if (self->rd_index == self->MessageItem) self->rd_index=0;
+	--self->counter;
+}
+
+bool fifo_pop(fifo_t *self,void *data)
 {
 	if(self==NULL)
 		return false;
@@ -111,28 +120,43 @@ bool fifo_Read(fifo_t *self,void *data)
 	  return false;
 	}
 
-	fifo_memcpy(data,&self->Buffer[self->rd_index*self->MessageSize],self->MessageSize);
-	self->rd_index++;
-	if (self->rd_index == self->MessageItem) self->rd_index=0;
-	--self->counter;
+	fifo_take_locked(self,data);
 	fifo_unlock(self->Mutex_Id);
 	return true;
 }
 
-void fifo_flush(fifo_t *self)
+bool fifo_pop_wait(fifo_t *self,void *data)
+{
+	if(self==NULL)
+		return false;
+
+	fifo_lock(self->Mutex_Id);
+	while (self->counter == 0 && !self->closed)
+		fifo_wait(self->NotEmpty, self->Mutex_Id);
+
+	if (self->counter == 0)
+	{
+		fifo_unlock(self->Mutex_Id);
+		return false;
+	}
+
+	fifo_take_locked(self,data);
+	fifo_unlock(self->Mutex_Id);
+	return true;
+}
+
+void fifo_close(fifo_t *self)
 {
 	if(self==NULL)
 		return;
 
 	fifo_lock(self->Mutex_Id);
-	fifo_memset(self->Buffer,0, self->MessageSize*self->MessageItem);
-	self->wr_index = 0;
-	self->rd_index = 0;
-	self->counter = 0;
+	self->closed = true;
+	fifo_broadcast(self->NotEmpty);
 	fifo_unlock(self->Mutex_Id);
 }
 
-uint16_t fifo_UnreadMessage(fifo_t *self)
+uint16_t fifo_count(fifo_t *self)
 {
 	if(self==NULL)
 		return 0;
@@ -143,13 +167,3 @@ uint16_t fifo_UnreadMessage(fifo_t *self)
 	return unread;
 }
 
-uint16_t fifo_SpacesAvailable(fifo_t *self)
-{
-	if(self==NULL)
-		return 0;
-	uint16_t Free = 0;
-	fifo_lock(self->Mutex_Id);
-	Free = self->MessageItem - self->counter;
-	fifo_unlock(self->Mutex_Id);
-	return Free;
-}
