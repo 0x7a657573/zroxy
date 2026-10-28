@@ -776,8 +776,7 @@ static void enter_relay(sni_engine *e, sni_conn *c)
 		c->c2u_by = now + (int64_t)c->io_ms;
 		note_pending(c->c2u_len);
 	}
-	idle = (c->timeout_sec > 0) ? (int64_t)c->timeout_sec * 1000 : 0;
-	c->idle_at = now + idle;
+	c->idle_at = now + (int64_t)c->io_ms;
 	c->touched = 1;
 	relay_pump(e, c);
 }
