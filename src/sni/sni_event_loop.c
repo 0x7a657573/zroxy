@@ -217,6 +217,7 @@ static int g_eintr_read;
 static int g_eintr_write;
 static int g_eintr_connect;
 static int g_eintr_wait;
+static int g_fail_wait;
 static int g_fail_allocs;
 static uint32_t g_client_bytes;
 static uint32_t g_max_pending;
@@ -393,6 +394,10 @@ static int react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 		errno = EINTR;
 		return -1;
 	}
+	if (take_one(&g_fail_wait)) {
+		errno = EBADF;
+		return -1;
+	}
 #endif
 	n = epoll_wait(e->backend, evs, cap, timeout_ms);
 	if (n < 0)
@@ -490,6 +495,10 @@ static int react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 #ifdef SNI_TEST_HOOKS
 	if (take_one(&g_eintr_wait)) {
 		errno = EINTR;
+		return -1;
+	}
+	if (take_one(&g_fail_wait)) {
+		errno = EBADF;
 		return -1;
 	}
 #endif
@@ -1893,14 +1902,16 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 
 void sni_listener_close(sni_listener *ls)
 {
-	sni_engine *eng;
 	if (!ls)
 		return;
+	/*
+	 * Wake under mu: engine_thread clears ls->eng under mu before deinit
+	 * closes wake_w, so the write never reaches a closed or reused fd.
+	 */
 	pthread_mutex_lock(&ls->mu);
-	eng = ls->eng;
+	if (ls->eng)
+		request_stop(ls->eng);
 	pthread_mutex_unlock(&ls->mu);
-	if (eng)
-		request_stop(eng);
 	pthread_join(ls->thread, NULL);
 	if (ls->sink) {
 		sni_resolver_sink_release(ls->sink);
@@ -1969,6 +1980,7 @@ void sni_test_set_faults(const sni_test_faults *faults)
 	__atomic_store_n(&g_eintr_write, faults->eintr_write, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_eintr_connect, faults->eintr_connect, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_eintr_wait, faults->eintr_wait, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_fail_wait, faults->fail_wait, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_fail_allocs, faults->fail_allocs, __ATOMIC_RELAXED);
 }
 
