@@ -1353,7 +1353,8 @@ static void test_relay_budget(void)
 		return;
 	}
 	sni_test_reset_counters();
-	sni_test_set_relay_budget(16u * 1024u);
+	/* Keep the test budget below one typical socket read on every backend. */
+	sni_test_set_relay_budget(1024u);
 	expect_true(pthread_create(&utid, NULL, bulk_upstream, &b) == 0, "budget upstream");
 	client = make_client(pair[1], port, 5, NULL, NULL, NULL);
 	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "budget handler");
