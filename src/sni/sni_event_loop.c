@@ -30,12 +30,12 @@
 
 /*
  * Plan:
- * - sni_spawn_detached / sni_listener_open bind nothing; the caller or open()
- *   listens, then one thread runs sni_engine_run.
+ * - sni_listener_open listens, then one joinable thread runs sni_engine_run
+ *   until sni_listener_close wakes it.
  * - accept() only allocates a connection and arms it. The 1024 slot cap stays
  *   a connection limit (sni_worker_acquire), not a thread count.
  * - Mutable connection fields are touched only on that event-loop thread.
- * - HELLO reads until net_GetHost, overflow, EOF, or the old hello deadline
+ * - HELLO reads until net_get_host, overflow, EOF, or the old hello deadline
  *   (absolute net_timeout_ms plus a 5s gap with no bytes).
  * - A non-numeric upstream name is submitted to the process-wide resolver.
  *   The loop never calls getaddrinfo(). RESOLVE and CONNECT do not arm
@@ -44,7 +44,7 @@
  * - SOCKS5 is an explicit send/recv sequence with partial I/O.
  * - RELAY copies through two fixed buffers, stops reading a direction while
  *   its buffer is full, and shutdown(SHUT_WR) after a peer EOF is flushed.
- * - state_RxTxClose and sni_worker_release run once, from conn_kill.
+ * - stats_close_connection and sni_worker_release run once, from conn_kill.
  */
 
 #define SNI_SOCKS_CAP 600u
@@ -152,7 +152,7 @@ struct sni_conn {
 	uint32_t socks_out_off;
 	uint32_t socks_in_len;
 	uint32_t socks_need;
-	char host[_MaxHostName_];
+	char host[ZROXY_MAX_HOSTNAME];
 	uint8_t hello[SNI_HELLO_CAP];
 	uint8_t c2u[SNI_RELAY_CAP];
 	uint8_t u2c[SNI_RELAY_CAP];
@@ -200,7 +200,6 @@ struct sni_listener {
 
 typedef struct sni_boot {
 	int listen_fd;
-	int report_fd;
 	SniServer_t cfg;
 	sni_listener *joinable;
 } sni_boot;
@@ -267,42 +266,6 @@ static void note_pending(uint32_t n) { (void)n; }
 static void note_eagain(void) { }
 static void note_wait(void) { }
 #endif
-
-static int write_full_fd(int fd, const void *buf, size_t len)
-{
-	const uint8_t *p = (const uint8_t *)buf;
-	size_t off = 0;
-	while (off < len) {
-		ssize_t n = write(fd, p + off, len - off);
-		if (n < 0) {
-			if (errno == EINTR)
-				continue;
-			return -1;
-		}
-		if (n == 0)
-			return -1;
-		off += (size_t)n;
-	}
-	return 0;
-}
-
-static int read_full_fd(int fd, void *buf, size_t len)
-{
-	uint8_t *p = (uint8_t *)buf;
-	size_t off = 0;
-	while (off < len) {
-		ssize_t n = read(fd, p + off, len - off);
-		if (n < 0) {
-			if (errno == EINTR)
-				continue;
-			return -1;
-		}
-		if (n == 0)
-			return -1;
-		off += (size_t)n;
-	}
-	return 0;
-}
 
 static bool set_nb_cloexec(int fd)
 {
@@ -673,7 +636,7 @@ static void conn_kill(sni_engine *e, sni_conn *c)
 		return;
 	c->settled = 1;
 	if (c->close_stats && c->cfg.sta)
-		state_RxTxClose(c->cfg.sta, c->rx, c->tx);
+		stats_close_connection(c->cfg.sta, c->rx, c->tx);
 	if (c->slot_held) {
 		sni_worker_release();
 		c->slot_held = 0;
@@ -900,7 +863,7 @@ static bool socks_queue_req(sni_conn *c)
 	out[0] = 0x05;
 	out[1] = 0x01;
 	out[2] = 0x00;
-	if (isTrueIpAddress(c->host)) {
+	if (net_is_ip_literal(c->host)) {
 		in_addr_t ip;
 		if (inet_pton(AF_INET, c->host, &ip) != 1)
 			return false;
@@ -1293,7 +1256,7 @@ static void drain_resolve(sni_engine *e)
 static bool copy_host(char *dst, const char *src)
 {
 	size_t n = strlen(src);
-	if (n == 0 || n >= _MaxHostName_)
+	if (n == 0 || n >= ZROXY_MAX_HOSTNAME)
 		return false;
 	memcpy(dst, src, n + 1);
 	return true;
@@ -1301,20 +1264,20 @@ static bool copy_host(char *dst, const char *src)
 
 static bool host_ready(sni_engine *e, sni_conn *c)
 {
-	char raw[_MaxHostName_];
+	char raw[ZROXY_MAX_HOSTNAME];
 	char norm[SNI_RESOLVER_HOST_MAX + 1];
-	if (!net_GetHost(c->hello, c->hello_len, raw, (uint16_t)_MaxHostName_))
+	if (!net_get_host(c->hello, c->hello_len, raw, (uint16_t)ZROXY_MAX_HOSTNAME))
 		return false;
 	if (!sni_resolver_normalize(raw, norm, sizeof(norm)) || !copy_host(c->host, norm)) {
 		conn_kill(e, c);
 		return true;
 	}
-	if (c->cfg.wlist && filter_IsWhite(c->cfg.wlist, c->host) == false) {
+	if (c->cfg.wlist && filter_match(c->cfg.wlist, c->host) == false) {
 		log_trace("SNI filter Host { %s }", c->host);
 		conn_kill(e, c);
 		return true;
 	}
-	if (isTrueIpAddress(c->host)) {
+	if (net_is_ip_literal(c->host)) {
 		log_trace("SNI we can't support IP address");
 		conn_kill(e, c);
 		return true;
@@ -1519,7 +1482,7 @@ static void accept_clients(sni_engine *e)
 		if (!conn_start(e, c))
 			continue;
 		if (e->cfg.sta) {
-			state_IncConnection(e->cfg.sta);
+			stats_open_connection(e->cfg.sta);
 			c->close_stats = 1;
 		}
 	}
@@ -1835,29 +1798,13 @@ static void *engine_thread(void *arg)
 {
 	sni_boot *boot = (sni_boot *)arg;
 	sni_listener *ls = boot->joinable;
-	int report = boot->report_fd;
 	int fd = boot->listen_fd;
 	SniServer_t cfg = boot->cfg;
 	sni_engine eng;
-	char status = 0;
 	free(boot);
 	if (!sni_engine_init(&eng, fd, &cfg)) {
-		if (report >= 0) {
-			(void)write_full_fd(report, &status, 1);
-			close(report);
-		}
 		publish_listener(ls, NULL, 0);
 		return NULL;
-	}
-	status = 1;
-	if (report >= 0) {
-		if (write_full_fd(report, &status, 1) != 0) {
-			close(report);
-			sni_engine_deinit(&eng);
-			publish_listener(ls, NULL, 0);
-			return NULL;
-		}
-		close(report);
 	}
 	publish_listener(ls, &eng, 1);
 	sni_engine_run(&eng);
@@ -1883,52 +1830,6 @@ static void request_stop(sni_engine *e)
 	} while (n < 0 && errno == EINTR);
 }
 
-bool sni_spawn_detached(int listen_fd, const SniServer_t *cfg)
-{
-	int sp[2] = {-1, -1};
-	sni_boot *boot;
-	pthread_t thread;
-	char ok = 0;
-	if (listen_fd < 0 || !cfg)
-		return false;
-	if (pipe(sp) != 0) {
-		close(listen_fd);
-		return false;
-	}
-	boot = (sni_boot *)calloc(1, sizeof(*boot));
-	if (!boot) {
-		close(sp[0]);
-		close(sp[1]);
-		close(listen_fd);
-		return false;
-	}
-	boot->listen_fd = listen_fd;
-	boot->report_fd = sp[1];
-	boot->cfg = *cfg;
-	boot->joinable = NULL;
-	if (pthread_create(&thread, NULL, engine_thread, boot) != 0) {
-		log_error("sni listener thread create failed");
-		free(boot);
-		close(sp[0]);
-		close(sp[1]);
-		close(listen_fd);
-		return false;
-	}
-	/*
-	 * The new thread owns sp[1]. Closing it here races the status write
-	 * and can close a reused descriptor.
-	 */
-	if (read_full_fd(sp[0], &ok, 1) != 0 || ok != 1) {
-		close(sp[0]);
-		pthread_join(thread, NULL);
-		log_error("sni listener failed to start");
-		return false;
-	}
-	close(sp[0]);
-	pthread_detach(thread);
-	return true;
-}
-
 bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 {
 	int fd = -1;
@@ -1939,7 +1840,7 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 		return false;
 	*out = NULL;
 	ip = inet_addr(cfg->Port.bindip);
-	if (!net_ListenIp4(ip, cfg->Port.local_port, &fd)) {
+	if (!net_listen_ipv4(ip, cfg->Port.local_port, &fd)) {
 		log_error("can not listen on Port %s:%i", cfg->Port.bindip, cfg->Port.local_port);
 		return false;
 	}
@@ -1969,7 +1870,6 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 		return false;
 	}
 	boot->listen_fd = fd;
-	boot->report_fd = -1;
 	boot->cfg = *cfg;
 	boot->joinable = ls;
 	if (pthread_create(&ls->thread, NULL, engine_thread, boot) != 0) {
@@ -2029,26 +1929,26 @@ void sni_connection_run(sniclient_t *client)
 		if (fd >= 0)
 			close(fd);
 		if (client->SniConfig.sta)
-			state_RxTxClose(client->SniConfig.sta, 0, 0);
+			stats_close_connection(client->SniConfig.sta, 0, 0);
 		return;
 	}
 	if (!sni_engine_init(&eng, -1, &client->SniConfig)) {
 		close(fd);
 		if (client->SniConfig.sta)
-			state_RxTxClose(client->SniConfig.sta, 0, 0);
+			stats_close_connection(client->SniConfig.sta, 0, 0);
 		return;
 	}
 	c = conn_new(&eng, fd);
 	if (!c) {
 		close(fd);
 		if (client->SniConfig.sta)
-			state_RxTxClose(client->SniConfig.sta, 0, 0);
+			stats_close_connection(client->SniConfig.sta, 0, 0);
 		sni_engine_deinit(&eng);
 		return;
 	}
 	if (!conn_start(&eng, c)) {
 		if (client->SniConfig.sta)
-			state_RxTxClose(client->SniConfig.sta, 0, 0);
+			stats_close_connection(client->SniConfig.sta, 0, 0);
 		sni_engine_run(&eng);
 		sni_engine_deinit(&eng);
 		return;

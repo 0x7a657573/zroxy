@@ -26,17 +26,14 @@
 
 typedef struct sni_listener sni_listener;
 
-/* Ownership of listen_fd moves to the detached loop thread. */
-bool sni_spawn_detached(int listen_fd, const SniServer_t *cfg);
-
-/* Joinable listener used by tests. Caller must sni_listener_close it. */
+/* Joinable listener. Caller must sni_listener_close it. */
 bool sni_listener_open(const SniServer_t *cfg, sni_listener **out);
 void sni_listener_close(sni_listener *ls);
 
 /*
  * Run one already-accepted client to completion on the calling thread.
  * Closes client->connid and stores -1. Does not free client and does not
- * take or release an SNI connection slot. Reports state_RxTxClose when
+ * take or release an SNI connection slot. Reports stats_close_connection when
  * SniConfig.sta is set, matching the previous handler.
  */
 void sni_connection_run(sniclient_t *client);
