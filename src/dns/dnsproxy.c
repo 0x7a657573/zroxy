@@ -214,7 +214,7 @@ bool localdns_pull(dnsserver_t *dns)
 	if(fifo_push(dns->fifo,&msg))
 	{
 		if(dns->Stat)
-			state_IncConnection(dns->Stat);
+			stats_open_connection(dns->Stat);
 	}
 	else
 	{
@@ -452,7 +452,7 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 	//Update statistics
 	if(dns->Stat)
 	{
-		state_RxTxClose(dns->Stat, rlen > 0 ? (uint32_t)rlen + 2u : 0u, (uint32_t)msg->len + 2u);
+		stats_close_connection(dns->Stat, rlen > 0 ? (uint32_t)rlen + 2u : 0u, (uint32_t)msg->len + 2u);
 	}
 }
 
