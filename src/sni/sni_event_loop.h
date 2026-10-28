@@ -59,6 +59,8 @@ uint32_t sni_test_max_pending(void);
 uint32_t sni_test_eagain_count(void);
 uint32_t sni_test_wait_calls(void);
 void sni_test_set_hello_idle_ms(int ms);
+uint32_t sni_test_relay_yields(void);
+void sni_test_set_relay_budget(uint32_t bytes); /* 0 restores the default */
 #endif
 
 #endif /* SNI_EVENT_LOOP_H_ */
