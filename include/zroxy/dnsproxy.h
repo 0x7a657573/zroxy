@@ -15,6 +15,7 @@
 #include <zroxy/dnsserver.h>
 #include <zroxy/fifo.h>
 #include <zroxy/filter.h>
+#include <pthread.h>
 
 #define DNS_MSG_SIZE	512
 typedef struct
@@ -25,10 +26,16 @@ typedef struct
 }dnsMessage_t;
 
 
-#define D_FIFO_Message_Size	sizeof(dnsMessage_t)
-#define D_FIFO_Item			128
+#define DNS_QUEUE_ITEM_SIZE	sizeof(dnsMessage_t)
+#define DNS_QUEUE_LEN			128
 
-typedef struct
+/*
+ * Fixed number of forwarding threads. Each handles one query at a time and
+ * keeps its own upstream TCP connection open between queries.
+ */
+#define DNS_WORKER_COUNT	32
+
+typedef struct dnsserver
 {
 	/* Fifo */
 	fifo_t		  *fifo;
@@ -40,10 +47,16 @@ typedef struct
 	uint8_t sni_ip[4];
 
 	/*bind ip/port*/
-	char 	 	  listen_addr[_MaxDNSHost_ + 1];
-	char	 	  listen_port[_MaxPORTAddress_];
+	char 	 	  listen_addr[ZROXY_MAX_DNS_HOST + 1];
+	char	 	  listen_port[ZROXY_MAX_PORT_TEXT];
 
-	bool		  worker_started;
+	pthread_t	  workers[DNS_WORKER_COUNT];
+	int			  worker_count;
+
+	/* receive loop */
+	pthread_t	  rx_thread;
+	bool		  rx_started;
+	int			  wake[2];
 
 	dnsStream_t   upstream;
 	sockshost_t	  *socks;
@@ -59,7 +72,15 @@ dnsserver_t *localdns_init_config(dnshost_t *conf);
 void localdns_free(dnsserver_t *dns);
 
 bool localdns_init_sockets(dnsserver_t *dns);
-bool localdns_start_worker(dnsserver_t *dns);
+bool localdns_start_workers(dnsserver_t *dns);
+/* Close the queue, let workers drain it, and join them. */
+void localdns_stop_workers(dnsserver_t *dns);
 bool localdns_pull(dnsserver_t *dns);
+
+/*
+ * Answer one query: locally for whitelisted names, otherwise over
+ * *upstream_fd (-1 = not connected), which stays open for the next call.
+ */
+void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *upstream_fd);
 
 #endif /* DNSPROXY_H_ */

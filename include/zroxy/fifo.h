@@ -29,17 +29,20 @@ typedef struct
 	uint16_t MessageSize;
 	uint16_t MessageItem;
 	fifo_mutex_t Mutex_Id;
+	fifo_cond_t  NotEmpty;
+	bool		 closed;
 }fifo_t;
 
 
 
 bool fifo_init(fifo_t *self,uint16_t MessageSize,uint16_t ItemNumber);
 void fifo_deinit(fifo_t *self);
-void fifo_Remove(fifo_t *self);
-bool fifo_incert(fifo_t *self,void *data);
-bool fifo_Read(fifo_t *self,void *data);
-void fifo_flush(fifo_t *self);
-uint16_t fifo_UnreadMessage(fifo_t *self);
-uint16_t fifo_SpacesAvailable(fifo_t *self);
+bool fifo_push(fifo_t *self,void *data);
+bool fifo_pop(fifo_t *self,void *data);
+/* Block until an item is available. Returns false once closed and drained. */
+bool fifo_pop_wait(fifo_t *self,void *data);
+/* Reject new items and wake every fifo_pop_wait caller. */
+void fifo_close(fifo_t *self);
+uint16_t fifo_count(fifo_t *self);
 
 #endif /* HARDFIFO_H */

@@ -28,12 +28,19 @@
 #define  fifo_memcpy                            memcpy
 #define  fifo_memset                            memset
 
-#define  fifo_maloc(size)		                malloc(size)
+#define  fifo_malloc(size)		                malloc(size)
 #define  fifo_free(ptr)		                    free(ptr)
 
 typedef pthread_mutex_t fifo_mutex_t;
-#define fifo_CreateMutex(x)                     pthread_mutex_init(&x, NULL)
+#define fifo_mutex_init(x)                     pthread_mutex_init(&x, NULL)
 #define fifo_lock(x)                            pthread_mutex_lock(&x)
 #define fifo_unlock(x)                          pthread_mutex_unlock(&x)    
+
+typedef pthread_cond_t fifo_cond_t;
+#define fifo_cond_init(x)                      pthread_cond_init(&x, NULL)
+#define fifo_cond_destroy(x)                     pthread_cond_destroy(&x)
+#define fifo_wait(c, m)                         pthread_cond_wait(&c, &m)
+#define fifo_signal(c)                          pthread_cond_signal(&c)
+#define fifo_broadcast(c)                       pthread_cond_broadcast(&c)
 
 #endif /* FIFO_PORT_H */

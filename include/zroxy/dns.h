@@ -165,6 +165,6 @@ bool dns_encode_msg(struct Message *msg, uint8_t **buffer);
 bool dns_encode_msg_n(struct Message *msg, uint8_t *buffer, size_t capacity, size_t *written);
 
 /*free dns message struct*/
-void free_msg(struct Message *msg);
+void dns_free_msg(struct Message *msg);
 
 #endif /* dns.h */

@@ -112,7 +112,7 @@ static bool decode_domain_name(dns_reader *r, char **out)
   size_t wire_end = 0;
   bool wire_done = false;
   int jumps = 0;
-  char name[_MaxHostName_];
+  char name[ZROXY_MAX_HOSTNAME];
   size_t nlen = 0;
 
   *out = NULL;
@@ -205,13 +205,13 @@ static bool dns_decode_header(struct Message *msg, dns_reader *r)
   if (!reader_u16(r, &msg->id) || !reader_u16(r, &fields))
     return false;
 
-  msg->qr = (fields & QR_MASK) >> 15;
-  msg->opcode = (fields & OPCODE_MASK) >> 11;
-  msg->aa = (fields & AA_MASK) >> 10;
-  msg->tc = (fields & TC_MASK) >> 9;
-  msg->rd = (fields & RD_MASK) >> 8;
-  msg->ra = (fields & RA_MASK) >> 7;
-  msg->rcode = (fields & RCODE_MASK) >> 0;
+  msg->qr = (uint16_t)((fields & QR_MASK) >> 15);
+  msg->opcode = (uint16_t)((fields & OPCODE_MASK) >> 11);
+  msg->aa = (uint16_t)((fields & AA_MASK) >> 10);
+  msg->tc = (uint16_t)((fields & TC_MASK) >> 9);
+  msg->rd = (uint16_t)((fields & RD_MASK) >> 8);
+  msg->ra = (uint16_t)((fields & RA_MASK) >> 7);
+  msg->rcode = (uint16_t)(fields & RCODE_MASK);
 
   if (!reader_u16(r, &msg->qdCount) ||
       !reader_u16(r, &msg->anCount) ||
@@ -287,7 +287,7 @@ bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size)
   return true;
 }
 
-void free_questions(struct Question *qq)
+static void free_questions(struct Question *qq)
 {
   struct Question *next;
   while (qq)
@@ -299,7 +299,7 @@ void free_questions(struct Question *qq)
   }
 }
 
-void free_resource_records(struct ResourceRecord *rr)
+static void free_resource_records(struct ResourceRecord *rr)
 {
   struct ResourceRecord *next;
   while (rr)
@@ -311,7 +311,7 @@ void free_resource_records(struct ResourceRecord *rr)
   }
 }
 
-void free_msg(struct Message *msg)
+void dns_free_msg(struct Message *msg)
 {
   if (!msg)
     return;
