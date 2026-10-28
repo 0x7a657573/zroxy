@@ -2068,8 +2068,11 @@ static void expect_pool(const char *name)
 
 static void resolver_quiet(void)
 {
+	/*
+	 * Reap cancels queued slots and unpauses under one lock. Unpausing first
+	 * would let workers resolve them into a ring nobody drains.
+	 */
 	sni_resolver_test_hold_running(0);
-	sni_resolver_test_pause_dequeue(0);
 	sni_resolver_test_reap();
 }
 
@@ -2154,7 +2157,7 @@ typedef struct hook_cfg {
 	_Atomic int eintr_left;
 	_Atomic int calls;
 	_Atomic int delay_ms;
-	_Atomic int second_done;
+	_Atomic int release_first;
 } hook_cfg;
 
 static pthread_mutex_t g_hook_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -2176,23 +2179,17 @@ static int test_hook(const char *hostname, int family, sni_resolved_addr *out,
 	}
 	if (cfg->mode == HOOK_DELAY && cfg->delay_ms > 0)
 		usleep((useconds_t)cfg->delay_ms * 1000u);
-	if (cfg->mode == HOOK_ORDER) {
-		if (strcmp(hostname, "second.test") == 0) {
-			pthread_mutex_lock(&g_hook_mu);
-			cfg->second_done = 1;
-			pthread_cond_broadcast(&g_hook_cv);
-			pthread_mutex_unlock(&g_hook_mu);
-		} else if (strcmp(hostname, "first.test") == 0) {
-			struct timespec ts;
-			pthread_mutex_lock(&g_hook_mu);
-			clock_gettime(CLOCK_REALTIME, &ts);
-			ts.tv_sec += 2;
-			while (!cfg->second_done) {
-				if (pthread_cond_timedwait(&g_hook_cv, &g_hook_mu, &ts) == ETIMEDOUT)
-					break;
-			}
-			pthread_mutex_unlock(&g_hook_mu);
+	if (cfg->mode == HOOK_ORDER && strcmp(hostname, "first.test") == 0) {
+		/* Held until the test has drained second.test's completion. */
+		struct timespec ts;
+		pthread_mutex_lock(&g_hook_mu);
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_sec += 5;
+		while (!cfg->release_first) {
+			if (pthread_cond_timedwait(&g_hook_cv, &g_hook_mu, &ts) == ETIMEDOUT)
+				break;
 		}
+		pthread_mutex_unlock(&g_hook_mu);
 	}
 	if (cfg->mode == HOOK_ERR)
 		return cfg->err;
@@ -2453,7 +2450,7 @@ static void test_resolver_quota_and_cancel(void)
 	expect_true(slot != NULL && slot->req_id == req, "stale req_id did not cancel the new slot");
 	release_slot(slot);
 	cfg.mode = HOOK_ORDER;
-	cfg.second_done = 0;
+	cfg.release_first = 0;
 	{
 		int i1 = -1;
 		int i2 = -1;
@@ -2466,24 +2463,16 @@ static void test_resolver_quota_and_cancel(void)
 				mono_ms() + 3000, &i1, &r1), SNI_SUBMIT_OK, "order first");
 		expect_int(sni_resolver_submit(a, 2, 2, "second.test", 9, AF_UNSPEC,
 				mono_ms() + 3000, &i2, &r2), SNI_SUBMIT_OK, "order second");
-		{
-			resolve_slot *batch[4];
-			int64_t deadline = mono_ms() + 3000;
-			while ((!first || !second) && mono_ms() < deadline) {
-				size_t got = sni_resolver_drain(a, batch, 4);
-				size_t bi;
-				for (bi = 0; bi < got; bi++) {
-					if (!first)
-						first = batch[bi];
-					else if (!second)
-						second = batch[bi];
-					else
-						release_slot(batch[bi]);
-				}
-				if (!first || !second)
-					usleep(1000);
-			}
-		}
+		/*
+		 * first.test is held in its hook, so the only completion that can
+		 * arrive now is second.test, unless the pool serialized it behind first.
+		 */
+		first = wait_one(a, 3000);
+		pthread_mutex_lock(&g_hook_mu);
+		cfg.release_first = 1;
+		pthread_cond_broadcast(&g_hook_cv);
+		pthread_mutex_unlock(&g_hook_mu);
+		second = wait_one(a, 3000);
 		expect_true(first && second, "both completions");
 		if (first && second) {
 			expect_true(strcmp(first->hostname, "second.test") == 0, "out of order completion");
