@@ -23,13 +23,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "log.h"
-#include "net.h"
+#include <zroxy/log.h>
+#include <zroxy/net.h>
 #include "sni_event_loop.h"
 #include "sni_resolver.h"
 #include "sniclient.h"
-#include "sniproxy.h"
-#include "statistics.h"
+#include <zroxy/sniproxy.h>
+#include <zroxy/statistics.h>
 
 static int failures = 0;
 

@@ -6,9 +6,9 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-#include "config.h"
-#include "log.h"
-#include "net.h"
+#include <zroxy/config.h>
+#include <zroxy/log.h>
+#include <zroxy/net.h>
 
 static int failures = 0;
 

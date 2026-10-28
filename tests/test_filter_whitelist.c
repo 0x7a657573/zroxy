@@ -2,9 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "config.h"
-#include "filter/filter.h"
-#include "log.h"
+#include <zroxy/config.h>
+#include <zroxy/filter.h>
+#include <zroxy/log.h>
 
 static int failures = 0;
 

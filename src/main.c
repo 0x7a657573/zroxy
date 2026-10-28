@@ -12,19 +12,19 @@
 #include <sys/socket.h> /*Lib Socket*/
 #include <unistd.h>  	/*Header file for sleep(). man 3 sleep for details.*/
 #include <pthread.h>
-#include <log.h>
-#include <sniproxy.h>
-#include "version.h"
+#include <zroxy/log.h>
+#include <zroxy/sniproxy.h>
+#include <zroxy/version.h>
 #include <netdb.h>		/* getaddrinfo, getnameinfo */ /*https://rosettacode.org/wiki/DNS_query#C*/
 #include <stdbool.h>
 #include <signal.h>
 #include <string.h>
-#include "args.h"
-#include <monitor.h>
-#include "filter/filter.h"
-#include "dnsproxy.h"
-#include "monitor.h"
-#include "filter/filter.h"
+#include <zroxy/args.h>
+#include <zroxy/monitor.h>
+#include <zroxy/filter.h>
+#include <zroxy/dnsproxy.h>
+#include <zroxy/monitor.h>
+#include <zroxy/filter.h>
 
 zroxy_t prg_setting = {0};
 
