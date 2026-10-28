@@ -18,6 +18,7 @@
 #endif
 #include <unistd.h>
 #include <errno.h>
+#include <ctype.h>
 
 void filter_Remove(filter_t *self);
 void filter_Remove_Itemlist(item_t *ptr);
@@ -364,7 +365,7 @@ void filter_Remove(filter_t *self)
 }
 
 /*
-this function chack str2 match pattern in str1 
+this function chack str2 match pattern in str1 (ASCII case-insensitive, RFC 4343)
 str1 = apple, str2 = app* -return-> true
 str1 = apple, str2 = *ple -return-> true
 str1 = apple, str2 = *plex -return-> false
@@ -383,7 +384,7 @@ bool match(char *str1, char *str2)
          star = j++;
          match = i;
       } 
-	  else if (str1[i] == str2[j] || str2[j] == '?') 
+	  else if (tolower((unsigned char)str1[i]) == tolower((unsigned char)str2[j]) || str2[j] == '?')
 	  {
          i++;
          j++;

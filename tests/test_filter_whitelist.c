@@ -53,7 +53,12 @@ int main(void)
     expect_false(filter_IsWhite(&filter, "badexample.com"), "wildcard does not overmatch suffix");
     expect_false(filter_IsWhite(&filter, "other.com"), "non-match");
 
-    expect_false(filter_IsWhite(&filter, "Example.com"), "case-sensitive behavior");
+    expect_true(filter_IsWhite(&filter, "Example.COM"), "exact match ignores case");
+    expect_true(filter_IsWhite(&filter, "API.Example.com"), "wildcard match ignores case");
+    expect_false(filter_IsWhite(&filter, "BadExample.com"), "case folding does not overmatch");
+
+    strcpy(other.Rec, "*.Mixed.Test");
+    expect_true(filter_IsWhite(&filter, "www.mixed.test"), "uppercase pattern matches lowercase host");
 
     pthread_mutex_destroy(&filter.Lock);
 
