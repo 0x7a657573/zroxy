@@ -21,7 +21,7 @@ typedef struct
 }sniclient_t;
 
 
-void *SniClientHandler(void *arg);
+void *sni_client_handler(void *arg);
 
 
 #endif /* SNICLIENT_H_ */

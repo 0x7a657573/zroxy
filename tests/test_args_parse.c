@@ -10,7 +10,7 @@
 #include <zroxy/args.h>
 #include <zroxy/log.h>
 
-bool Parse_config(zroxy_t *ptr, char *str);
+bool args_parse_config(zroxy_t *ptr, char *str);
 
 extern int optind;
 
@@ -55,8 +55,8 @@ static void expect_string(const char *actual, const char *expected, const char *
 
 static void free_settings(zroxy_t *cfg)
 {
-    Free_PortList(cfg);
-    Free_DnsServer(cfg);
+    args_free_ports(cfg);
+    args_free_dns(cfg);
     if (cfg->socks)
     {
         free(cfg->socks->host);
@@ -84,7 +84,7 @@ static void test_cli_listener_with_bind_and_remote(void)
     const char *argv[] = {arg0, arg1, arg2};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 3, argv), "arg_Init listener bind/remote");
+    expect_true(args_init(&cfg, 3, argv), "args_init listener bind/remote");
     expect_true(cfg.ports != NULL, "listener bind/remote has one port");
     if (cfg.ports)
     {
@@ -105,7 +105,7 @@ static void test_cli_listener_defaults(void)
     const char *argv[] = {arg0, arg1, arg2};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 3, argv), "arg_Init listener defaults");
+    expect_true(args_init(&cfg, 3, argv), "args_init listener defaults");
     expect_true(cfg.ports != NULL, "listener defaults has one port");
     if (cfg.ports)
     {
@@ -126,7 +126,7 @@ static void test_cli_socks_case_preserved(void)
     const char *argv[] = {arg0, arg1, arg2};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 3, argv), "arg_Init socks");
+    expect_true(args_init(&cfg, 3, argv), "args_init socks");
     expect_true(cfg.socks != NULL, "socks parsed");
     if (cfg.socks)
     {
@@ -150,7 +150,7 @@ static void test_cli_monitor_and_sni_timeout(void)
     const char *argv[] = {arg0, arg1, arg2, arg3, arg4};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 5, argv), "arg_Init monitor + snitimeout");
+    expect_true(args_init(&cfg, 5, argv), "args_init monitor + snitimeout");
     expect_true(cfg.monitorPort != NULL, "monitor port parsed");
     if (cfg.monitorPort)
     {
@@ -180,7 +180,7 @@ static void test_cli_monitor_bind_and_token(void)
     const char *hi_argv[] = {arg0, a, bad_hi};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 7, argv), "arg_Init monitor bind token timeout");
+    expect_true(args_init(&cfg, 7, argv), "args_init monitor bind token timeout");
     expect_true(cfg.monitorPort != NULL, "explicit monitor port parsed");
     if (cfg.monitorPort)
         expect_u16(*cfg.monitorPort, 8123, "explicit monitor port");
@@ -190,11 +190,11 @@ static void test_cli_monitor_bind_and_token(void)
     free_settings(&cfg);
 
     reset_getopt();
-    expect_true(!arg_Init(&cfg, 3, bad_argv), "reject monitor timeout 0");
+    expect_true(!args_init(&cfg, 3, bad_argv), "reject monitor timeout 0");
     free_settings(&cfg);
 
     reset_getopt();
-    expect_true(!arg_Init(&cfg, 3, hi_argv), "reject monitor timeout 61");
+    expect_true(!args_init(&cfg, 3, hi_argv), "reject monitor timeout 61");
     free_settings(&cfg);
 }
 
@@ -234,7 +234,7 @@ static void test_config_value_case_preserved(void)
     write_all_or_fail(fd, config_data);
     close(fd);
 
-    expect_true(Parse_config(&cfg, template_path), "Parse_config value case preserved");
+    expect_true(args_parse_config(&cfg, template_path), "args_parse_config value case preserved");
     expect_true(cfg.socks != NULL, "config socks parsed");
     if (cfg.socks)
     {
@@ -266,7 +266,7 @@ static void test_config_port_key_case_insensitive(void)
     write_all_or_fail(fd, config_data);
     close(fd);
 
-    expect_true(Parse_config(&cfg, template_path), "Parse_config uppercase PORT key");
+    expect_true(args_parse_config(&cfg, template_path), "args_parse_config uppercase PORT key");
     expect_true(cfg.ports != NULL, "config port parsed");
     if (cfg.ports)
     {
@@ -288,7 +288,7 @@ static void test_cli_socks_no_auth_cleanup_safe(void)
     const char *argv[] = {arg0, arg1, arg2};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 3, argv), "arg_Init socks no auth");
+    expect_true(args_init(&cfg, 3, argv), "args_init socks no auth");
     expect_true(cfg.socks != NULL, "socks no auth allocated");
     if (cfg.socks)
     {
@@ -310,7 +310,7 @@ static void test_cli_socks_user_no_pass_cleanup_safe(void)
     const char *argv[] = {arg0, arg1, arg2};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 3, argv), "arg_Init socks user no pass");
+    expect_true(args_init(&cfg, 3, argv), "args_init socks user no pass");
     expect_true(cfg.socks != NULL, "socks user no pass allocated");
     if (cfg.socks)
     {
@@ -341,7 +341,7 @@ static void test_config_dns_only_cleanup_safe(void)
     write_all_or_fail(fd, config_data);
     close(fd);
 
-    expect_true(Parse_config(&cfg, template_path), "Parse_config dns only");
+    expect_true(args_parse_config(&cfg, template_path), "args_parse_config dns only");
     expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
     if (cfg.dnsserver)
     {
@@ -373,7 +373,7 @@ static void test_config_dns_with_dsocks_no_auth_cleanup_safe(void)
     write_all_or_fail(fd, config_data);
     close(fd);
 
-    expect_true(Parse_config(&cfg, template_path), "Parse_config dns with dsocks no auth");
+    expect_true(args_parse_config(&cfg, template_path), "args_parse_config dns with dsocks no auth");
     expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
     if (cfg.dnsserver)
     {
@@ -412,7 +412,7 @@ static void test_config_dns_with_snip_cleanup_safe(void)
     write_all_or_fail(fd, config_data);
     close(fd);
 
-    expect_true(Parse_config(&cfg, template_path), "Parse_config dns with snip");
+    expect_true(args_parse_config(&cfg, template_path), "args_parse_config dns with snip");
     expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
     if (cfg.dnsserver)
     {
@@ -433,7 +433,7 @@ static void test_cli_rejects_overlong_bind_and_bad_port(void)
     const char *argv[] = {arg0, arg1, arg2};
 
     reset_getopt();
-    expect_true(!arg_Init(&cfg, 3, argv), "reject overlong listener token");
+    expect_true(!args_init(&cfg, 3, argv), "reject overlong listener token");
     free_settings(&cfg);
 
     {
@@ -442,7 +442,7 @@ static void test_cli_rejects_overlong_bind_and_bad_port(void)
         char bad2[] = "127.0.0.1:80abc@80";
         const char *bad_argv[] = {bad0, bad1, bad2};
         reset_getopt();
-        expect_true(!arg_Init(&cfg, 3, bad_argv), "reject non-numeric listener port");
+        expect_true(!args_init(&cfg, 3, bad_argv), "reject non-numeric listener port");
         free_settings(&cfg);
     }
 }
@@ -456,7 +456,7 @@ static void test_cli_accepts_long_dns_hostname(void)
     const char *argv[] = {arg0, arg1, arg2};
 
     reset_getopt();
-    expect_true(arg_Init(&cfg, 3, argv), "arg_Init long DNS hostname");
+    expect_true(args_init(&cfg, 3, argv), "args_init long DNS hostname");
     expect_true(cfg.dnsserver != NULL, "long DNS hostname allocated");
     if (cfg.dnsserver)
         expect_string(cfg.dnsserver->Remote.ip, "long.dns.example.test", "long DNS hostname stored");
@@ -479,7 +479,7 @@ static void test_config_rejects_blank_value(void)
 
     write_all_or_fail(fd, config_data);
     close(fd);
-    expect_true(!Parse_config(&cfg, template_path), "reject blank config value");
+    expect_true(!args_parse_config(&cfg, template_path), "reject blank config value");
     unlink(template_path);
     free_settings(&cfg);
 }
@@ -501,7 +501,7 @@ static void test_config_minimal_cleanup_safe(void)
     write_all_or_fail(fd, config_data);
     close(fd);
 
-    expect_true(Parse_config(&cfg, template_path), "Parse_config minimal");
+    expect_true(args_parse_config(&cfg, template_path), "args_parse_config minimal");
     expect_true(cfg.ports != NULL, "config port parsed");
     expect_true(cfg.socks == NULL, "minimal socks is NULL");
     expect_true(cfg.dnsserver == NULL, "minimal dnsserver is NULL");

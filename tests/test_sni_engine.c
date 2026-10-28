@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <stdatomic.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -327,10 +328,10 @@ static int build_client_hello(uint8_t *out, size_t cap, size_t *out_len, const c
 static size_t first_host_len(const uint8_t *msg, size_t len)
 {
 	size_t i;
-	char host[_MaxHostName_];
+	char host[ZROXY_MAX_HOSTNAME];
 	for (i = 1; i <= len; i++) {
 		host[0] = '\0';
-		if (net_GetHost((uint8_t *)msg, (uint32_t)i, host, _MaxHostName_))
+		if (net_get_host((uint8_t *)msg, (uint32_t)i, host, ZROXY_MAX_HOSTNAME))
 			return i;
 	}
 	return 0;
@@ -643,14 +644,14 @@ static int slots_are_clear(void)
 	return n == 1024;
 }
 
-/* Byte-at-a-time prefixes must not connect before net_GetHost succeeds. */
+/* Byte-at-a-time prefixes must not connect before net_get_host succeeds. */
 static void test_split_prefixes(const uint8_t *msg, size_t len, const char *name)
 {
 	uint16_t port = 0;
 	int lfd;
 	int pair[2] = {-1, -1};
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	size_t ready;
 	size_t i;
 	uint8_t got[4096];
@@ -677,7 +678,7 @@ static void test_split_prefixes(const uint8_t *msg, size_t len, const char *name
 	sni_test_reset_counters();
 	client = make_client(pair[1], port, 5, NULL, NULL, NULL);
 	expect_true(client != NULL, "prefix client");
-	if (!client || pthread_create(&tid, NULL, SniClientHandler, client) != 0) {
+	if (!client || pthread_create(&tid, NULL, sni_client_handler, client) != 0) {
 		close(pair[0]);
 		close(pair[1]);
 		close(lfd);
@@ -726,7 +727,7 @@ static void test_partial_write_and_eagain(void)
 	int lfd = listen_loopback(&port);
 	int pair[2] = {-1, -1};
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int up = -1;
 	sni_test_faults faults;
 	uint8_t bulk[64 * 1024];
@@ -743,7 +744,7 @@ static void test_partial_write_and_eagain(void)
 	sni_test_reset_counters();
 	expect_true(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "eagain pair");
 	client = make_client(pair[1], port, 5, NULL, NULL, NULL);
-	if (!client || pthread_create(&tid, NULL, SniClientHandler, client) != 0) {
+	if (!client || pthread_create(&tid, NULL, sni_client_handler, client) != 0) {
 		expect_true(false, "eagain handler");
 		close(lfd);
 		return;
@@ -805,7 +806,7 @@ static void test_eintr_still_forwards(void)
 	int lfd = listen_loopback(&port);
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	sni_test_faults faults;
 	uint8_t got[128];
 	int up;
@@ -819,7 +820,7 @@ static void test_eintr_still_forwards(void)
 	if (lfd < 0)
 		return;
 	client = make_client(pair[1], port, 3, NULL, NULL, NULL);
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "eintr handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "eintr handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "eintr write");
 	up = -1;
 	{
@@ -1065,7 +1066,7 @@ static void test_socks_mode(int mode, int with_auth, int split, const char *name
 	int pair[2];
 	socks_job job;
 	pthread_t stid;
-	pthread_t htid;
+	pthread_t htid = 0;
 	sniclient_t *client;
 	sockshost_t socks;
 	uint8_t got[256];
@@ -1095,7 +1096,7 @@ static void test_socks_mode(int mode, int with_auth, int split, const char *name
 		return;
 	expect_true(pthread_create(&stid, NULL, socks_thread, &job) == 0, "socks thread");
 	client = make_client(pair[1], eport, 4, NULL, NULL, &socks);
-	expect_true(client && pthread_create(&htid, NULL, SniClientHandler, client) == 0, "socks handler");
+	expect_true(client && pthread_create(&htid, NULL, sni_client_handler, client) == 0, "socks handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "socks client write");
 	if (mode == SOCKS_NOAUTH || mode == SOCKS_AUTH) {
 		struct pollfd pfd;
@@ -1146,7 +1147,7 @@ static void test_connect_failure(void)
 	socklen_t len = sizeof(addr);
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int64_t start;
 	uint8_t sink[8];
 	size_t got = 0;
@@ -1161,7 +1162,7 @@ static void test_connect_failure(void)
 	expect_true(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "connect-fail pair");
 	client = make_client(pair[1], ntohs(addr.sin_port), 2, NULL, NULL, NULL);
 	start = mono_ms();
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "connect-fail handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "connect-fail handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "connect-fail request");
 	expect_true(read_eof_ms(pair[0], sink, sizeof(sink), &got, 3000) == 0, "connect-fail closes");
 	close(pair[0]);
@@ -1174,12 +1175,12 @@ static void test_handshake_timeout(void)
 {
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int64_t start;
 	expect_true(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "handshake pair");
 	client = make_client(pair[1], 1, 1, NULL, NULL, NULL);
 	start = mono_ms();
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "handshake handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "handshake handler");
 	pthread_join(tid, NULL);
 	expect_true(mono_ms() - start >= 500, "handshake waits for the deadline");
 	expect_true(mono_ms() - start < 2500, "handshake timeout does not hang");
@@ -1192,14 +1193,14 @@ static void test_idle_timeout(void)
 	int lfd = listen_loopback(&port);
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int up = -1;
 	int64_t start;
 	expect_true(lfd >= 0 && socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "idle setup");
 	if (lfd < 0)
 		return;
 	client = make_client(pair[1], port, 1, NULL, NULL, NULL);
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "idle handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "idle handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "idle request");
 	{
 		struct pollfd pfd;
@@ -1222,12 +1223,12 @@ static void test_client_eof_during_hello(void)
 {
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int64_t start;
 	expect_true(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "eof pair");
 	client = make_client(pair[1], 1, 5, NULL, NULL, NULL);
 	start = mono_ms();
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "eof handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "eof handler");
 	expect_true(write_full(pair[0], "GET /", 5) == 0, "partial hello");
 	shutdown(pair[0], SHUT_WR);
 	pthread_join(tid, NULL);
@@ -1241,7 +1242,7 @@ static void test_upstream_eof(void)
 	int lfd = listen_loopback(&port);
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int up;
 	uint8_t sink[64];
 	size_t got = 0;
@@ -1249,7 +1250,7 @@ static void test_upstream_eof(void)
 	if (lfd < 0)
 		return;
 	client = make_client(pair[1], port, 3, NULL, NULL, NULL);
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "up-eof handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "up-eof handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "up-eof request");
 	up = -1;
 	{
@@ -1278,7 +1279,7 @@ static void test_half_close(void)
 	int lfd = listen_loopback(&port);
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int up;
 	uint8_t req[64];
 	uint8_t extra[8];
@@ -1287,7 +1288,7 @@ static void test_half_close(void)
 	if (lfd < 0)
 		return;
 	client = make_client(pair[1], port, 3, NULL, NULL, NULL);
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "half handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "half handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "half request");
 	shutdown(pair[0], SHUT_WR);
 	up = -1;
@@ -1322,7 +1323,7 @@ static void test_upstream_half_close(void)
 	int lfd = listen_loopback(&port);
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	int up;
 	uint8_t req[64];
 	uint8_t more[4];
@@ -1330,7 +1331,7 @@ static void test_upstream_half_close(void)
 	if (lfd < 0)
 		return;
 	client = make_client(pair[1], port, 3, NULL, NULL, NULL);
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "up-half handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "up-half handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "up-half request");
 	up = -1;
 	{
@@ -1363,7 +1364,7 @@ static void test_oversize_hello(void)
 	int lfd = listen_loopback(&port);
 	int pair[2];
 	sniclient_t *client;
-	pthread_t tid;
+	pthread_t tid = 0;
 	uint8_t big[SNI_HELLO_CAP];
 	struct pollfd pfd;
 	expect_true(lfd >= 0 && socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "oversize setup");
@@ -1371,7 +1372,7 @@ static void test_oversize_hello(void)
 		return;
 	memset(big, 'A', sizeof(big));
 	client = make_client(pair[1], port, 3, NULL, NULL, NULL);
-	expect_true(client && pthread_create(&tid, NULL, SniClientHandler, client) == 0, "oversize handler");
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "oversize handler");
 	expect_true(write_full(pair[0], big, sizeof(big)) == 0, "write oversized hello");
 	pthread_join(tid, NULL);
 	pfd.fd = lfd;
@@ -1399,7 +1400,7 @@ static void test_alloc_failure(void)
 	expect_true(binder >= 0, "alloc port");
 	if (binder >= 0)
 		close(binder);
-	state_init(&st, "sni-alloc");
+	stats_init(&st, "sni-alloc");
 	fill_listener(&cfg, local, echo.port, 2, st, NULL, NULL);
 	expect_true(sni_listener_open(&cfg, &ls), "alloc listener");
 	memset(&faults, 0, sizeof(faults));
@@ -1412,7 +1413,7 @@ static void test_alloc_failure(void)
 		close(fd);
 	}
 	usleep(50000);
-	state_get(st, &snap);
+	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 0, "alloc failure does not stick active");
 	expect_int((int)snap.TotalConnection, 0, "alloc failure is not a completed connection");
 	expect_true(slots_are_clear(), "alloc failure released its slot");
@@ -1421,7 +1422,7 @@ static void test_alloc_failure(void)
 	expect_true(echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) == 0, "forward after alloc failure");
 	sni_listener_close(ls);
 	echo_stop(&echo);
-	state_get(st, &snap);
+	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 0, "active after alloc test");
 	expect_int((int)snap.TotalConnection, 1, "only the successful connection was counted");
 	state_drop(st);
@@ -1442,7 +1443,7 @@ static void test_stats_once(void)
 	binder = listen_loopback(&local);
 	if (binder >= 0)
 		close(binder);
-	state_init(&st, "sni-stats");
+	stats_init(&st, "sni-stats");
 	fill_listener(&cfg, local, echo.port, 1, st, NULL, NULL);
 	expect_true(sni_listener_open(&cfg, &ls), "stats listener");
 	for (i = 0; i < 2; i++)
@@ -1472,7 +1473,7 @@ static void test_stats_once(void)
 		}
 	}
 	usleep(100000);
-	state_get(st, &snap);
+	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 0, "stats active back to zero");
 	expect_int((int)snap.TotalConnection, 4, "stats counted each accepted connection once");
 	expect_true(snap.TotalTx == (uint64_t)(sizeof(REQ) - 1) * 2, "tx counted on the successes only");
@@ -1480,7 +1481,7 @@ static void test_stats_once(void)
 	expect_true(snap.MaxConnection >= 1, "max connection observed");
 	sni_listener_close(ls);
 	echo_stop(&echo);
-	state_get(st, &snap);
+	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 0, "stats stay zero after listener stop");
 	expect_int((int)snap.TotalConnection, 4, "listener stop does not count twice");
 	state_drop(st);
@@ -1491,24 +1492,21 @@ static void test_whitelist_and_ip(void)
 	echo_srv echo;
 	sni_listener *ls = NULL;
 	SniServer_t cfg;
-	filter_t wl;
-	item_t item;
+	static const char *const allow[] = { "localhost" };
+	filter_t *wl;
 	uint16_t local = 0;
 	int binder;
 	int before;
 	uint8_t sink[8];
 	size_t got;
 	int fd;
-	memset(&wl, 0, sizeof(wl));
-	memset(&item, 0, sizeof(item));
-	pthread_mutex_init(&wl.Lock, NULL);
-	memcpy(item.Rec, "localhost", 10);
-	wl.item = &item;
+	wl = filter_from_list(allow, 1);
+	expect_true(wl != NULL, "build whitelist");
 	expect_true(echo_start(&echo) == 0, "filter echo");
 	binder = listen_loopback(&local);
 	if (binder >= 0)
 		close(binder);
-	fill_listener(&cfg, local, echo.port, 2, NULL, &wl, NULL);
+	fill_listener(&cfg, local, echo.port, 2, NULL, wl, NULL);
 	expect_true(sni_listener_open(&cfg, &ls), "filter listener");
 	before = __atomic_load_n(&echo.accepts, __ATOMIC_RELAXED);
 	fd = connect_local(local, 1000);
@@ -1533,7 +1531,7 @@ static void test_whitelist_and_ip(void)
 	expect_true(__atomic_load_n(&echo.accepts, __ATOMIC_RELAXED) > before, "allow reached upstream");
 	sni_listener_close(ls);
 	echo_stop(&echo);
-	pthread_mutex_destroy(&wl.Lock);
+	filter_free(wl);
 }
 
 static void test_two_listeners(void)
@@ -1733,7 +1731,7 @@ static void test_connection_cap(void)
 	binder = listen_loopback(&local);
 	if (binder >= 0)
 		close(binder);
-	state_init(&st, "sni-cap");
+	stats_init(&st, "sni-cap");
 	fill_listener(&cfg, local, 1, 180, st, NULL, NULL);
 	base = count_threads();
 	sni_test_set_hello_idle_ms(180000);
@@ -1763,7 +1761,7 @@ static void test_connection_cap(void)
 		int64_t deadline = mono_ms() + 20000;
 		do {
 			int j;
-			state_get(st, &snap);
+			stats_get(st, &snap);
 			if (snap.ActiveConnection >= 1024)
 				break;
 			for (j = 0; j < opened; j++) {
@@ -1783,20 +1781,20 @@ static void test_connection_cap(void)
 		expect_true(got == 0, "cap refusal has no payload");
 		close(refused);
 	}
-	state_get(st, &snap);
+	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 1024, "active matches the cap");
 	for (i = 0; i < opened; i++)
 		close(fds[i]);
 	{
 		int64_t deadline = mono_ms() + 15000;
 		do {
-			state_get(st, &snap);
+			stats_get(st, &snap);
 			if (snap.ActiveConnection == 0)
 				break;
 			usleep(20000);
 		} while (mono_ms() < deadline);
 	}
-	state_get(st, &snap);
+	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 0, "cap connections drained");
 	expect_int((int)snap.TotalConnection, 1024, "refused connection was not counted");
 	expect_int(count_threads(), base + 1, "threads after draining the cap");
@@ -1876,23 +1874,23 @@ static void test_production_spawn(void)
 		if (binder >= 0)
 			close(binder);
 		fill_listener(&cfg, local, echo.port, 3, NULL, NULL, NULL);
-		if (!SniProxy_Start(&cfg))
+		if (!sniproxy_start(&cfg))
 			_exit(4);
 		rc = echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000);
 		echo_stop(&echo);
 		_exit(rc == 0 ? 0 : 5);
 	}
 	expect_true(waitpid(pid, &status, 0) == pid, "wait production child");
-	expect_true(WIFEXITED(status) && WEXITSTATUS(status) == 0, "SniProxy_Start forwarded");
+	expect_true(WIFEXITED(status) && WEXITSTATUS(status) == 0, "sniproxy_start forwarded");
 }
 
 static void test_tls_hello_builds(void)
 {
 	uint8_t hello[256];
 	size_t len = 0;
-	char host[_MaxHostName_];
+	char host[ZROXY_MAX_HOSTNAME];
 	expect_true(build_client_hello(hello, sizeof(hello), &len, "localhost") == 0, "build hello");
-	expect_true(net_GetHost(hello, (uint32_t)len, host, _MaxHostName_), "parser accepts built hello");
+	expect_true(net_get_host(hello, (uint32_t)len, host, ZROXY_MAX_HOSTNAME), "parser accepts built hello");
 	expect_true(strcmp(host, "localhost") == 0, "built hello name");
 }
 
@@ -2008,12 +2006,12 @@ static int test_hook(const char *hostname, int family, sni_resolved_addr *out,
 {
 	hook_cfg *cfg = (hook_cfg *)cookie;
 	(void)family;
-	__atomic_fetch_add(&cfg->calls, 1, __ATOMIC_RELAXED);
+	atomic_fetch_add_explicit(&cfg->calls, 1, memory_order_relaxed);
 	*count = 0;
 	if (max_out == 0)
 		return EAI_FAIL;
-	if (cfg->mode == HOOK_EINTR && __atomic_load_n(&cfg->eintr_left, __ATOMIC_RELAXED) > 0) {
-		__atomic_fetch_sub(&cfg->eintr_left, 1, __ATOMIC_RELAXED);
+	if (cfg->mode == HOOK_EINTR && atomic_load_explicit(&cfg->eintr_left, memory_order_relaxed) > 0) {
+		atomic_fetch_sub_explicit(&cfg->eintr_left, 1, memory_order_relaxed);
 		errno = EINTR;
 		return EAI_SYSTEM;
 	}
@@ -2313,9 +2311,9 @@ static void test_resolver_quota_and_cancel(void)
 			resolve_slot *batch[4];
 			int64_t deadline = mono_ms() + 3000;
 			while ((!first || !second) && mono_ms() < deadline) {
-				size_t n = sni_resolver_drain(a, batch, 4);
+				size_t got = sni_resolver_drain(a, batch, 4);
 				size_t bi;
-				for (bi = 0; bi < n; bi++) {
+				for (bi = 0; bi < got; bi++) {
 					if (!first)
 						first = batch[bi];
 					else if (!second)
@@ -2388,10 +2386,10 @@ static void test_resolver_quota_and_cancel(void)
 					SNI_SUBMIT_OK, "eagain submit");
 			expect_true(sni_resolver_test_wait_running(1, 2000) != 0, "eagain worker is held");
 			for (;;) {
-				ssize_t n = write(a->pipe_write, buf, sizeof(buf));
-				if (n < 0 && errno == EINTR)
+				ssize_t wr = write(a->pipe_write, buf, sizeof(buf));
+				if (wr < 0 && errno == EINTR)
 					continue;
-				if (n <= 0)
+				if (wr <= 0)
 					break;
 			}
 			sni_resolver_test_hold_running(0);
@@ -2472,8 +2470,8 @@ static void test_sni_resolver_behavior(void)
 	uint16_t local = 0;
 	int binder;
 	int calls_before;
-	filter_t wl;
-	item_t item;
+	static const char *const allow[] = { "localhost" };
+	filter_t *wl;
 	uint32_t waits;
 	int fd;
 	memset(&cfg, 0, sizeof(cfg));
@@ -2488,16 +2486,13 @@ static void test_sni_resolver_behavior(void)
 		expect_int((int)n, 1, "numeric address count");
 		expect_int(cfg.calls, 0, "numeric lookup was not submitted");
 	}
-	memset(&wl, 0, sizeof(wl));
-	memset(&item, 0, sizeof(item));
-	pthread_mutex_init(&wl.Lock, NULL);
-	memcpy(item.Rec, "localhost", 10);
-	wl.item = &item;
+	wl = filter_from_list(allow, 1);
+	expect_true(wl != NULL, "build whitelist");
 	expect_true(echo_start(&echo) == 0, "resolver echo");
 	binder = listen_loopback(&local);
 	if (binder >= 0)
 		close(binder);
-	fill_listener(&scfg, local, echo.port, 2, NULL, &wl, NULL);
+	fill_listener(&scfg, local, echo.port, 2, NULL, wl, NULL);
 	expect_true(sni_listener_open(&scfg, &ls), "resolver listener");
 	calls_before = cfg.calls;
 	fd = connect_local(local, 1000);
@@ -2594,7 +2589,7 @@ static void test_sni_resolver_behavior(void)
 	}
 	sni_listener_close(ls);
 	echo_stop(&echo);
-	pthread_mutex_destroy(&wl.Lock);
+	filter_free(wl);
 	resolver_settle("sni resolver behavior");
 }
 

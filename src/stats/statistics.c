@@ -10,7 +10,7 @@
 #include <string.h>
 
 
-void state_init(statistics_t **self,char *name)
+void stats_init(statistics_t **self,char *name)
 {
 	*self = malloc(sizeof(statistics_t));
 	if (!*self)
@@ -35,7 +35,7 @@ void state_init(statistics_t **self,char *name)
 }
 
 
-void state_RxTxClose(statistics_t *self,uint32_t rx,uint32_t tx)
+void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx)
 {
 	pthread_mutex_lock(&self->Lock);
 	self->stat.TotalRx += rx;
@@ -47,7 +47,7 @@ void state_RxTxClose(statistics_t *self,uint32_t rx,uint32_t tx)
 }
 
 
-void state_IncConnection(statistics_t *self)
+void stats_open_connection(statistics_t *self)
 {
 	pthread_mutex_lock(&self->Lock);
 	self->stat.ActiveConnection++;
@@ -56,17 +56,7 @@ void state_IncConnection(statistics_t *self)
 	pthread_mutex_unlock(&self->Lock);
 }
 
-void state_abandon(statistics_t *self)
-{
-	if (!self)
-		return;
-	pthread_mutex_lock(&self->Lock);
-	if (self->stat.ActiveConnection > 0)
-		self->stat.ActiveConnection--;
-	pthread_mutex_unlock(&self->Lock);
-}
-
-void state_get(statistics_t *self,stat_t *st)
+void stats_get(statistics_t *self,stat_t *st)
 {
 	pthread_mutex_lock(&self->Lock);
 	*st =  self->stat;

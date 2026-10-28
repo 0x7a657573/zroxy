@@ -221,13 +221,10 @@ static char *mon_dup_token(const char *src)
 	return out;
 }
 
-void *Monitor_HandleConnection(void *vargp);
-void Conv_Time(time_t Up,UpTime_t *tm);
-char *Print_humanSize(char *ptr,uint64_t bytes);
-int count_open_files(void);
-void read_memory_usage(void);
+static void *monitor_accept_thread(void *vargp);
+static int count_open_files(void);
 
-mon_t *monitor_Init(uint16_t port, const char *bind_ip, const char *token, int header_timeout_sec)
+mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int header_timeout_sec)
 {
 	int sockfd;
 	struct in_addr addr;
@@ -243,7 +240,7 @@ mon_t *monitor_Init(uint16_t port, const char *bind_ip, const char *token, int h
 		return NULL;
 	}
 
-	if(net_ListenIp4(addr.s_addr, port, &sockfd)==false)
+	if(net_listen_ipv4(addr.s_addr, port, &sockfd)==false)
 	{
 		log_error("monitor can not listen on Port %i", port);
 		return NULL;
@@ -268,7 +265,7 @@ mon_t *monitor_Init(uint16_t port, const char *bind_ip, const char *token, int h
 			return NULL;
 		}
 	}
-	if (pthread_mutex_init(&mon->state_lock, NULL) != 0)
+	if (pthread_mutex_init(&mon->stats_lock, NULL) != 0)
 	{
 		log_error("monitor mutex init failed");
 		close(sockfd);
@@ -283,11 +280,11 @@ mon_t *monitor_Init(uint16_t port, const char *bind_ip, const char *token, int h
 	if (mon->header_timeout > 60)
 		mon->header_timeout = 60;
 
-	if (pthread_create(&thread_id, NULL, Monitor_HandleConnection, (void*)mon) != 0)
+	if (pthread_create(&thread_id, NULL, monitor_accept_thread, (void*)mon) != 0)
 	{
 		log_error("monitor thread create failed");
 		close(sockfd);
-		pthread_mutex_destroy(&mon->state_lock);
+		pthread_mutex_destroy(&mon->stats_lock);
 		free(mon->token);
 		free(mon);
 		return NULL;
@@ -297,24 +294,24 @@ mon_t *monitor_Init(uint16_t port, const char *bind_ip, const char *token, int h
 	return mon;
 }
 
-statistics_t *monitor_AddNewStat(mon_t *self,char *name)
+statistics_t *monitor_add_stat(mon_t *self,char *name)
 {
 	statistics_t *stat;
 	statistics_t *created;
 	if (!self)
 		return NULL;
-	pthread_mutex_lock(&self->state_lock);
+	pthread_mutex_lock(&self->stats_lock);
 	stat = self->state;
-	state_init(&self->state,name);		/*create statistics var*/
+	stats_init(&self->state,name);		/*create statistics var*/
 	self->state->next = stat;
 	created = self->state;
-	pthread_mutex_unlock(&self->state_lock);
+	pthread_mutex_unlock(&self->stats_lock);
 	return created;
 }
 
-void *Minitor_HandelConnection(void *arg);
-void Monitor_HandelClient(int fd,uint8_t *data,int len,mon_t *owner);
-void *Monitor_HandleConnection(void *vargp)
+static void *monitor_client_thread(void *arg);
+static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner);
+static void *monitor_accept_thread(void *vargp)
 {
 	mon_t *mon = (mon_t*)vargp;
 	int sockfd = mon->fd;	  /* listening socket descriptor */
@@ -345,7 +342,7 @@ void *Monitor_HandleConnection(void *vargp)
 		}
 
 		pthread_t thread_id;
-		if (pthread_create(&thread_id, NULL, Minitor_HandelConnection, (void*)client) != 0)
+		if (pthread_create(&thread_id, NULL, monitor_client_thread, (void*)client) != 0)
 		{
 			mon_worker_release();
 			close(client->connid);
@@ -354,9 +351,10 @@ void *Monitor_HandleConnection(void *vargp)
 		}
 		pthread_detach(thread_id);
 	}
+	return NULL;
 }
 
-void *Minitor_HandelConnection(void *arg)
+static void *monitor_client_thread(void *arg)
 {
 	if (!arg) pthread_exit(0);
 	monclient_t *client = (monclient_t*)arg;
@@ -398,7 +396,7 @@ void *Minitor_HandelConnection(void *arg)
 		{
 			if (errno == EINTR)
 				continue;
-			log_error("Err in select");
+			log_error("monitor select failed");
 			break;
 		}
 
@@ -408,12 +406,12 @@ void *Minitor_HandelConnection(void *arg)
 			break;
 		}
 
-		int newData = read(client->connid, &buffer[Windex], sizeof(buffer) - Windex);/* read length of message */
+		ssize_t newData = read(client->connid, &buffer[Windex], sizeof(buffer) - Windex);/* read length of message */
 		if (newData < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
 			continue;
 		if (newData <= 0)
 		{
-			log_trace("client %i disconnect %i",client->connid,newData);
+			log_trace("client %i disconnect %zd",client->connid,newData);
 			break;
 		}
 		if ((uint32_t)newData > sizeof(buffer) - Windex)
@@ -437,7 +435,7 @@ void *Minitor_HandelConnection(void *arg)
 				mon_send_empty(client->connid, 401, header_timeout);
 				break;
 			}
-			Monitor_HandelClient(client->connid, buffer, (int)Windex, client->owner);
+			monitor_send_report(client->connid, buffer, (int)Windex, client->owner);
 			break;
 		}
 		if (Windex >= sizeof(buffer))
@@ -445,7 +443,7 @@ void *Minitor_HandelConnection(void *arg)
 	}
 
 out:
-	log_trace("Monitor tid:%i Prosess",client->connid);
+	log_trace("monitor client %i done",client->connid);
 	if (client->connid >= 0)
 		close(client->connid);
 	mon_worker_release();
@@ -470,7 +468,7 @@ static bool mon_append(char **ptr, char *end, const char *fmt, ...)
 	return true;
 }
 
-void Monitor_HandelClient(int fd,uint8_t *data,int len,mon_t *owner)
+static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 {
 	char message[2048];
 	char *ptr = message;
@@ -481,24 +479,20 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,mon_t *owner)
 
 	if (!owner)
 		return;
-	pthread_mutex_lock(&owner->state_lock);
+	pthread_mutex_lock(&owner->stats_lock);
 	stat = owner->state;
-	pthread_mutex_unlock(&owner->state_lock);
+	pthread_mutex_unlock(&owner->stats_lock);
 
 	memset(message, 0, sizeof(message));
 	if (!mon_append(&ptr, end, "{\n\"ZroxyVersion\" : \"%s\",\n", version) ||
 	    !mon_append(&ptr, end, "\"CountOfOpenFile\" : %i,\n", count_open_files()))
 		return;
 	
-	// return;
-	// read_memory_usage();
-
 	statistics_t *sta = stat;
 	while(sta)
 	{
-		/*incoming data and possess it*/
 		stat_t stdata;
-		state_get(sta,&stdata);	/*get static data*/
+		stats_get(sta,&stdata);
 		time_t CurrentTime;
 		time ( &CurrentTime );
 		time_t LiveTime = CurrentTime - stdata.StartTime;
@@ -536,40 +530,7 @@ void Monitor_HandelClient(int fd,uint8_t *data,int len,mon_t *owner)
 	}
 }
 
-
-
-void Conv_Time(time_t Up,UpTime_t *tm)
-{
-#define OneDaySec	(3600*24)
-
-	tm->tm_yday = Up/OneDaySec;
-	time_t Rtime = Up%OneDaySec;
-	tm->tm_hour = Rtime/3600;
-	Rtime = Rtime%3600;
-	tm->tm_min = Rtime/60;
-	tm->tm_sec = Rtime%60;
-}
-
-char *Print_humanSize(char *ptr,uint64_t bytes)
-{
-	char *suffix[] = {"B", "KB", "MB", "GB", "TB"};
-	char length = sizeof(suffix) / sizeof(suffix[0]);
-
-	int i = 0;
-	double dblBytes = bytes;
-
-	if (bytes >= 1024)
-	{
-		for (i = 0; (bytes / 1024) > 0 && i<length-1; i++, bytes /= 1024)
-			dblBytes = bytes / 1024.0;
-	}
-
-	ptr += sprintf(ptr, "%.02lf %s", dblBytes, suffix[i]);
-	return ptr;
-}
-
-
-int count_open_files(void)
+static int count_open_files(void)
 {
     struct dirent *entry;
     int count = 0;
@@ -597,28 +558,4 @@ int count_open_files(void)
     
 	// because "." and ".." are also in the directory, we need to reduce by 2
     return count - 2;
-}
-
-void read_memory_usage(void) 
-{
-    FILE *status_file;
-
-    status_file = fopen("/proc/self/status", "r");
-    if (!status_file) 
-	{
-        perror("fopen");
-        return;
-    }
-
-	char line[256];
-    while (fgets(line, sizeof(line), status_file)) 
-	{
-        if (strncmp(line, "VmRSS:", 6) == 0 || strncmp(line, "VmSize:", 7) == 0) 
-		{
-            printf("%s", line);
-        }
-		//printf("%s", line);
-    }
-
-    fclose(status_file);
 }

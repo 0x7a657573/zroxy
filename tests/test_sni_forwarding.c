@@ -231,7 +231,7 @@ static void test_sni_forwarding_basic(void)
     client->SniConfig.wlist = NULL;
     client->SniConfig.snitimeout = 2;
 
-    expect_true(pthread_create(&sni_tid, NULL, SniClientHandler, client) == 0, "start sniclient handler");
+    expect_true(pthread_create(&sni_tid, NULL, sni_client_handler, client) == 0, "start sniclient handler");
     if (failures != 0)
     {
         close(pair[0]);
@@ -337,7 +337,7 @@ static void test_stalled_upstream_releases_worker(void)
     sigemptyset(&sa.sa_mask);
     sigaction(SIGALRM, &sa, NULL);
     alarm(8);
-    if (pthread_create(&sni_tid, NULL, SniClientHandler, client) != 0)
+    if (pthread_create(&sni_tid, NULL, sni_client_handler, client) != 0)
     {
         alarm(0);
         sni_worker_release();
