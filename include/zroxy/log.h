@@ -19,14 +19,14 @@ typedef void (*log_LockFn)(void *udata, int lock);
 
 enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
 
-#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+#define LOG_FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
-#define log_trace(...) log_log(LOG_TRACE, __FILENAME__ , __LINE__, __VA_ARGS__)
-#define log_debug(...) log_log(LOG_DEBUG, __FILENAME__ , __LINE__, __VA_ARGS__)
-#define log_info(...)  log_log(LOG_INFO,  __FILENAME__ , __LINE__, __VA_ARGS__)
-#define log_warn(...)  log_log(LOG_WARN,  __FILENAME__ , __LINE__, __VA_ARGS__)
-#define log_error(...) log_log(LOG_ERROR, __FILENAME__ , __LINE__, __VA_ARGS__)
-#define log_fatal(...) log_log(LOG_FATAL, __FILENAME__ , __LINE__, __VA_ARGS__)
+#define log_trace(...) log_log(LOG_TRACE, LOG_FILENAME , __LINE__, __VA_ARGS__)
+#define log_debug(...) log_log(LOG_DEBUG, LOG_FILENAME , __LINE__, __VA_ARGS__)
+#define log_info(...)  log_log(LOG_INFO,  LOG_FILENAME , __LINE__, __VA_ARGS__)
+#define log_warn(...)  log_log(LOG_WARN,  LOG_FILENAME , __LINE__, __VA_ARGS__)
+#define log_error(...) log_log(LOG_ERROR, LOG_FILENAME , __LINE__, __VA_ARGS__)
+#define log_fatal(...) log_log(LOG_FATAL, LOG_FILENAME , __LINE__, __VA_ARGS__)
 
 void log_set_udata(void *udata);
 void log_set_lock(log_LockFn fn);
@@ -36,5 +36,6 @@ void log_set_quiet(int enable);
 
 void log_log(int level, const char *file, int line, const char *fmt, ...);
 
-void Log_init(void);
+/* Serialize log lines across threads. Call once before starting threads. */
+void log_init(void);
 #endif

@@ -318,7 +318,7 @@ static void test_recvfrom_failure_and_eintr(void)
     dns.fifo = &fifo;
     dns.local_sock = -1;
     expect_true(localdns_pull(&dns), "recvfrom on a closed descriptor returns");
-    expect_int(fifo_UnreadMessage(&fifo), 0, "failed recvfrom does not enqueue");
+    expect_int(fifo_count(&fifo), 0, "failed recvfrom does not enqueue");
 
     closed_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (closed_fd < 0)
@@ -331,7 +331,7 @@ static void test_recvfrom_failure_and_eintr(void)
     dns.local_sock = closed_fd;
     closed_fd = -1;
     expect_true(localdns_pull(&dns), "recvfrom EBADF returns");
-    expect_int(fifo_UnreadMessage(&fifo), 0, "EBADF does not enqueue");
+    expect_int(fifo_count(&fifo), 0, "EBADF does not enqueue");
     dns.local_sock = -1;
 
     if (!bind_udp(&udp, &addr))
@@ -362,9 +362,9 @@ static void test_recvfrom_failure_and_eintr(void)
         goto done;
     }
     expect_true(localdns_pull(&dns), "successful recvfrom returns");
-    expect_int(fifo_UnreadMessage(&fifo), 1, "successful recvfrom enqueues one message");
+    expect_int(fifo_count(&fifo), 1, "successful recvfrom enqueues one message");
     memset(&got, 0, sizeof(got));
-    expect_true(fifo_Read(&fifo, &got), "read the enqueued datagram");
+    expect_true(fifo_pop(&fifo, &got), "read the enqueued datagram");
     expect_int(got.len, (int)sizeof(query), "recvfrom length is the datagram size");
     expect_true(memcmp(got.message + 2, query, sizeof(query)) == 0, "recvfrom payload is unchanged");
     close(sender);
@@ -401,7 +401,7 @@ static void test_recvfrom_failure_and_eintr(void)
     have_killer = false;
     expect_true(ok, "recvfrom EINTR returns without failing the listener");
     expect_true(hit_during_call != 0, "SIGUSR1 arrived during recvfrom");
-    expect_int(fifo_UnreadMessage(&fifo), 0, "interrupted recvfrom does not enqueue");
+    expect_int(fifo_count(&fifo), 0, "interrupted recvfrom does not enqueue");
 
 done:
     in_call = 0;

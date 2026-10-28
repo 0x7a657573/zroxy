@@ -46,9 +46,9 @@ static void test_http_host_valid(void)
         "Host: example.com\r\n"
         "Connection: close\r\n"
         "\r\n";
-    char host[_MaxHostName_] = {0};
+    char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_GetHttpHost(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
                 "valid HTTP Host");
     expect_string(host, "example.com", "valid HTTP Host value");
 }
@@ -59,9 +59,9 @@ static void test_http_without_host(void)
         "GET / HTTP/1.1\r\n"
         "Connection: close\r\n"
         "\r\n";
-    char host[_MaxHostName_] = "unchanged";
+    char host[ZROXY_MAX_HOSTNAME] = "unchanged";
 
-    expect_false(net_GetHttpHost(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+    expect_false(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
                  "HTTP without Host");
     expect_string(host, "", "HTTP without Host clears output");
 }
@@ -73,9 +73,9 @@ static void test_http_host_with_port(void)
         "Host: example.com:443\r\n"
         "Connection: close\r\n"
         "\r\n";
-    char host[_MaxHostName_] = {0};
+    char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_GetHttpHost(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
                 "HTTP Host with port");
     expect_string(host, "example.com:443", "HTTP Host with port value");
 }
@@ -104,9 +104,9 @@ static void test_tls_sni_valid(void)
         0x00, 0x0b,
         'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'
     };
-    char host[_MaxHostName_] = {0};
+    char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_GetHttpsHost((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
+    expect_true(net_get_https_host((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
                 "valid TLS SNI");
     expect_string(host, "example.com", "valid TLS SNI value");
 }
@@ -114,11 +114,11 @@ static void test_tls_sni_valid(void)
 static void test_http_host_without_terminator(void)
 {
     uint8_t request[] = "GET / HTTP/1.1\r\nHost: ";
-    char host[_MaxHostName_];
+    char host[ZROXY_MAX_HOSTNAME];
     memset(host, 'x', sizeof(host));
     host[sizeof(host) - 1] = '\0';
 
-    expect_false(net_GetHttpHost(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+    expect_false(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
                  "HTTP Host without CRLF");
     expect_string(host, "", "HTTP Host without CRLF clears output");
 }
@@ -130,11 +130,11 @@ static void test_tls_sni_truncated_record(void)
         0x01, 0x00, 0x00, 0x3f,
         0x03, 0x03
     };
-    char host[_MaxHostName_];
+    char host[ZROXY_MAX_HOSTNAME];
     memset(host, 'x', sizeof(host));
     host[sizeof(host) - 1] = '\0';
 
-    expect_false(net_GetHttpsHost((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
+    expect_false(net_get_https_host((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
                  "truncated TLS record");
     expect_string(host, "", "truncated TLS record clears output");
 }
@@ -169,14 +169,14 @@ static void copy_valid_hello(uint8_t *dst)
 static void test_tls_sni_malformed_extensions(void)
 {
     uint8_t hello[72];
-    char host[_MaxHostName_];
+    char host[ZROXY_MAX_HOSTNAME];
 
     copy_valid_hello(hello);
     hello[3] = 0x00;
     hello[4] = 0x80;
     memset(host, 'x', sizeof(host));
     host[sizeof(host) - 1] = '\0';
-    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
                  "TLS record longer than the buffer");
     expect_string(host, "", "overlong TLS record clears output");
 
@@ -185,7 +185,7 @@ static void test_tls_sni_malformed_extensions(void)
     hello[51] = 0x30;
     memset(host, 'x', sizeof(host));
     host[sizeof(host) - 1] = '\0';
-    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
                  "TLS extensions length past the record");
     expect_string(host, "", "overlong extensions clear output");
 
@@ -194,7 +194,7 @@ static void test_tls_sni_malformed_extensions(void)
     hello[60] = 0x14;
     memset(host, 'x', sizeof(host));
     host[sizeof(host) - 1] = '\0';
-    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
                  "SNI name longer than the server-name list");
     expect_string(host, "", "overlong SNI name clears output");
 
@@ -203,14 +203,14 @@ static void test_tls_sni_malformed_extensions(void)
     hello[4] = 0x38;
     memset(host, 'x', sizeof(host));
     host[sizeof(host) - 1] = '\0';
-    expect_false(net_GetHttpsHost(hello, sizeof(hello), host, sizeof(host)),
+    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
                  "SNI name sitting past the TLS record");
     expect_string(host, "", "name past the record is not accepted");
 
     copy_valid_hello(hello);
     memset(host, 'x', sizeof(host));
     host[sizeof(host) - 1] = '\0';
-    expect_false(net_GetHttpsHost(hello, 61, host, sizeof(host)),
+    expect_false(net_get_https_host(hello, 61, host, sizeof(host)),
                  "ClientHello cut off inside the SNI name");
     expect_string(host, "", "cut-off SNI name clears output");
 }

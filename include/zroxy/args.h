@@ -19,7 +19,7 @@ typedef struct
 	lport_t 	*ports;
 	sockshost_t *socks;
 	uint16_t	*monitorPort;
-	char		monitor_bind[_MaxIPAddress_];
+	char		monitor_bind[ZROXY_MAX_IP_TEXT];
 	char		*monitor_token;
 	int			monitor_header_timeout;
 	char 		*WhitePath;
@@ -27,10 +27,10 @@ typedef struct
 	int			snitimeout;
 }zroxy_t;
 
-bool arg_Init(zroxy_t *pgp,int argc, const char **argv);
-void print_usage(void);
-void Free_PortList(zroxy_t *ptr);
-void Free_DnsServer(zroxy_t *ptr);
+bool args_init(zroxy_t *pgp,int argc, const char **argv);
+void args_print_usage(void);
+void args_free_ports(zroxy_t *ptr);
+void args_free_dns(zroxy_t *ptr);
 
 
 #endif /* ARGS_H_ */

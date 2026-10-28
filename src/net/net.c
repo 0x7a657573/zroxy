@@ -21,7 +21,7 @@
 #include <poll.h>
 #include <zroxy/net_io.h>
 
-void *MemSearch(const void *haystack_start, size_t haystack_len,
+static void *net_memmem(const void *haystack_start, size_t haystack_len,
         		const void *needle_start, size_t needle_len);
 
 bool net_enable_keepalive(int sock) 
@@ -97,7 +97,7 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port, int timeout_se
     deadline = now + net_timeout_ms(timeout_sec);
 
     /*check Hostname is IP or Domain*/
-    if(isTrueIpAddress(hostname))
+    if(net_is_ip_literal(hostname))
 	{
         int sfd = socket(AF_INET, SOCK_STREAM, 0);
         if(sfd < 0)
@@ -177,7 +177,7 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port, int timeout_se
     return false;
 }
 
-bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd)
+bool net_listen_ipv4(in_addr_t addr, uint16_t Port,int *sockfd)
 {
 
 	struct  sockaddr_in servaddr;
@@ -239,13 +239,13 @@ bool net_ListenIp4(in_addr_t addr, uint16_t Port,int *sockfd)
 	return true;
 }
 
-bool net_GetHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
+bool net_get_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
 {
-	if(net_GetHttpHost(buf,len,HostName,MaxHostName)==true)
+	if(net_get_http_host(buf,len,HostName,MaxHostName)==true)
 	{
 		return true;
 	}
-	if(net_GetHttpsHost(buf,len,HostName,MaxHostName)==true)
+	if(net_get_https_host(buf,len,HostName,MaxHostName)==true)
 	{
 		return true;
 	}
@@ -259,7 +259,7 @@ static bool tls_need(size_t pos, size_t n, size_t limit)
 	return true;
 }
 
-bool net_GetHttpsHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
+bool net_get_https_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
 {
     /* 1   TLS_HANDSHAKE_CONTENT_TYPE
      * 1   TLS major version
@@ -427,7 +427,7 @@ bool net_GetHttpsHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostN
     return false;
 }
 
-bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
+bool net_get_http_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
 {
     const uint8_t *data = buf;
     const uint8_t *end;
@@ -440,7 +440,7 @@ bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostNa
     HostName[0] = '\0';
     end = data + len;
 
-    pos = (const uint8_t *)MemSearch(buf, len, "\r\nHost:", 7);
+    pos = (const uint8_t *)net_memmem(buf, len, "\r\nHost:", 7);
     if (pos == NULL || pos < data || pos > end)
         return false;
 
@@ -452,7 +452,7 @@ bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostNa
     if (pos >= end)
         return false;
 
-    end_pos = (const uint8_t *)MemSearch(pos, (size_t)(end - pos), "\r\n", 2);
+    end_pos = (const uint8_t *)net_memmem(pos, (size_t)(end - pos), "\r\n", 2);
     if (end_pos == NULL || end_pos < pos || end_pos > end)
         return false;
 
@@ -470,7 +470,7 @@ bool net_GetHttpHost(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostNa
     return true;
 }
 
-void *MemSearch(const void *haystack_start, size_t haystack_len,
+static void *net_memmem(const void *haystack_start, size_t haystack_len,
         		const void *needle_start, size_t needle_len)
 {
     /* Abstract memory is considered to be an array of 'unsigned char' values,
@@ -494,7 +494,7 @@ void *MemSearch(const void *haystack_start, size_t haystack_len,
 		haystack = memchr(haystack, *needle, haystack_len);
 		if (!haystack || (needle_len == 1))
 			return (void *) haystack;
-		haystack_len -= haystack - Startptr;
+		haystack_len -= (size_t)(haystack - Startptr);
 
 		if (haystack_len < needle_len)
 				return NULL;
@@ -507,29 +507,10 @@ void *MemSearch(const void *haystack_start, size_t haystack_len,
 	return NULL;
 }
 
-bool isTrueIpAddress(const char *ipAddress)
+bool net_is_ip_literal(const char *ipAddress)
 {
     struct sockaddr_in sa;
     int result = inet_pton(AF_INET, ipAddress, &(sa.sin_addr));
     return result != 0;
 }
 
-bool net_socket_timeout(int sockfd,int txTimeout,int rxTimeout)
-{
-    struct timeval xtimeout;      
-    xtimeout.tv_sec = rxTimeout;
-    xtimeout.tv_usec = 0;
-    
-    if (setsockopt (sockfd, SOL_SOCKET, SO_RCVTIMEO, &xtimeout, sizeof(xtimeout)) < 0)
-    {
-        return false;
-    }
-        
-    xtimeout.tv_sec = txTimeout;
-    if (setsockopt (sockfd, SOL_SOCKET, SO_SNDTIMEO, &xtimeout, sizeof(xtimeout)) < 0)
-    {
-        return false;
-    }
-    
-    return true;
-}

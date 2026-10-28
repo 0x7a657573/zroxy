@@ -23,7 +23,7 @@ COUNTERS = (
 
 
 def _expected_version():
-    path = os.path.join(zroxy_lab.ROOT, "src", "version.h")
+    path = os.path.join(zroxy_lab.ROOT, "include", "zroxy", "version.h")
     with open(path, encoding="utf-8") as f:
         m = re.search(r'^#define\s+version\s+"([^"]+)"', f.read(), re.M)
     if not m:

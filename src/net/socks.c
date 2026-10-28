@@ -180,7 +180,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 	}
 
 	 /*check domain or ip*/
-	 is_domain = !isTrueIpAddress(host);
+	 is_domain = !net_is_ip_literal(host);
 
 	 // SOCKS5 CLIENT REQUEST
 	 // +-----+-----+-------+------+----------+----------+
