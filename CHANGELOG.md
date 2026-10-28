@@ -2,6 +2,19 @@
 
 These notes describe the `1.3.1` release. Nothing here says the result is production-ready.
 
+## Unreleased
+
+### Correctness
+
+- Dropped DNS requests now abandon their statistics state when worker admission or allocation fails.
+- Whitelist matching is case-insensitive for DNS names and file entries, as required by RFC 4343.
+- Linux and FreeBSD whitelist watchers reload after in-place writes and file replacement.
+
+### Test coverage
+
+- Monitor end-to-end tests read the expected version from `src/version.h`.
+- DNS end-to-end tests cover mixed-case whitelist queries and atomic or in-place whitelist saves.
+
 ## 1.3.1 - 2026-10-28
 
 ### Command-line interface
