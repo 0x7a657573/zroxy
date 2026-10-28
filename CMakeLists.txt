@@ -74,6 +74,10 @@ TARGET_LINK_LIBRARIES(${EXECUTABLE_NAME}
 INSTALL(TARGETS ${EXECUTABLE_NAME} RUNTIME DESTINATION bin)
 
 if(BUILD_TESTING)
+    add_test(NAME help_output COMMAND ${CMAKE_COMMAND}
+        -DZROXY_BIN=$<TARGET_FILE:zroxy>
+        -P ${CMAKE_SOURCE_DIR}/tests/check_help.cmake)
+
     add_executable(test_net_host_extract
         tests/test_net_host_extract.c
         network/net.c
