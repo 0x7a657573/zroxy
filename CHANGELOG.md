@@ -14,6 +14,12 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 - Each worker keeps its upstream TCP connection (direct or SOCKS5) open between queries. A connection closed by the server is detected before reuse; a failure on a reused connection is retried once on a fresh one.
 - Upstream reads and writes use monotonic per-call deadlines instead of `SO_RCVTIMEO`/`SO_SNDTIMEO`.
 
+### SNI data plane
+
+- `--snitimeout 0` now uses the minimum one-second relay idle timeout instead of expiring connections immediately.
+- Listener shutdown synchronizes its wakeup with engine teardown, preventing writes to closed or reused descriptors.
+- Relay work is bounded per pass by a 256 KiB byte budget; pending I/O remains armed for a later wait.
+
 ### Process lifecycle
 
 - `SIGINT` and `SIGTERM` stop the SNI listeners and the DNS service, join their threads, and exit with status 0.
