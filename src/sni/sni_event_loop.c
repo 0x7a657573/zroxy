@@ -44,10 +44,14 @@
  * - SOCKS5 is an explicit send/recv sequence with partial I/O.
  * - RELAY copies through two fixed buffers, stops reading a direction while
  *   its buffer is full, and shutdown(SHUT_WR) after a peer EOF is flushed.
+ *   One pump moves at most SNI_RELAY_BUDGET bytes, then level-triggered
+ *   readiness brings the connection back on a later wait.
  * - stats_close_connection and sni_worker_release run once, from conn_kill.
  */
 
 #define SNI_SOCKS_CAP 600u
+/* Bytes one relay_pump call may move before yielding to other connections. */
+#define SNI_RELAY_BUDGET (256u * 1024u)
 #define SNI_ADDR_MAX 16
 #define SNI_POLL_MAX 4096
 
@@ -223,7 +227,9 @@ static uint32_t g_client_bytes;
 static uint32_t g_max_pending;
 static uint32_t g_eagain;
 static uint32_t g_wait_calls;
+static uint32_t g_relay_yields;
 static int g_hello_idle_ms = SNI_HELLO_IDLE_MS;
+static uint32_t g_relay_budget = SNI_RELAY_BUDGET;
 
 static int take_one(int *counter)
 {
@@ -260,11 +266,17 @@ static void note_wait(void)
 {
 	__atomic_fetch_add(&g_wait_calls, 1u, __ATOMIC_RELAXED);
 }
+
+static void note_relay_yield(void)
+{
+	__atomic_fetch_add(&g_relay_yields, 1u, __ATOMIC_RELAXED);
+}
 #else
 static void note_client_read(uint32_t n) { (void)n; }
 static void note_pending(uint32_t n) { (void)n; }
 static void note_eagain(void) { }
 static void note_wait(void) { }
+static void note_relay_yield(void) { }
 #endif
 
 static bool set_nb_cloexec(int fd)
@@ -1324,10 +1336,21 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 		conn_kill(e, c);
 }
 
+static uint32_t relay_budget(void)
+{
+#ifdef SNI_TEST_HOOKS
+	uint32_t b = __atomic_load_n(&g_relay_budget, __ATOMIC_RELAXED);
+	if (b > 0)
+		return b;
+#endif
+	return SNI_RELAY_BUDGET;
+}
+
 static void relay_pump(sni_engine *e, sni_conn *c)
 {
-	int guard = 0;
-	while (!c->dead && guard++ < 100000) {
+	uint32_t budget = relay_budget();
+	uint32_t moved = 0;
+	while (!c->dead) {
 		int progress = 0;
 		int wr;
 		int rr;
@@ -1338,8 +1361,10 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 				conn_kill(e, c);
 				return;
 			}
-			if (c->c2u_off > before)
+			if (c->c2u_off > before) {
 				progress = 1;
+				moved += c->c2u_off - before;
+			}
 			if (c->c2u_off == c->c2u_len)
 				c->c2u_by = 0;
 			if (c->c2u_len >= c->c2u_off)
@@ -1352,8 +1377,10 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 				conn_kill(e, c);
 				return;
 			}
-			if (c->u2c_off > before)
+			if (c->u2c_off > before) {
 				progress = 1;
+				moved += c->u2c_off - before;
+			}
 			if (c->u2c_off == c->u2c_len)
 				c->u2c_by = 0;
 			if (c->u2c_len >= c->u2c_off)
@@ -1409,6 +1436,15 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			note_idle(c);
 		if (!progress)
 			break;
+		/*
+		 * Stop only after a whole pass, so EOF and shutdown steps above are
+		 * never skipped. Whatever is left is a buffered write or a readable
+		 * socket, and conn_arm keeps both armed.
+		 */
+		if (moved >= budget) {
+			note_relay_yield();
+			break;
+		}
 	}
 	if (!c->dead && !conn_arm(e, c))
 		conn_kill(e, c);
@@ -1995,6 +2031,7 @@ void sni_test_reset_counters(void)
 	__atomic_store_n(&g_max_pending, 0u, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_eagain, 0u, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_wait_calls, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_relay_yields, 0u, __ATOMIC_RELAXED);
 }
 
 uint32_t sni_test_client_bytes(void)
@@ -2022,5 +2059,17 @@ void sni_test_set_hello_idle_ms(int ms)
 	if (ms <= 0)
 		ms = SNI_HELLO_IDLE_MS;
 	__atomic_store_n(&g_hello_idle_ms, ms, __ATOMIC_RELAXED);
+}
+
+uint32_t sni_test_relay_yields(void)
+{
+	return __atomic_load_n(&g_relay_yields, __ATOMIC_RELAXED);
+}
+
+void sni_test_set_relay_budget(uint32_t bytes)
+{
+	if (bytes == 0)
+		bytes = SNI_RELAY_BUDGET;
+	__atomic_store_n(&g_relay_budget, bytes, __ATOMIC_RELAXED);
 }
 #endif
