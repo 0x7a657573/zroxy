@@ -8,7 +8,11 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.3.0"
+#define version	 "1.3.1"
+/*
+* cli : improve command-line help layout, descriptions, and examples
+*/
+//#define version	 "1.3.0"
 /*
 * sni : replace one pthread per client with one event loop per listener
 * sni : move hostname resolution to a bounded process-wide resolver pool

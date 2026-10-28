@@ -1,6 +1,14 @@
 # Changelog
 
-These notes describe the `1.3.0` release. Nothing here says the result is production-ready.
+These notes describe the `1.3.1` release. Nothing here says the result is production-ready.
+
+## 1.3.1 - 2026-10-28
+
+### Command-line interface
+
+- Reworked `-h` and `--help` output into grouped General, SNI, DNS, and Monitor sections.
+- Documented long-option forms, argument syntax, defaults, examples, and no-argument configuration behavior.
+- Added a CTest check for both help entry points and the new output format.
 
 ## 1.3.0 - 2026-10-26
 
