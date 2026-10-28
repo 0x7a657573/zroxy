@@ -154,6 +154,16 @@ def test_dns_whitelist_synthetic():
         if upstream.query_count() != 0:
             raise AssertionError("whitelisted name was forwarded upstream")
 
+        mixed = zroxy_lab.build_dns_query("Allowed.TEST", qid=0x1112)
+        reply = zroxy_lab.udp_exchange(ldns, mixed, 3.0)
+        if reply is None:
+            raise AssertionError("mixed-case whitelisted name produced no response\n%s" % proc.log_text())
+        parsed = zroxy_lab.parse_dns_message(reply)
+        if not any(a["type"] == 1 and a["rdata"] == bytes(SYNTHETIC_IP) for a in parsed["answers"]):
+            raise AssertionError("mixed-case name did not get the synthetic answer: %r" % parsed)
+        if upstream.query_count() != 0:
+            raise AssertionError("mixed-case whitelisted name was forwarded upstream")
+
         other = zroxy_lab.build_dns_query("other.test", qid=0x2222)
         _expect_exact(ldns, other, 3.0)
         if other not in upstream.queries:
