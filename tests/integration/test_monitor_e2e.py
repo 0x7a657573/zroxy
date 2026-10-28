@@ -2,6 +2,7 @@
 """End-to-end monitor JSON after real SNI and DNS traffic."""
 
 import os
+import re
 import sys
 import time
 import traceback
@@ -19,6 +20,15 @@ COUNTERS = (
     "TotalRx",
     "TotalTx",
 )
+
+
+def _expected_version():
+    path = os.path.join(zroxy_lab.ROOT, "src", "version.h")
+    with open(path, encoding="utf-8") as f:
+        m = re.search(r'^#define\s+version\s+"([^"]+)"', f.read(), re.M)
+    if not m:
+        raise AssertionError("version not found in %s" % path)
+    return m.group(1)
 
 
 def _dns_reply(query):
@@ -98,7 +108,7 @@ def test_monitor_after_traffic():
         if not fetched["closed"]:
             raise AssertionError("monitor did not close the connection")
         doc = fetched["json"]
-        if doc.get("ZroxyVersion") != "1.3.0":
+        if doc.get("ZroxyVersion") != _expected_version():
             raise AssertionError("unexpected version %r" % doc.get("ZroxyVersion"))
         _number(doc.get("CountOfOpenFile"), "CountOfOpenFile")
         for name in ("SNI_Server", "DNS_Server"):
