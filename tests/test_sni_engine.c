@@ -1219,6 +1219,164 @@ static void test_idle_timeout(void)
 	close(lfd);
 }
 
+static int accept_ms(int lfd, int timeout_ms)
+{
+	if (wait_fd(lfd, POLLIN, timeout_ms) != 0)
+		return -1;
+	return accept(lfd, NULL, NULL);
+}
+
+/* snitimeout 0 used to arm a zero idle timer and drop the relay at once. */
+static void test_zero_timeout_relays(void)
+{
+	uint16_t port = 0;
+	int lfd = listen_loopback(&port);
+	int pair[2];
+	sniclient_t *client;
+	pthread_t tid = 0;
+	int up = -1;
+	uint8_t req[64];
+	uint8_t reply[4];
+	int64_t start;
+	expect_true(lfd >= 0 && socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "zero-timeout setup");
+	if (lfd < 0)
+		return;
+	client = make_client(pair[1], port, 0, NULL, NULL, NULL);
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "zero-timeout handler");
+	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "zero-timeout request");
+	up = accept_ms(lfd, 2000);
+	expect_true(up >= 0, "zero-timeout upstream accepted");
+	if (up >= 0) {
+		expect_true(read_full_ms(up, req, sizeof(REQ) - 1, 2000) == 0, "zero-timeout upstream read");
+		usleep(300000);
+		expect_true(write_full(up, "PONG", 4) == 0, "zero-timeout reply");
+	}
+	expect_true(read_full_ms(pair[0], reply, sizeof(reply), 2000) == 0 &&
+			memcmp(reply, "PONG", 4) == 0, "snitimeout 0 keeps an idle relay open");
+	start = mono_ms();
+	pthread_join(tid, NULL);
+	expect_true(mono_ms() - start < 2500, "snitimeout 0 still idles out");
+	close(pair[0]);
+	if (up >= 0)
+		close(up);
+	close(lfd);
+}
+
+/* The loop may exit on its own; closing the listener afterwards must not write to its fds. */
+static void test_listener_self_exit(void)
+{
+	SniServer_t cfg;
+	sni_listener *ls = NULL;
+	sni_test_faults faults;
+	uint16_t local = 0;
+	int binder;
+	int threads;
+	int probe[2] = {-1, -1};
+	int64_t deadline;
+	char byte;
+	binder = listen_loopback(&local);
+	if (binder >= 0)
+		close(binder);
+	fill_listener(&cfg, local, 1, 3, NULL, NULL, NULL);
+	memset(&faults, 0, sizeof(faults));
+	faults.fail_wait = 1;
+	threads = count_threads();
+	sni_test_set_faults(&faults);
+	expect_true(sni_listener_open(&cfg, &ls), "self-exit listener");
+	deadline = mono_ms() + 2000;
+	while (count_threads() > threads && mono_ms() < deadline)
+		usleep(1000);
+	sni_test_clear_faults();
+	expect_int(count_threads(), threads, "event loop exits on wait failure");
+	/* Likely reuses the closed wake pipe numbers. */
+	expect_true(pipe(probe) == 0 && set_nb(probe[0]) == 0, "self-exit probe pipe");
+	sni_listener_close(ls);
+	expect_true(read(probe[0], &byte, 1) < 0 && errno == EAGAIN, "close after exit writes nothing");
+	if (probe[0] >= 0)
+		close(probe[0]);
+	if (probe[1] >= 0)
+		close(probe[1]);
+	expect_true(slots_are_clear(), "self-exit released slots");
+}
+
+#define BULK_LEN (1024u * 1024u)
+
+typedef struct bulk_up {
+	int lfd;
+	int ok;
+} bulk_up;
+
+static void *bulk_upstream(void *arg)
+{
+	bulk_up *b = (bulk_up *)arg;
+	uint8_t req[64];
+	uint8_t chunk[4096];
+	uint32_t sent = 0;
+	int up = accept_ms(b->lfd, 2000);
+	if (up < 0)
+		return NULL;
+	if (read_full_ms(up, req, sizeof(REQ) - 1, 2000) != 0) {
+		close(up);
+		return NULL;
+	}
+	while (sent < BULK_LEN) {
+		uint32_t i;
+		for (i = 0; i < sizeof(chunk); i++)
+			chunk[i] = (uint8_t)((sent + i) * 131u);
+		if (write_full(up, chunk, sizeof(chunk)) != 0)
+			break;
+		sent += (uint32_t)sizeof(chunk);
+	}
+	b->ok = sent == BULK_LEN;
+	close(up);
+	return NULL;
+}
+
+/* A fast transfer yields after the budget instead of holding the loop. */
+static void test_relay_budget(void)
+{
+	uint16_t port = 0;
+	int pair[2];
+	sniclient_t *client;
+	pthread_t tid = 0;
+	pthread_t utid = 0;
+	bulk_up b;
+	uint8_t *buf = (uint8_t *)malloc(BULK_LEN + 1);
+	size_t got = 0;
+	int intact = 1;
+	size_t i;
+	memset(&b, 0, sizeof(b));
+	b.lfd = listen_loopback(&port);
+	expect_true(buf && b.lfd >= 0 && socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "budget setup");
+	if (!buf || b.lfd < 0) {
+		free(buf);
+		return;
+	}
+	sni_test_reset_counters();
+	sni_test_set_relay_budget(16u * 1024u);
+	expect_true(pthread_create(&utid, NULL, bulk_upstream, &b) == 0, "budget upstream");
+	client = make_client(pair[1], port, 5, NULL, NULL, NULL);
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0, "budget handler");
+	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "budget request");
+	expect_true(read_eof_ms(pair[0], buf, BULK_LEN + 1, &got, 10000) == 0, "budget transfer ends");
+	pthread_join(utid, NULL);
+	expect_true(b.ok, "budget upstream sent everything");
+	expect_int((int)got, (int)BULK_LEN, "budget transfer length");
+	for (i = 0; i < got; i++) {
+		if (buf[i] != (uint8_t)(i * 131u)) {
+			intact = 0;
+			break;
+		}
+	}
+	expect_true(intact, "budget transfer is intact");
+	expect_true(sni_test_relay_yields() > 0, "relay pump yields after the budget");
+	close(pair[0]);
+	pthread_join(tid, NULL);
+	sni_test_set_relay_budget(0);
+	close(b.lfd);
+	free(buf);
+}
+
 static void test_client_eof_during_hello(void)
 {
 	int pair[2];
@@ -2757,6 +2915,8 @@ int main(void)
 	test_connect_failure();
 	test_handshake_timeout();
 	test_idle_timeout();
+	test_zero_timeout_relays();
+	test_relay_budget();
 	test_client_eof_during_hello();
 	test_upstream_eof();
 	test_half_close();
@@ -2766,6 +2926,7 @@ int main(void)
 	test_stats_once();
 	test_whitelist_and_ip();
 	test_two_listeners();
+	test_listener_self_exit();
 	test_load_and_threads();
 	test_stall_stays_responsive();
 	test_connection_cap();
