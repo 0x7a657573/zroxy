@@ -8,117 +8,309 @@
 #include <zroxy/log.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #ifdef __linux__
 #include <sys/inotify.h>
 #elif __FreeBSD__
 #include <sys/types.h>
 #include <sys/event.h>
 #include <fcntl.h>
-#include <unistd.h>
 #endif
 #include <unistd.h>
 #include <errno.h>
 #include <ctype.h>
 
-void filter_Remove(filter_t *self);
-void filter_Remove_Itemlist(item_t *ptr);
+/* Open-addressing string set. cap is a power of two, at most half full. */
+typedef struct
+{
+	char   **slot;
+	size_t cap;
+}strset_t;
 
-static bool filter_store_line(char *dst, size_t dstsz, char *line, ssize_t read)
+struct filter_set
+{
+	strset_t exact;		/* "example.com" */
+	strset_t suffix;	/* ".example.com" from "*.example.com" */
+	char   **pattern;	/* everything else with '*' or '?' */
+	size_t pattern_count;
+	size_t total;
+};
+
+static uint64_t fnv1a(const char *s)
+{
+	uint64_t h = 1469598103934665603ULL;
+	while (*s)
+	{
+		h ^= (unsigned char)*s++;
+		h *= 1099511628211ULL;
+	}
+	return h;
+}
+
+static bool strset_init(strset_t *set, size_t count)
+{
+	size_t cap = 8;
+	while (cap < count * 2)
+		cap <<= 1;
+	set->slot = calloc(cap, sizeof(*set->slot));
+	set->cap = set->slot ? cap : 0;
+	return set->slot != NULL;
+}
+
+/* Takes ownership of key; frees it if already present. */
+static void strset_add(strset_t *set, char *key)
+{
+	size_t i = (size_t)fnv1a(key) & (set->cap - 1);
+	while (set->slot[i])
+	{
+		if (strcmp(set->slot[i], key) == 0)
+		{
+			free(key);
+			return;
+		}
+		i = (i + 1) & (set->cap - 1);
+	}
+	set->slot[i] = key;
+}
+
+static bool strset_has(const strset_t *set, const char *key)
+{
+	size_t i;
+	if (set->cap == 0)
+		return false;
+	i = (size_t)fnv1a(key) & (set->cap - 1);
+	while (set->slot[i])
+	{
+		if (strcmp(set->slot[i], key) == 0)
+			return true;
+		i = (i + 1) & (set->cap - 1);
+	}
+	return false;
+}
+
+static void strset_free(strset_t *set)
+{
+	size_t i;
+	for (i = 0; i < set->cap; i++)
+		free(set->slot[i]);
+	free(set->slot);
+	set->slot = NULL;
+	set->cap = 0;
+}
+
+static void set_free(filter_set_t *set)
+{
+	size_t i;
+	if (!set)
+		return;
+	strset_free(&set->exact);
+	strset_free(&set->suffix);
+	for (i = 0; i < set->pattern_count; i++)
+		free(set->pattern[i]);
+	free(set->pattern);
+	free(set);
+}
+
+/*
+ * Lower-case, drop surrounding whitespace and one trailing dot.
+ * Returns false for an over-long entry; *out is "" for a line to skip.
+ */
+static bool normalize_entry(const char *in, char *out, size_t out_cap)
 {
 	size_t n;
-	if (read < 0 || (size_t)read >= _MaxHostName_ || (size_t)read >= dstsz)
-		return false;
-	n = (size_t)read;
-	if (n > 0 && line[n - 1] == '\n')
+	size_t i;
+
+	while (*in && isspace((unsigned char)*in))
+		in++;
+	n = strlen(in);
+	while (n > 0 && isspace((unsigned char)in[n - 1]))
+		n--;
+	if (n == 0 || in[0] == '#')
 	{
-		line[--n] = '\0';
+		out[0] = '\0';
+		return true;
 	}
-	if (n > 0 && line[n - 1] == '\r')
-	{
-		line[--n] = '\0';
-	}
-	if (n >= dstsz)
+	if (n > 1 && in[n - 1] == '.')
+		n--;
+	if (n >= out_cap)
 		return false;
-	memcpy(dst, line, n + 1);
+	for (i = 0; i < n; i++)
+		out[i] = (char)tolower((unsigned char)in[i]);
+	out[n] = '\0';
 	return true;
 }
 
-void filter_Reload(filter_t *self)
+/* "*.example.com" with no other wildcard -> ".example.com" */
+static bool is_suffix_pattern(const char *e)
 {
-	if(!self)
-		return;
+	return e[0] == '*' && e[1] == '.' && e[2] != '\0' && strpbrk(e + 1, "*?") == NULL;
+}
 
-	log_info("Try Reload Filters");
+/* entries are already normalized and non-empty */
+static filter_set_t *set_build(char **entries, size_t count)
+{
+	filter_set_t *set = calloc(1, sizeof(*set));
+	size_t i;
+	size_t nexact = 0, nsuffix = 0, npattern = 0;
 
-	FILE *FilterFile  = fopen(self->filepath, "r"); // read only
-	if(FilterFile==NULL)
+	if (!set)
+		return NULL;
+	for (i = 0; i < count; i++)
 	{
-		log_error("Can not Open Filter File");
-		return;
+		if (is_suffix_pattern(entries[i]))
+			nsuffix++;
+		else if (strpbrk(entries[i], "*?"))
+			npattern++;
+		else
+			nexact++;
 	}
+	if (!strset_init(&set->exact, nexact) || !strset_init(&set->suffix, nsuffix) ||
+		(npattern && !(set->pattern = calloc(npattern, sizeof(*set->pattern)))))
+	{
+		set_free(set);
+		return NULL;
+	}
+	for (i = 0; i < count; i++)
+	{
+		char *e = entries[i];
+		entries[i] = NULL; /* ownership moves into the set */
+		if (is_suffix_pattern(e))
+		{
+			memmove(e, e + 1, strlen(e)); /* keep the leading '.' */
+			strset_add(&set->suffix, e);
+		}
+		else if (strpbrk(e, "*?"))
+			set->pattern[set->pattern_count++] = e;
+		else
+			strset_add(&set->exact, e);
+	}
+	set->total = count;
+	return set;
+}
 
-	/*load domain from file to new list*/
-	item_t *NewList = NULL;
-	item_t *Pvitem = NULL;
+typedef struct
+{
+	char   **item;
+	size_t count;
+	size_t cap;
+}entry_list_t;
+
+static void entry_list_free(entry_list_t *l)
+{
+	size_t i;
+	for (i = 0; i < l->count; i++)
+		free(l->item[i]);
+	free(l->item);
+	memset(l, 0, sizeof(*l));
+}
+
+/* Normalize and append one raw entry. false on error. */
+static bool entry_list_add(entry_list_t *l, const char *raw)
+{
+	char norm[ZROXY_MAX_HOSTNAME];
+	char *copy;
+
+	if (!normalize_entry(raw, norm, sizeof(norm)))
+	{
+		log_error("whitelist entry too long");
+		return false;
+	}
+	if (norm[0] == '\0')
+		return true;
+	if (l->count == l->cap)
+	{
+		size_t cap = l->cap ? l->cap * 2 : 64;
+		char **item = realloc(l->item, cap * sizeof(*item));
+		if (!item)
+			return false;
+		l->item = item;
+		l->cap = cap;
+	}
+	copy = strdup(norm);
+	if (!copy)
+		return false;
+	l->item[l->count++] = copy;
+	return true;
+}
+
+static filter_set_t *set_load_file(const char *path)
+{
+	FILE *fp = fopen(path, "r"); // read only
+	entry_list_t list = {0};
+	filter_set_t *set = NULL;
 	char *line = NULL;
 	size_t len = 0;
 	ssize_t read;
-	int num = 0;
-	bool failed = false;
-	while ((read = getline(&line, &len, FilterFile)) != -1)
+	bool ok = true;
+
+	if (!fp)
 	{
-		if (read > _MaxConfigLine_)
+		log_error("can not open whitelist file %s", path);
+		return NULL;
+	}
+	while ((read = getline(&line, &len, fp)) != -1)
+	{
+		if (read > ZROXY_MAX_CONFIG_LINE || !entry_list_add(&list, line))
 		{
-			log_error("Filter Item Len Bigest Buffer");
-			failed = true;
+			if (read > ZROXY_MAX_CONFIG_LINE)
+				log_error("whitelist entry too long");
+			ok = false;
 			break;
 		}
-
-	    NewList = malloc(sizeof(item_t));
-	    if(NewList==NULL)
-	    {
-	    	filter_Remove_Itemlist(Pvitem);
-	    	Pvitem = NULL;
-	    	failed = true;
-	    	break;
-	    }
-
-	    memset(NewList,0,sizeof(item_t));
-
-	    if (!filter_store_line(NewList->Rec, sizeof(NewList->Rec), line, read))
-	    {
-	    	log_error("Filter Item Len Bigest Buffer");
-	    	free(NewList);
-	    	filter_Remove_Itemlist(Pvitem);
-	    	Pvitem = NULL;
-	    	failed = true;
-	    	break;
-	    }
-
-	    NewList->Next = Pvitem;
-	    Pvitem = NewList;
-	    num++;
 	}
-
-	/*free getline buffer*/
 	free(line);
-	fclose(FilterFile);
+	fclose(fp);
+	if (ok)
+		set = set_build(list.item, list.count);
+	entry_list_free(&list);
+	return set;
+}
 
-	if (failed)
+static filter_t *filter_alloc(filter_set_t *set, const char *path)
+{
+	filter_t *self = calloc(1, sizeof(*self));
+	if (!self)
+		return NULL;
+	if (path && !(self->filepath = strdup(path)))
+	{
+		free(self);
+		return NULL;
+	}
+	if (pthread_rwlock_init(&self->lock, NULL) != 0)
+	{
+		log_error("filter lock init has failed");
+		free(self->filepath);
+		free(self);
+		return NULL;
+	}
+	self->set = set;
+	return self;
+}
+
+void filter_reload(filter_t *self)
+{
+	filter_set_t *fresh;
+	filter_set_t *old;
+
+	if(!self || !self->filepath)
+		return;
+
+	log_info("reloading whitelist %s", self->filepath);
+	fresh = set_load_file(self->filepath);
+	if (!fresh)
 	{
 		log_error("Reload filter failed; keeping previous list");
 		return;
 	}
 
-	/*replace new list with old one*/
-	pthread_mutex_lock(&self->Lock);
-	item_t *ptr = self->item;
-	self->item = NewList;
-	pthread_mutex_unlock(&self->Lock);
+	pthread_rwlock_wrlock(&self->lock);
+	old = self->set;
+	self->set = fresh;
+	pthread_rwlock_unlock(&self->lock);
 
-	/*remove old entry entry*/
-	filter_Remove_Itemlist(ptr);
-	log_info("Reload filter: %i valid host loaded",num);
+	/* no reader can still hold old: the write lock waited for them */
+	set_free(old);
+	log_info("Reload filter: %zu valid host loaded", fresh->total);
 }
 
 #ifdef __linux__
@@ -128,7 +320,7 @@ void filter_Reload(filter_t *self)
  * replaces the inode and silently kills a watch on the file itself.
  * IN_CLOSE_WRITE also avoids reloading a half-written file.
  */
-void *filter_Handlefilewatcher(void *vargp)
+static void *filter_watch_thread(void *vargp)
 {
 	filter_t *self = (filter_t *)vargp;
 	int wd, fd;
@@ -170,7 +362,7 @@ void *filter_Handlefilewatcher(void *vargp)
 		close(fd);
 		return NULL;
 	}
-	log_info("Watching::%s",self->filepath);
+	log_info("watching %s for changes",self->filepath);
 
 	char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
 	const struct inotify_event *event;
@@ -212,7 +404,7 @@ void *filter_Handlefilewatcher(void *vargp)
 		if (changed)
 		{
 			log_info( "file %s was modified", self->filepath);
-			filter_Reload(self);
+			filter_reload(self);
 		}
 	}
 
@@ -243,7 +435,7 @@ static int filter_watch_open(int kq, const char *filename)
 	return fd;
 }
 
-void *filter_Handlefilewatcher(void *vargp)
+static void *filter_watch_thread(void *vargp)
 {
 	filter_t *self = (filter_t *)vargp;
 	const char *filename = self->filepath; // The file to monitor
@@ -297,13 +489,13 @@ void *filter_Handlefilewatcher(void *vargp)
 				break;
 			}
 			log_info( "file %s was replaced", self->filepath);
-			filter_Reload(self);
+			filter_reload(self);
 			continue;
 		}
 		if (event.fflags & FILTER_NOTE_CHANGE)
 		{
 			log_info( "file %s was modified", self->filepath);
-			filter_Reload(self);
+			filter_reload(self);
 		}
 	}
 
@@ -317,161 +509,101 @@ void *filter_Handlefilewatcher(void *vargp)
 
 filter_t *filter_init(char *filename)
 {
-	filter_t *self = NULL;
-	char *line = NULL;
-	size_t len = 0;
-	ssize_t read;
+	filter_set_t *set = set_load_file(filename);
+	filter_t *self;
+	pthread_t thread_id;
 
-	FILE *FilterFile  = fopen(filename, "r"); // read only
-
-	if(FilterFile==NULL)
-	{
-		log_error("Can not Open Filter File");
-		return self;
-	}
-
-	self = malloc(sizeof(filter_t));
+	if (!set)
+		return NULL;
+	self = filter_alloc(set, filename);
 	if (!self)
 	{
-		free(line);
-		fclose(FilterFile);
+		set_free(set);
 		return NULL;
 	}
-	memset(self,0,sizeof(filter_t));
-	if(pthread_mutex_init(&self->Lock, NULL) != 0)
-	{
-	    log_error("filter mutex init has failed");
-	    free(self);
-	    free(line);
-	    fclose(FilterFile);
-	    return NULL;
-	}
-
-	self->filepath = malloc(strlen(filename)+1);
-	if(!self->filepath)
-	{
-		log_error("filter filename malloc error");
-		pthread_mutex_destroy(&self->Lock);
-		free(self);
-		free(line);
-		fclose(FilterFile);
-		return NULL;
-	}
-	memcpy(self->filepath, filename, strlen(filename) + 1);
-
-	item_t *Pvitem = NULL;
-	int num = 0;
-	while ((read = getline(&line, &len, FilterFile)) != -1)
-	{
-		if(read > _MaxConfigLine_)
-		{
-			log_error("Filter Item Len Bigest Buffer");
-			filter_Remove(self);
-			self = NULL;
-			break;
-		}
-
-	    self->item = malloc(sizeof(item_t));
-	    if(self->item==NULL)
-	    {
-	    	filter_Remove(self);
-	    	self = NULL;
-	    	break;
-	    }
-
-	    memset(self->item,0,sizeof(item_t));
-
-	    if (!filter_store_line(self->item->Rec, sizeof(self->item->Rec), line, read))
-	    {
-	    	log_error("Filter Item Len Bigest Buffer");
-	    	free(self->item);
-	    	self->item = Pvitem;
-	    	filter_Remove(self);
-	    	self = NULL;
-	    	break;
-	    }
-
-	    self->item->Next = Pvitem;
-	    Pvitem = self->item;
-	    num++;
-	}
-
-	log_info("load %i valid host",num);
-
-	free(line);
-	fclose(FilterFile);
+	log_info("load %zu valid host", set->total);
 
 	/*create file watcher*/
-	if(self)
-	{
-		pthread_t thread_id;
-		if (pthread_create(&thread_id, NULL, filter_Handlefilewatcher, (void*)self) == 0)
-			pthread_detach(thread_id);
-		else
-			log_error("whitelist watcher thread failed");
-	}
-
+	if (pthread_create(&thread_id, NULL, filter_watch_thread, (void*)self) == 0)
+		pthread_detach(thread_id);
+	else
+		log_error("whitelist watcher thread failed");
 	return self;
 }
 
-void filter_Remove_Itemlist(item_t *ptr)
+filter_t *filter_from_list(const char *const *entries, size_t count)
 {
-	while(ptr)
+	entry_list_t list = {0};
+	filter_set_t *set;
+	filter_t *self;
+	size_t i;
+
+	for (i = 0; i < count; i++)
 	{
-		item_t *next = ptr->Next;
-		free(ptr);
-		ptr = next;
+		if (!entry_list_add(&list, entries[i]))
+		{
+			entry_list_free(&list);
+			return NULL;
+		}
 	}
+	set = set_build(list.item, list.count);
+	entry_list_free(&list);
+	if (!set)
+		return NULL;
+	self = filter_alloc(set, NULL);
+	if (!self)
+		set_free(set);
+	return self;
 }
 
-void filter_Remove(filter_t *self)
+void filter_free(filter_t *self)
 {
 	if(!self)
 		return;
-
-	filter_Remove_Itemlist(self->item);
+	set_free(self->set);
 	free(self->filepath);
-	pthread_mutex_destroy(&self->Lock);
+	pthread_rwlock_destroy(&self->lock);
 	free(self);
 }
 
 /*
-this function chack str2 match pattern in str1 (ASCII case-insensitive, RFC 4343)
+this function chack str2 match pattern in str1
+'*' matches any run of characters (dots included), '?' exactly one.
 str1 = apple, str2 = app* -return-> true
 str1 = apple, str2 = *ple -return-> true
 str1 = apple, str2 = *plex -return-> false
 */
-bool match(char *str1, char *str2) 
+static bool match(const char *str1, const char *str2)
 {
    int i = 0;
    int j = 0;
    int star = -1;
-   int match = 0;
+   int mark = 0;
 
-   while (str1[i] != '\0' && str2[j] != '\0') 
+   while (str1[i] != '\0')
    {
-      if (str2[j] == '*') 
-	  {
+      if (str2[j] == '*')
+      {
          star = j++;
-         match = i;
-      } 
-	  else if (tolower((unsigned char)str1[i]) == tolower((unsigned char)str2[j]) || str2[j] == '?')
-	  {
+         mark = i;
+      }
+      else if (str2[j] != '\0' && (str1[i] == str2[j] || str2[j] == '?'))
+      {
          i++;
          j++;
       }
-	  else if (star != -1) 
-	  {
+      else if (star != -1)
+      {
          j = star + 1;
-         i = ++match;
+         i = ++mark;
       }
-	  else 
-	  {
+      else
+      {
          return false;
       }
    }
 
-   while (str2[j] == '*') 
+   while (str2[j] == '*')
    {
       j++;
    }
@@ -479,23 +611,57 @@ bool match(char *str1, char *str2)
    return str2[j] == '\0';
 }
 
-bool filter_IsWhite(filter_t *self,char *host)
+static bool set_match(const filter_set_t *set, const char *host)
 {
-	bool res = false;
-	pthread_mutex_lock(&self->Lock);
+	const char *dot;
+	size_t i;
 
-	item_t *ptr = self->item;
-	while(ptr)
+	if (strset_has(&set->exact, host))
+		return true;
+	for (dot = strchr(host, '.'); dot; dot = strchr(dot + 1, '.'))
 	{
-		item_t *next = ptr->Next;
-		if(match(host,ptr->Rec))
-		{
-			res = true;
-			break;
-		}
-		ptr = next;
+		if (strset_has(&set->suffix, dot))
+			return true;
 	}
+	for (i = 0; i < set->pattern_count; i++)
+	{
+		if (match(host, set->pattern[i]))
+			return true;
+	}
+	return false;
+}
 
-	pthread_mutex_unlock(&self->Lock);
+bool filter_match(filter_t *self,const char *host)
+{
+	char norm[ZROXY_MAX_HOSTNAME];
+	size_t n;
+	size_t i;
+	bool res;
+
+	if (!self || !host)
+		return false;
+	n = strlen(host);
+	if (n > 1 && host[n - 1] == '.')
+		n--;
+	if (n >= sizeof(norm))
+		return false;
+	for (i = 0; i < n; i++)
+		norm[i] = (char)tolower((unsigned char)host[i]);
+	norm[n] = '\0';
+
+	pthread_rwlock_rdlock(&self->lock);
+	res = set_match(self->set, norm);
+	pthread_rwlock_unlock(&self->lock);
 	return res;
+}
+
+size_t filter_count(filter_t *self)
+{
+	size_t n;
+	if (!self)
+		return 0;
+	pthread_rwlock_rdlock(&self->lock);
+	n = self->set->total;
+	pthread_rwlock_unlock(&self->lock);
+	return n;
 }

@@ -408,7 +408,7 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 			snprintf(domain_resolve,sizeof(domain_resolve),"resolve { (%s) qName '%s'} ",dns_type_name(q->qType),q->qName);
 
 			/*try make replay*/
-			if(dns->whitelist && filter_IsWhite(dns->whitelist,q->qName))
+			if(dns->whitelist && filter_match(dns->whitelist,q->qName))
 			{
 				uint8_t buffer[DNS_MSG_SIZE];
 				int len = localdns_answer_local(dns,&dns_msg,buffer);
