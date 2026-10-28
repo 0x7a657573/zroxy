@@ -100,7 +100,7 @@ static void free_sockshost(sockshost_t *socks)
 	free(socks);
 }
 
-static char doc[] = "zroxy v"version "\n\tsimple sni and dns proxy.";
+static const char doc[] = "SNI proxy with optional SOCKS5 upstream, DNS proxy, and HTTP monitor.";
 static int parse_opt(int key, char *arg, void *userprm);
 
 bool Parse_Ports(zroxy_t *ptr,char *str);
@@ -125,46 +125,85 @@ typedef struct
 	const char  *arg;
 	int			require;
 	const char *doc;
+	int			section;
 }arg_option;
+
+enum
+{
+	OPTION_SECTION_GENERAL,
+	OPTION_SECTION_SNI,
+	OPTION_SECTION_DNS,
+	OPTION_SECTION_MONITOR
+};
 
 
 static arg_option options[] =
 {
-	{ "config", 'c' , "path to config" , required_argument, "path to config. -c /etc/zroxy.conf"},
-    { "port", 'p', "sni port", required_argument, "sni port that listens.\n\t\t\t\t\t\t<bind ip>:<local port>@<remote port>\n\t\t\t\t\t\t -p 127.0.0.1:8080@80,4433@433,853..."},
-	{ "socks", 's', "socks proxy", required_argument, "set proxy for up stream. -s 127.0.0.1:9050"},
-	{ "monitor", 'm', "monitor port", required_argument, "monitor port that listens. -m 1234 or -m 127.0.0.1:1234"},
-	{ "monitortoken", 'k', "monitor token", required_argument, "bearer token for the monitor. -k secret"},
-	{ "monitortimeout", 'a', "monitor header timeout", required_argument, "incomplete header timeout in sec. -a 5"},
-	{ "snitimeout", 'o', "set sni timeout", required_argument, "set sni timeout in sec. -o 30"},
-	{ "white", 'w' , "white list" , required_argument, "white list for host -w /etc/whitelist.txt"},
-	{ "ldns", 'd' , "local DNS server" , required_argument, "dns server that listens. -d 0.0.0.0:53"},
-	{ "dns", 'u' , "upstream DNS providers" , required_argument, "upstream DNS providers. -u 8.8.8.8"},
-	{ "dsocks", 'x' , "DNS upstream socks" , required_argument, "DNS upstream socks. -x 127.0.0.1:9050"},
-	{ "dtimeout", 't' , "DNS timeout in sec" , required_argument, "DNS upstream timeout. -t 5"},
-	{ "snip", 'i' , "SNI IP for DNS server" , required_argument, "SNI IP for DNS server. -i 127.0.0.1"},
-	{ "log", 'l' , "set log level" , required_argument, "set log level between 0 to 5. -l 2"},
-	{ "help", 'h' , "Give this help list" , no_argument, ""},
-    { 0 }
+	{ "config", 'c', "PATH", required_argument, "load configuration from PATH", OPTION_SECTION_GENERAL },
+	{ "log", 'l', "0..5", required_argument, "set log level (0=trace, 5=fatal)", OPTION_SECTION_GENERAL },
+	{ "help", 'h', "", no_argument, "show this help and exit", OPTION_SECTION_GENERAL },
+
+	{ "port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]", OPTION_SECTION_SNI },
+	{ "socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI },
+	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
+	{ "white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI },
+
+	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local UDP DNS listener", OPTION_SECTION_DNS },
+	{ "dns", 'u', "HOST[:PORT]", required_argument, "set the upstream DNS server (default port: 53)", OPTION_SECTION_DNS },
+	{ "dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS },
+	{ "dtimeout", 't', "SECONDS", required_argument, "DNS upstream timeout (default: 5)", OPTION_SECTION_DNS },
+	{ "snip", 'i', "IPv4", required_argument, "synthetic address for whitelisted DNS names", OPTION_SECTION_DNS },
+
+	{ "monitor", 'm', "[BIND-IP:]PORT", required_argument, "enable the HTTP monitor (default bind: 127.0.0.1)", OPTION_SECTION_MONITOR },
+	{ "monitortoken", 'k', "TOKEN", required_argument, "require Bearer TOKEN for the monitor", OPTION_SECTION_MONITOR },
+	{ "monitortimeout", 'a', "SECONDS", required_argument, "incomplete-header timeout, 1..60 (default: 5)", OPTION_SECTION_MONITOR },
+
+	{ 0 }
 };
+
+static void print_option(const arg_option *option)
+{
+	printf("  -%c, --%-16s %-16s %s\n",
+		option->key,
+		option->name,
+		option->arg,
+		option->doc);
+}
+
+static void print_option_section(int section, const char *title)
+{
+	int arg_number = (int)(sizeof(options) / sizeof(arg_option));
+
+	printf("%s:\n", title);
+	for (int i = 0; i < arg_number - 1; i++)
+	{
+		if (options[i].section == section)
+			print_option(&options[i]);
+	}
+}
 
 void print_usage(void)
 {
-	
-	printf("\r\nUsage: zroxy [OPTION...]\r\n");
-	printf("\t%s\r\n\r\n",doc);
+	printf("Usage: zroxy [OPTIONS]\n");
+	printf("       zroxy --help\n\n");
+	printf("zroxy v%s\n%s\n\n", version, doc);
 
-	int arg_number = sizeof(options)/sizeof(arg_option);
-	for(int i=0;i<arg_number-1;i++)
-	{
-		printf("\t-%c, '%s'\t%s\t\t%s\r\n",
-			options[i].key,
-			options[i].name,
-			options[i].arg,
-			options[i].doc
-		);
-	}
-	printf("\r\n");
+	print_option_section(OPTION_SECTION_GENERAL, "General options");
+	printf("\n");
+	print_option_section(OPTION_SECTION_SNI, "SNI proxy options");
+	printf("\n");
+	print_option_section(OPTION_SECTION_DNS, "DNS proxy options");
+	printf("\n");
+	print_option_section(OPTION_SECTION_MONITOR, "Monitor options");
+
+	printf("\nExamples:\n");
+	printf("  zroxy -c ./zroxy.conf\n");
+	printf("  zroxy -p 127.0.0.1:8443@443 -s 127.0.0.1:9050\n");
+	printf("  zroxy -d 127.0.0.1:5353 -u 1.1.1.1 -i 192.0.2.10\n");
+
+	printf("\nNotes:\n");
+	printf("  With no options, zroxy loads ./zroxy.conf.\n");
+	printf("  A configured service must start successfully; unconfigured services are skipped.\n");
 }
 
 bool arg_Init(zroxy_t *pgp,int argc, const char **argv)
