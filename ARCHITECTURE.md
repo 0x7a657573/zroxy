@@ -6,17 +6,23 @@ claim, capacity guarantee, or security audit.
 
 The main implementation areas are:
 
-- `src/` — process startup, configuration, and version information;
-- `sniproxy/` — hostname-aware TCP forwarding and the SNI event loop;
-- `dnsproxy/` — local UDP DNS receive, queueing, and upstream TCP forwarding;
-- `statistics/` — counters and the HTTP JSON monitor;
-- `network/` — sockets, bounded I/O, hostname extraction, and SOCKS5 helpers;
-- `sniproxy/filter/` — whitelist loading, matching, and reload;
-- `fifo/` — the bounded DNS message queue;
-- `log/` — logging and log synchronization.
+- `include/zroxy/` — public headers of every module, included as
+  `<zroxy/name.h>`;
+- `src/` — process startup (`main.c`) and configuration (`args.c`);
+- `src/sni/` — hostname-aware TCP forwarding and the SNI event loop (its
+  event-loop and resolver headers are private to this directory);
+- `src/dns/` — local UDP DNS receive, queueing, and upstream TCP forwarding;
+- `src/stats/` — counters and the HTTP JSON monitor;
+- `src/net/` — sockets, bounded I/O, hostname extraction, and SOCKS5 helpers;
+- `src/filter/` — whitelist loading, matching, and reload;
+- `src/fifo/` — the bounded DNS message queue;
+- `src/log/` — logging and log synchronization.
+
+Each `src/<module>/` directory builds one static library (`zroxy_<module>`);
+the executable and the unit tests link only the libraries they need.
 
 When this document says “the event loop”, it means the SNI listener loop in
-`sniproxy/sni_event_loop.c`. When it says “the main thread”, it means the
+`src/sni/sni_event_loop.c`. When it says “the main thread”, it means the
 thread running `src/main.c`.
 
 ## Design summary
@@ -25,15 +31,21 @@ zroxy is one process containing three optional services:
 
 1. one SNI listener event loop for each configured `PORT` entry;
 2. one monitor accept loop when `MONITOR` is configured; and
-3. one DNS receive/queue loop when `LDNS` is configured.
+3. one DNS receive loop and a fixed pool of DNS workers when `LDNS` is
+   configured.
 
 The SNI data plane does not create one pthread per client. Each listener owns
 one long-lived event-loop thread and represents accepted clients as connection
 objects managed by that thread. Hostname resolution is moved out of the event
 loop into one bounded, process-wide resolver pool.
 
-The monitor and DNS paths still use detached pthreads for accepted work. Their
-worker counts are bounded.
+The DNS service uses a fixed pool of 32 worker threads that wait on the DNS
+queue; each worker keeps one upstream TCP connection open between queries. The
+monitor still uses detached pthreads for accepted work, bounded to 32.
+
+The main thread waits for signals: `SIGHUP` reloads the whitelist, and
+`SIGINT`/`SIGTERM` stop the SNI listeners and the DNS service and exit with
+status `0`.
 
 ## System context
 
@@ -54,7 +66,7 @@ flowchart LR
         SNI[SNI listener event loop\none per PORT entry]
         Resolve[resolver pool\n4 threads / 128 slots]
         DNS[DNS receive loop\nUDP + FIFO]
-        DNSWorkers[DNS request workers\nmaximum 128]
+        DNSWorkers[DNS worker pool\n32 threads]
         Monitor[monitor accept loop]
         MonWorkers[monitor workers\nmaximum 32]
         Stats[statistics objects\nper service]
@@ -100,7 +112,7 @@ If Mermaid is not rendered by the viewer, the same topology is:
  DNS UDP ---------------> DNS receive/FIFO -----+----> DNS over TCP
                          |       |              |      direct or SOCKS5
                          |       v              |
-                         |  DNS request workers |
+                         |  DNS worker pool (32)|
                          |                      |
  Monitor HTTP ----------> monitor accept/workers |
                          |                      |
@@ -124,6 +136,7 @@ sequenceDiagram
 
     M->>M: initialize logging
     M->>M: ignore SIGPIPE
+    M->>M: block SIGINT, SIGTERM, SIGHUP (inherited by every thread)
     M->>A: parse CLI or zroxy.conf
     alt invalid configuration
         A-->>M: failure
@@ -148,19 +161,26 @@ sequenceDiagram
     end
 
     opt LDNS configured
-        M->>D: start DNS service thread
-        D-->>M: bind/worker startup result
+        M->>D: bind, start worker pool and receive thread
+        D-->>M: service handle or failure
     end
 
     loop each PORT entry
         M->>S: prime SOCKS cache, bind, start event loop
-        S-->>M: startup result
+        S-->>M: listener handle or failure
     end
 
     M->>M: free parsed port list
-    loop normal lifetime
-        M->>M: sleep(1)
+    loop until SIGINT or SIGTERM
+        M->>M: sigwait()
+        opt SIGHUP
+            M->>F: reload whitelist
+        end
     end
+
+    M->>S: stop each listener (close connections, join loop)
+    M->>D: stop receive thread, drain queue, join workers
+    M-->>M: return 0
 ```
 
 ### Startup failure semantics
@@ -178,37 +198,51 @@ sequenceDiagram
   listener running, but new SOCKS connections fail until a usable cache entry
   exists.
 
-The production main loop has no normal signal-driven shutdown path. The
-`Free_DnsServer` call appears after the infinite sleep and is not reached on
-the normal path. Process termination is therefore the effective cleanup path
-for the detached services.
+### Signals and shutdown
+
+`main` blocks `SIGINT`, `SIGTERM` and `SIGHUP` before any thread is created,
+so every thread inherits the mask and only the main thread's `sigwait` sees
+them.
+
+- `SIGHUP` reloads the whitelist (the same path the file watcher uses). Without
+  a whitelist it is logged and ignored.
+- `SIGINT` or `SIGTERM` starts shutdown. Each SNI listener is stopped: its
+  event loop is woken, closes every client and upstream connection, and is
+  joined. The DNS receive thread is woken through its wake pipe and joined;
+  the queue is then closed, workers answer what is already queued, close
+  their upstream connections and are joined. `main` returns `0`.
+- The monitor and the whitelist watcher are not stopped explicitly. They only
+  read shared state and end with the process.
+
+A startup failure also goes through the same stop path for anything already
+started, then returns `1`.
 
 ## Module map
 
 | Path | Responsibility | Main boundary |
 | --- | --- | --- |
-| `src/main.c` | Startup order, service creation, process lifetime | Owns top-level configuration references |
+| `src/main.c` | Startup order, signal handling, shutdown | Owns top-level configuration and service handles |
 | `src/args.c` | CLI/config parsing and validation | Produces `zroxy_t` |
-| `src/args.h` | Configuration structures and parser API | Shared by startup/services |
-| `src/config.h` | Length and queue bounds | Compile-time limits |
-| `src/version.h` | Current version and release notes | Used by monitor output |
-| `sniproxy/sniproxy.c` | SNI bind, SOCKS priming, listener startup | Creates one loop per configured port |
-| `sniproxy/sni_event_loop.c` | Non-blocking SNI state machine | Owns listener/client/upstream fds on its thread |
-| `sniproxy/sni_event_loop.h` | Event-loop API and test hooks | Joinable test loop and detached production loop |
-| `sniproxy/sni_resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
-| `sniproxy/sni_resolver.h` | Resolver states, quotas, address policy | Defines resolver ownership protocol |
-| `sniproxy/sniclient.c` | SNI connection cap and test entry point | 1024 live-connection slots |
-| `sniproxy/filter/filter.c` | Whitelist load, match, reload watcher | Publishes a protected list |
-| `network/net.c` | IPv4 listen/connect, HTTP/TLS host extraction | Protocol-independent socket helpers |
-| `network/net_io.c` | Exact and deadline-bounded I/O | Shared timeout behavior |
-| `network/socks/socks.c` | Blocking SOCKS5 client helper | Used by DNS and legacy/test paths |
-| `dnsproxy/dnsserver.c` | DNS service bootstrap thread | Binds UDP socket and starts worker loop |
-| `dnsproxy/dnsproxy.c` | UDP receive, FIFO, DNS request workers | Direct/SOCKS5 upstream forwarding |
-| `dnsproxy/dns.c` | DNS decode/encode | Bounded packet representation |
-| `fifo/fifo.c` | Mutex-protected fixed-size FIFO | Backpressure/drop boundary for DNS |
-| `statistics/statistics.c` | Per-service counters | One mutex per statistics object |
-| `statistics/monitor.c` | HTTP monitor accept/workers/JSON | Maximum 32 monitor workers |
-| `log/log.c`, `log/loglock.c` | Logging | Shared logging path |
+| `include/zroxy/args.h` | Configuration structures and parser API | Shared by startup/services |
+| `include/zroxy/config.h` | Length bounds | Compile-time limits |
+| `include/zroxy/version.h` | Current version and release notes | Used by monitor output |
+| `src/sni/sniproxy.c` | SOCKS priming, listener start/stop | One loop per configured port |
+| `src/sni/sni_event_loop.c` | Non-blocking SNI state machine | Owns listener/client/upstream fds on its thread |
+| `src/sni/sni_event_loop.h` | Event-loop API and test hooks (private) | Joinable listener: open/close |
+| `src/sni/sni_resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
+| `src/sni/sni_resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
+| `src/sni/sniclient.c` | SNI connection cap and test entry point | 1024 live-connection slots |
+| `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |
+| `src/net/net.c` | IPv4 listen/connect, HTTP/TLS host extraction | Protocol-independent socket helpers |
+| `src/net/net_io.c` | Exact and deadline-bounded I/O | Shared timeout behavior |
+| `src/net/socks.c` | Blocking SOCKS5 client helper | Used by DNS and legacy/test paths |
+| `src/dns/dnsserver.c` | DNS service start/stop and receive thread | Owns the UDP socket and wake pipe |
+| `src/dns/dnsproxy.c` | UDP receive, queue, worker pool | Direct/SOCKS5 upstream forwarding over kept connections |
+| `src/dns/dns.c` | DNS decode/encode | Bounded packet representation |
+| `src/fifo/fifo.c` | Fixed-size FIFO with blocking pop | Backpressure/drop boundary for DNS |
+| `src/stats/statistics.c` | Per-service counters | One mutex per statistics object |
+| `src/stats/monitor.c` | HTTP monitor accept/workers/JSON | Maximum 32 monitor workers |
+| `src/log/log.c`, `src/log/loglock.c` | Logging | Shared logging path |
 
 ## Thread and ownership model
 
@@ -216,7 +250,7 @@ for the detached services.
 
 ```mermaid
 flowchart TB
-    Main[main thread\nparse / start / sleep]
+    Main[main thread\nparse / start / sigwait / stop]
 
     subgraph PerListener[one instance per SNI listener]
         Loop[SNI event-loop thread\naccept + state machines + relay]
@@ -235,8 +269,8 @@ flowchart TB
     end
 
     subgraph DNSService[optional DNS]
-        DA[DNS service/receive thread]
-        DW[detached DNS request workers\nmax 128]
+        DA[DNS receive thread]
+        DW[DNS worker pool\n32 joinable threads]
     end
 
     Main --> Loop
@@ -257,8 +291,9 @@ flowchart TB
   them.
 - The whitelist object is created by `main` and referenced by SNI and DNS
   services. Services do not own or free it.
-- A production SNI loop receives a copy of `SniServer_t`; the pointed-to SOCKS,
-  filter, and statistics objects remain owned by the caller/process.
+- An SNI loop receives a copy of `SniServer_t`; the pointed-to SOCKS,
+  filter, and statistics objects remain owned by the caller/process. `main`
+  keeps the listener handle and stops it with `sniproxy_stop`.
 - After startup, the SNI event-loop thread owns its listening socket, wake pipe,
   resolver completion pipe, accepted client sockets, and upstream sockets.
 - SNI connection objects are allocated and freed by the same event-loop thread.
@@ -268,15 +303,17 @@ flowchart TB
   objects. Its `localdns_free` function does not free those aliases.
 - Monitor workers close their client descriptor exactly once and release their
   worker slot before exiting.
-- DNS workers free their copied request object and release their worker slot
-  before exiting.
+- Each DNS worker owns at most one upstream connection, opened on demand and
+  closed when the worker exits. The DNS service object owns the UDP socket, the
+  wake pipe, the queue and the worker threads; `dnsserver_stop` releases them.
 
 ### File-descriptor ownership
 
 ```text
 main
   ├─ creates/binds monitor fd ──> monitor accept thread
-  ├─ creates/binds DNS fd ──────> DNS receive thread
+  ├─ creates/binds DNS fd ──────> DNS receive thread (+ wake pipe)
+  │                                   └─ one upstream fd per DNS worker
   └─ creates/binds SNI fd ──────> owning SNI event-loop thread
                                       ├─ wake pipe
                                       ├─ resolver completion pipe
@@ -292,14 +329,13 @@ closing the same descriptor again.
 
 ### Listener startup
 
-For every `PORT` entry, `SniProxy_Start`:
+For every `PORT` entry, `sniproxy_start`:
 
 1. primes the shared SOCKS hostname cache if a SOCKS hostname is configured;
 2. creates and binds an IPv4 TCP listener;
-3. creates a startup-report pipe;
-4. starts one detached event-loop thread; and
-5. waits for that thread to finish internal initialization before reporting
-   success to `main`.
+3. starts one joinable event-loop thread; and
+4. waits for that thread to finish internal initialization before returning
+   the listener handle to `main`.
 
 The event-loop initialization creates its resolver completion sink, wake pipe,
 and epoll/poll backend. A listener is not reported ready until these resources
@@ -376,7 +412,7 @@ stateDiagram-v2
 #### `HELLO`
 
 - The client socket is readable while the initial buffer has room.
-- `net_GetHost` tries HTTP `Host` extraction and then TLS ClientHello SNI
+- `net_get_host` tries HTTP `Host` extraction and then TLS ClientHello SNI
   extraction.
 - The initial buffer is capped at 8192 bytes.
 - The configured SNI timeout is an absolute connection-stage deadline.
@@ -537,12 +573,12 @@ flowchart TD
     R --> Q{FIFO has room?}
     Q -- no --> Drop[drop/log queue-full request]
     Q -- yes --> F[bounded FIFO\n128 messages]
-    F --> W[DNS service worker]
+    F --> W[DNS worker pool\n32 threads, blocking pop]
     W --> C{DNS name matches whitelist?}
     C -- yes, A --> SA[synthetic A = SNIP]
     C -- yes, AAAA --> SAAAA[synthetic AAAA = ::]
     C -- unsupported local type --> NI[Not Implemented response]
-    C -- no --> T[upstream TCP query]
+    C -- no --> T[upstream TCP query\non the worker's kept connection]
     T --> D[direct TCP]
     T --> X[SOCKS5 TCP]
     D --> R2[read length-prefixed response]
@@ -555,24 +591,34 @@ flowchart TD
 
 ### DNS receive and worker flow
 
-1. `dnsserver_init` starts a DNS service thread and waits for its startup
-   condition result.
-2. The service creates the DNS state, binds the configured IPv4 UDP socket,
-   creates the FIFO, and starts one DNS worker loop.
-3. The receive loop reads UDP datagrams into a bounded `dnsMessage_t` and
-   enqueues them in the FIFO.
-4. The DNS worker dequeues a message and reserves one of 128 detached request
-   worker slots.
-5. The request worker decodes the DNS message and either creates a local
-   synthetic response or forwards the original query upstream.
-6. Upstream DNS uses TCP framing: a two-byte network-order length followed by
-   the DNS payload. Responses larger than the 512-byte internal message limit
-   are rejected.
-7. The worker sends the response back over UDP, updates statistics, frees its
-   request copy, and releases its worker slot.
+1. `dnsserver_start` creates the DNS state and the FIFO, binds the configured
+   IPv4 UDP socket, starts `DNS_WORKER_COUNT` (32) joinable workers, then
+   starts the receive thread. Any failure undoes what was started and returns
+   `NULL`.
+2. The receive thread polls the UDP socket and a wake pipe. Each datagram is
+   read into a bounded `dnsMessage_t` and pushed into the FIFO; a full FIFO
+   drops the datagram.
+3. Workers block on the FIFO's condition variable (`fifo_pop_wait`); there is
+   no polling or sleep. Each worker handles one query at a time.
+4. The worker decodes the DNS message and either creates a local synthetic
+   response or forwards the original query upstream.
+5. Upstream DNS uses TCP framing: a two-byte network-order length followed by
+   the DNS payload. Each write and read has the configured DNS timeout as a
+   monotonic deadline. Responses larger than the 512-byte internal message
+   limit are rejected.
+6. A worker keeps its upstream connection open for the next query. Before
+   reuse it drops the connection if the server already closed it (readable
+   with no request outstanding). If a reused connection still fails, the query
+   is retried once on a fresh connection; a failure on a fresh connection is
+   final, so a broken upstream is not hammered.
+7. The worker sends the response back over UDP and updates statistics.
 
-`recvfrom` failures, including `EINTR`, do not enqueue a job. FIFO insertion is
-mutex-protected and has a hard capacity of 128 messages.
+`dnsserver_stop` writes to the wake pipe and joins the receive thread, then
+closes the FIFO: workers drain what is already queued, close their upstream
+connections and exit, and are joined.
+
+`recvfrom` failures, including `EINTR`, do not enqueue a job. The FIFO has a
+hard capacity of 128 messages.
 
 ## Monitor and statistics
 
@@ -581,7 +627,7 @@ sequenceDiagram
     participant C as monitor client
     participant A as monitor accept thread
     participant W as monitor worker
-    participant L as state_lock
+    participant L as stats_lock
     participant S as statistics mutexes
 
     C->>A: TCP connect
@@ -611,11 +657,11 @@ who can reach the monitor socket can read the counters.
 
 The monitor uses two lock levels:
 
-- `state_lock` protects the linked-list head when statistics objects are added
+- `stats_lock` protects the linked-list head when statistics objects are added
   or the list is read;
 - each `statistics_t::Lock` protects that object's counters.
 
-The list lock is released before `state_get` takes an individual statistics
+The list lock is released before `stats_get` takes an individual statistics
 mutex, so those locks are not nested.
 
 SNI and DNS statistics are updated on close/completion. SNI increments active
@@ -628,13 +674,13 @@ releases the active slot exactly once during connection destruction.
 flowchart LR
     File[whitelist file]
     Load[filter_init]
-    List[published linked list]
-    Mutex[filter mutex]
-    Match[filter_IsWhite]
+    List[published snapshot\nhash sets + pattern list]
+    Mutex[filter rwlock]
+    Match[filter_match]
     SNI[normalized SNI/Host]
     DNS[decoded DNS qName]
-    Watch[inotify on Linux\n/kqueue path on FreeBSD]
-    Reload[build replacement list]
+    Watch[inotify on parent dir (Linux)\nkqueue on file (FreeBSD)\nor SIGHUP]
+    Reload[build replacement snapshot]
 
     File --> Load --> Mutex --> List
     SNI --> Match
@@ -643,14 +689,30 @@ flowchart LR
     Watch --> Reload --> Mutex
 ```
 
-Startup loads the whitelist before listeners are started. A reload builds a
-new list first, publishes it under the filter mutex, then frees the old list.
-If opening, parsing, or allocating the replacement list fails, the old list is
-kept. Readers hold the filter mutex while walking the current list.
+Startup loads the whitelist before listeners are started. Each line is
+trimmed and lower-cased; blank lines and `#` comments are skipped. Entries are
+split into three groups:
 
-The hostname used for matching is normalized before the SNI lookup and the DNS
-path matches the decoded query name. The whitelist is not a universal firewall
-for every protocol; it affects the hostname-aware paths described above.
+- exact names, kept in a hash set;
+- `*.suffix` entries (no other wildcard), kept as `.suffix` in a second hash
+  set and checked once per label of the queried name;
+- any other `*`/`?` pattern, kept in a list and matched linearly.
+
+A lookup lower-cases the queried name, drops one trailing dot, and takes the
+read lock. Cost is proportional to the number of labels plus the number of
+generic patterns, not to the size of the list. A plain entry matches only that
+exact name, never a longer name that starts with it.
+
+A reload builds a complete new snapshot first, swaps it in under the write
+lock, then frees the old one; the write lock guarantees no reader still uses
+it. If opening, parsing, or allocating the replacement fails, the old snapshot
+is kept. Reloads come from the file watcher or from `SIGHUP`. On Linux the
+watcher watches the parent directory for `IN_CLOSE_WRITE`/`IN_MOVED_TO` on the
+file name, so a save by rename is seen and a half-written file is not loaded.
+
+The DNS path matches the decoded query name and the SNI path matches the
+normalized SNI/Host name. The whitelist is not a universal firewall for every
+protocol; it affects the hostname-aware paths described above.
 
 ## Configuration and object relationships
 
@@ -677,9 +739,10 @@ for every protocol; it affects the hostname-aware paths described above.
 ```
 
 The service objects use shared references rather than duplicating the filter
-and SOCKS credentials. This is why the process lifetime currently keeps the
-configuration and shared objects alive for as long as the detached services
-may use them.
+and SOCKS credentials. `main` stops the SNI listeners and the DNS service
+before it frees the configuration they reference. The whitelist and monitor
+objects are not freed: the watcher and monitor threads may still read them
+until the process exits.
 
 ## Concurrency and locking
 
@@ -687,14 +750,13 @@ may use them.
 | --- | --- | --- |
 | Resolver pool queues/slots | pool mutex | resolver workers and submit/release paths |
 | Resolver completion ring | sink mutex | resolver workers and owning event loop |
-| Filter list | filter mutex | SNI/DNS readers and reload watcher |
+| Filter snapshot pointer | filter rwlock (read: lookup, write: swap) | SNI/DNS readers, reload watcher, `SIGHUP` |
 | Statistics counters | one mutex per statistics object | SNI/DNS workers and monitor workers |
-| Monitor statistics-list head | monitor `state_lock` | startup/add and monitor response generation |
-| DNS FIFO indices and buffer | FIFO mutex | DNS receive and DNS worker loops |
+| Monitor statistics-list head | monitor `stats_lock` | startup/add and monitor response generation |
+| DNS FIFO indices, buffer, closed flag | FIFO mutex + not-empty condition | DNS receive thread and DNS workers |
 | Monitor worker count | monitor worker mutex | monitor accept/workers |
-| DNS worker count | DNS worker mutex | DNS service/workers |
 | SNI live-connection count | SNI worker mutex | SNI accept/destruction paths |
-| Joinable test listener state | listener mutex/condition | test caller and event-loop thread |
+| Listener startup/stop state | listener mutex/condition | `main` and the event-loop thread |
 
 Important lock-order rules:
 
@@ -702,8 +764,8 @@ Important lock-order rules:
 - Resolver blocking calls, pipe writes, and socket calls happen without the
   resolver pool mutex.
 - Filter and statistics locks are not nested.
-- A detached worker reserves its capacity before `pthread_create` and releases
-  it on every exit path.
+- A detached monitor worker reserves its capacity before `pthread_create` and
+  releases it on every exit path.
 
 ## Backpressure and bounded resources
 
@@ -713,7 +775,7 @@ flowchart LR
     Limits --> Conn[1024 SNI connection slots]
     Limits --> Resolver[128 resolver slots]
     Limits --> DNSQ[128 DNS FIFO messages]
-    Limits --> DNSW[128 DNS workers]
+    Limits --> DNSW[32 DNS workers]
     Limits --> MonW[32 monitor workers]
     Conn --> Buffers[8 KiB SNI hello +\n8 KiB per relay direction]
     Buffers --> Deadline[monotonic I/O deadlines]
@@ -732,13 +794,13 @@ Current important bounds are:
 | Resolver workers | 4 | `SNI_RESOLVER_THREADS` |
 | Resolver slots | 128 | `SNI_RESOLVER_SLOTS` |
 | Per-listener client lookup quota | 104 | `SNI_RESOLVER_LISTENER_QUOTA` |
-| DNS FIFO messages | 128 | `D_FIFO_Item` |
+| DNS FIFO messages | 128 | `DNS_QUEUE_LEN` |
 | DNS packet representation | 512 bytes | `DNS_MSG_SIZE` |
-| DNS request workers | 128 | DNS worker accounting |
+| DNS workers / kept upstream connections | 32 | `DNS_WORKER_COUNT` |
 | Monitor workers | 32 | `MON_MAX_WORKERS` |
 | Monitor request header | 4096 bytes | `MON_MAX_HEADER` |
-| Config line | 1024 bytes | `_MaxConfigLine_` |
-| Config value | 512 bytes | `_MaxConfigValue_` |
+| Config line | 1024 bytes | `ZROXY_MAX_CONFIG_LINE` |
+| Config value | 512 bytes | `ZROXY_MAX_CONFIG_VALUE` |
 | Hostname | 253/255 bytes depending on layer | resolver/config limits |
 
 Capacity rejection is deliberate at these boundaries. A full DNS FIFO, full
@@ -776,13 +838,13 @@ completions, cancels live connection requests, and releases the sink. A worker
 that completes after the sink is closed drops the completion safely according
 to the resolver reference-counting protocol.
 
-### Startup cleanup caveat
+### Process shutdown
 
-Startup failures return from `main` after the failing service reports its
-result. The normal long-running path has been hardened around descriptor and
-worker ownership, but cleanup of every configuration allocation across every
-possible startup-failure ordering is not treated as a complete graceful
-shutdown implementation.
+On `SIGINT`/`SIGTERM`, and on a startup failure after some services started,
+`main` stops each SNI listener (every live connection goes through the close
+path above) and then the DNS service, as described in
+[Signals and shutdown](#signals-and-shutdown). The whitelist, its watcher and
+the monitor are left to process exit.
 
 ## Observability
 
@@ -810,7 +872,7 @@ The test layout mirrors the major boundaries:
 | Test | Boundary covered |
 | --- | --- |
 | `test_net_host_extract` | HTTP Host and TLS SNI parser behavior |
-| `test_filter_whitelist` | whitelist matching/reload logic |
+| `test_filter_whitelist` | whitelist matching: exact, suffix, generic patterns, case, no prefix match |
 | `test_dns_codec` | bounded DNS decode/encode |
 | `test_args_parse` | CLI/config parsing and limits |
 | `test_socks_handshake` | SOCKS5 handshake and deadlines |
@@ -821,8 +883,9 @@ The test layout mirrors the major boundaries:
 | `test_io_limits` | exact I/O, EINTR, limits, worker caps |
 | `test_process` | process startup and invalid configuration |
 | `sni_e2e` | real zroxy SNI loopback exchange |
-| `dns_e2e` | real zroxy DNS loopback exchange |
+| `dns_e2e` | real zroxy DNS: forwarding, failures, whitelist, reload, upstream connection reuse |
 | `monitor_e2e` | real zroxy monitor exchange |
+| `lifecycle_e2e` | `SIGHUP` reload and clean `SIGTERM`/`SIGINT` exit |
 
 The SNI engine tests use fault injection to exercise partial reads/writes,
 `EAGAIN`, `EINTR`, timeouts, half-close, resolver cancellation, stale
@@ -850,8 +913,9 @@ These are the rules future changes should preserve or update explicitly:
 8. A failed whitelist reload must not replace a valid published list with an
    incomplete list.
 9. Configured service startup failures must be visible to `main`.
-10. Monitor and DNS worker limits must be enforced before creating detached
-    worker threads.
+10. Monitor worker limits must be enforced before creating detached worker
+    threads. DNS uses a fixed worker pool and must not create threads per
+    query.
 11. Descriptors must be removed from the event backend before close and set to
     `-1` afterward.
 12. Documentation must distinguish implemented behavior, tested behavior, and
@@ -859,11 +923,14 @@ These are the rules future changes should preserve or update explicitly:
 
 ## Known limitations and open design work
 
-- The production process has no graceful signal-driven shutdown protocol.
-- The DNS service is detached and its normal queue loop is intentionally
-  long-lived; the cleanup path after `main`'s sleep is not normally reached.
-- DNS request handling still uses a detached thread per accepted DNS job within
-  its 128-worker cap; it is not an event loop like SNI.
+- Shutdown does not stop the monitor or the whitelist watcher; they end with
+  the process.
+- Each DNS worker sends one query at a time on its connection (no TCP
+  pipelining). Throughput toward a slow upstream is bounded by
+  `DNS_WORKER_COUNT` divided by the upstream round-trip time.
+- Workers are woken in condition-variable order, so under light load queries
+  spread across workers and up to `DNS_WORKER_COUNT` upstream connections may
+  be opened before they are reused.
 - Monitor request handling still uses `select` internally and one detached
   worker per accepted monitor client within its 32-worker cap.
 - A resolver worker can remain allocated until process exit if bounded shutdown
