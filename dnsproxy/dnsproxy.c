@@ -493,12 +493,14 @@ void *dnsserver_workerTask(void *vargp)
 		if (!dns_thread_acquire())
 		{
 			log_error("dns worker limit reached");
+			state_abandon(dns->Stat);
 			continue;
 		}
 		newmsg = malloc(sizeof(dnsThread_t));
 		if (!newmsg)
 		{
 			dns_thread_release();
+			state_abandon(dns->Stat);
 			continue;
 		}
 		memcpy(&newmsg->msg,&msg,sizeof(dnsMessage_t));
@@ -509,6 +511,7 @@ void *dnsserver_workerTask(void *vargp)
 			log_error("can not create thread for new dns request");
 			free(newmsg);
 			dns_thread_release();
+			state_abandon(dns->Stat);
 			continue;
 		}
 		pthread_detach(thread_id);
