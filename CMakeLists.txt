@@ -148,7 +148,7 @@ if(BUILD_TESTING)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         set(ZROXY_TEST_ENV "ZROXY_BIN=$<TARGET_FILE:zroxy>")
-        foreach(e2e sni dns monitor)
+        foreach(e2e sni dns monitor lifecycle)
             add_test(NAME ${e2e}_e2e
                 COMMAND ${Python3_EXECUTABLE}
                     ${PROJECT_SOURCE_DIR}/tests/integration/test_${e2e}_e2e.py)

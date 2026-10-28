@@ -16,7 +16,7 @@
 
 typedef struct
 {
-	char	 bindip[_MaxIPAddress_];
+	char	 bindip[ZROXY_MAX_IP_TEXT];
 	uint16_t local_port;
 	uint16_t remote_port;
 	void 	 *next;
@@ -41,7 +41,12 @@ typedef struct
 
 
 
-bool SniProxy_Start(SniServer_t *Sni);
+typedef struct sni_listener sni_listener;
+
+/* Listen and start the event loop. NULL on failure. */
+sni_listener *sniproxy_start(SniServer_t *Sni);
+/* Stop accepting, close every connection, join the loop and free. */
+void sniproxy_stop(sni_listener *ls);
 bool sni_worker_acquire(void);
 void sni_worker_release(void);
 

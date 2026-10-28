@@ -18,7 +18,7 @@
 
 typedef struct
 {
-	char 	 ip[_MaxDNSHost_ + 1];
+	char 	 ip[ZROXY_MAX_DNS_HOST + 1];
 	uint16_t port;
 }dnsStream_t;
 
@@ -33,6 +33,11 @@ typedef struct
 	uint32_t	  timeout;
 }dnshost_t;
 
-bool dnsserver_init(dnshost_t *config);
+struct dnsserver;
+
+/* Bind, start workers and the receive loop. NULL on failure. */
+struct dnsserver *dnsserver_start(dnshost_t *config);
+/* Stop receiving, drain queued queries, join all threads and free. */
+void dnsserver_stop(struct dnsserver *dns);
 
 #endif /* DNSSERVER_H_ */
