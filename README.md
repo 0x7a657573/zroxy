@@ -321,6 +321,9 @@ address and port, where the whole reply is sent. Up to 8 TCP connections are
 served at once, each for at most 32 queries and closed after 3 seconds idle.
 If the TCP port cannot be bound, zroxy logs it and keeps serving UDP.
 
+Repeated queue, TCP-capacity, and upstream-failure logs are limited to one line
+per second; a later line reports how many messages were suppressed.
+
 Example:
 
 ```ini

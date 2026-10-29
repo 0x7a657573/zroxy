@@ -108,6 +108,7 @@ def test_dns_bounded_failures():
             raise AssertionError("a datagram shorter than a DNS header was forwarded")
 
         errors = proc.count_log("NO DATA")
+        time.sleep(1.05)
         _expect_bounded_failure(proc, ldns, malformed, 4.0, errors)
         if upstream.query_count() <= before:
             raise AssertionError("malformed DNS payload was not forwarded upstream")
@@ -117,6 +118,7 @@ def test_dns_bounded_failures():
         upstream.set_mode("incomplete")
         errors = proc.count_log("NO DATA")
         prefixes = len(upstream.prefix_bytes)
+        time.sleep(1.05)
         _expect_bounded_failure(proc, ldns, valid, 4.0, errors)
         if len(upstream.prefix_bytes) <= prefixes:
             raise AssertionError("incomplete length-prefix case accepted no connection")
@@ -124,12 +126,14 @@ def test_dns_bounded_failures():
         upstream.set_mode("close")
         errors = proc.count_log("NO DATA")
         before = upstream.query_count()
+        time.sleep(1.05)
         _expect_bounded_failure(proc, ldns, valid, 4.0, errors)
         if upstream.query_count() <= before:
             raise AssertionError("upstream close case did not receive the query")
 
         upstream.set_mode("timeout")
         errors = proc.count_log("NO DATA")
+        time.sleep(1.05)
         elapsed = _expect_bounded_failure(proc, ldns, valid, 4.0, errors)
         if elapsed >= upstream.stall:
             raise AssertionError("proxy waited for the stalled upstream instead of its own timeout")
