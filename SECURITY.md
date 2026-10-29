@@ -11,6 +11,7 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 - A whitelist miss still forwards the DNS query upstream. The whitelist is not a default-deny firewall for every protocol.
 - Forwarded DNS answers are cached. An upstream reply is relayed or cached only when its id and question match the query; upstream is reached over TCP, which makes off-path spoofing harder but is not authentication. There is no DNSSEC validation. Cache lifetimes are capped at 3600 s (300 s for negative answers), and whitelisted names are answered before the cache.
 - The local DNS listener applies `DACL` to both UDP source addresses and TCP peers. Without an explicit ACL, loopback binds have no additional source restriction; non-loopback binds allow only loopback, RFC 1918, and shared-address-space ranges. Use `DACL = 0.0.0.0/0` only when exposing the listener is intentional. Denied sources receive no UDP refusal response and are closed on TCP.
+- `DRATE` can bound UDP work per source IP before it enters the DNS FIFO. It is not a complete abuse defense: source spoofing, the fixed-slot collision policy, and TCP's separate bounded path remain relevant. Rate drops are silent to the sender and visible as `RateDropped` in the monitor.
 - Forwarding copies the original client bytes after the hostname is taken from SNI or `Host`. The proxy does not re-encode that stream.
 - Config and SOCKS usernames are process memory. Passwords are not written to the log on the SOCKS handshake path. Config failures log the key, not the value.
 

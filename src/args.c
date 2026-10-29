@@ -118,6 +118,7 @@ static bool parse_dns_timeout(zroxy_t *ptr,char *str);
 static bool parse_dns_cache(zroxy_t *ptr,char *str);
 static bool parse_dns_ttl(zroxy_t *ptr,char *str);
 static bool parse_dns_acl(zroxy_t *ptr,char *str);
+static bool parse_dns_rate(zroxy_t *ptr,char *str);
 static bool parse_log_level(zroxy_t *ptr,char *str);
 static bool parse_sni_timeout(zroxy_t *ptr,char *str);
 
@@ -175,6 +176,7 @@ static arg_option options[] =
 	{ "dcache", 'e', "ENTRIES", required_argument, "DNS answer cache size, 0 disables (default: 2048)", OPTION_SECTION_DNS },
 	{ "dttl", 'r', "SECONDS", required_argument, "TTL of synthetic DNS answers (default: 300)", OPTION_SECTION_DNS },
 	{ "dacl", 'A', "CIDR[,CIDR...]", required_argument, "IPv4 networks allowed to query DNS", OPTION_SECTION_DNS },
+	{ "drate", 'R', "QPS", required_argument, "per-source DNS query rate, 0 disables (default: 0)", OPTION_SECTION_DNS },
 
 	{ "monitor", 'm', "[BIND-IP:]PORT", required_argument, "enable the HTTP monitor (default bind: 127.0.0.1)", OPTION_SECTION_MONITOR },
 	{ "monitortoken", 'k', "TOKEN", required_argument, "require Bearer TOKEN for the monitor", OPTION_SECTION_MONITOR },
@@ -342,6 +344,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'e': if (!parse_dns_cache(setting,arg)) return -1; break;
 		case 'r': if (!parse_dns_ttl(setting,arg)) return -1; break;
 		case 'A': if (!parse_dns_acl(setting,arg)) return -1; break;
+		case 'R': if (!parse_dns_rate(setting,arg)) return -1; break;
 		case 'l': if (!parse_log_level(setting,arg)) return -1; break;
 		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);
@@ -615,6 +618,16 @@ static bool parse_dns_acl(zroxy_t *ptr,char *str)
 	dns->acl = copy;
 	dns->acl_count = count;
 	dns->acl_set = true;
+	return true;
+}
+
+static bool parse_dns_rate(zroxy_t *ptr,char *str)
+{
+	int qps;
+	dnshost_t *dns = dns_config(ptr);
+	if (!dns || !parse_i32_range(str, &qps, 0, 100000))
+		return false;
+	dns->rate_qps = (uint32_t)qps;
 	return true;
 }
 
