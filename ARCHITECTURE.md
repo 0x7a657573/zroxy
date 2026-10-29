@@ -43,6 +43,10 @@ The DNS service uses a fixed pool of 32 worker threads that wait on the DNS
 queue; each worker keeps one upstream TCP connection open between queries. The
 monitor still uses detached pthreads for accepted work, bounded to 32.
 
+Repeated DNS queue, TCP-capacity, and `NO DATA` errors use one-second
+throttles. Receive-loop throttles are receive-thread-owned; the worker-shared
+`NO DATA` throttle uses atomic state transitions and counters.
+
 The main thread waits for signals: `SIGHUP` reloads the whitelist, and
 `SIGINT`/`SIGTERM` stop the SNI listeners and the DNS service and exit with
 status `0`.

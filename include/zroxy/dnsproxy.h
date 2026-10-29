@@ -65,6 +65,12 @@ typedef struct
 #define DNS_TCP_IDLE_MS		3000
 #define DNS_TCP_MAX_QUERIES	32
 
+typedef struct
+{
+	int64_t next_ms;
+	uint32_t suppressed;
+} log_throttle_t;
+
 typedef struct dnsserver
 {
 	/* Fifo */
@@ -100,6 +106,10 @@ typedef struct dnsserver
 	/* TCP listener on the same address; -1 when it could not be opened */
 	int tcp_sock;
 	int tcp_active;
+	log_throttle_t fifo_log;
+	log_throttle_t tcp_limit_log;
+	log_throttle_t tcp_fifo_log;
+	log_throttle_t no_data_log;
 	statistics_t  *Stat;
 }dnsserver_t;
 
@@ -125,5 +135,9 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 
 /* Answer queries on an accepted TCP connection until it idles, then close it. */
 void localdns_serve_tcp(dnsserver_t *dns, int fd, int *upstream_fd);
+
+/* Test hook for the time-injected throttle state machine. */
+bool dnsproxy_test_throttle_take(log_throttle_t *t, int64_t now_ms,
+		int64_t interval_ms, uint32_t *dropped);
 
 #endif /* DNSPROXY_H_ */

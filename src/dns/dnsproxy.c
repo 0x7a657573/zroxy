@@ -38,6 +38,62 @@
  */
 #define DNS_LOCAL_TTL	300
 
+/* The receive loop owns its FIFO/TCP throttle state; NO DATA is worker-shared. */
+static bool throttle_take(log_throttle_t *t, int64_t now_ms, int64_t interval_ms,
+		uint32_t *dropped)
+{
+	int64_t next;
+
+	if (!t || !dropped || interval_ms < 0)
+		return false;
+	*dropped = 0;
+	for (;;)
+	{
+		next = __atomic_load_n(&t->next_ms, __ATOMIC_ACQUIRE);
+		if (now_ms < next)
+		{
+			(void)__atomic_fetch_add(&t->suppressed, 1u, __ATOMIC_RELAXED);
+			return false;
+		}
+		if (__atomic_compare_exchange_n(&t->next_ms, &next, now_ms + interval_ms,
+				false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+		{
+			*dropped = __atomic_exchange_n(&t->suppressed, 0u, __ATOMIC_ACQ_REL);
+			return true;
+		}
+	}
+}
+
+bool dnsproxy_test_throttle_take(log_throttle_t *t, int64_t now_ms,
+		int64_t interval_ms, uint32_t *dropped)
+{
+	return throttle_take(t, now_ms, interval_ms, dropped);
+}
+
+static void log_fifo_full(log_throttle_t *t, const char *suffix)
+{
+	uint32_t dropped;
+	if (!throttle_take(t, net_mono_ms(), 1000, &dropped))
+		return;
+	if (dropped > 0)
+		log_error("%s (%u more in the last 1s)", suffix, dropped);
+	else
+		log_error("%s", suffix);
+}
+
+static void log_no_data(dnsserver_t *dns, const char *domain_resolve,
+		double time_taken, const char *source)
+{
+	uint32_t dropped;
+	if (!throttle_take(&dns->no_data_log, net_mono_ms(), 1000, &dropped))
+		return;
+	if (dropped > 0)
+		log_error("NO DATA %s in %0.3fs%s (%u more in the last 1s)",
+			domain_resolve, time_taken, source, dropped);
+	else
+		log_error("NO DATA %s in %0.3fs%s", domain_resolve, time_taken, source);
+}
+
 static void close_fd(int *fd)
 {
 	if (fd && *fd >= 0)
@@ -246,7 +302,8 @@ bool localdns_pull(dnsserver_t *dns)
 				ServerFailure_ResponseType, reply, sizeof(reply));
 		if (n > 0)
 			sendto(dns->local_sock, reply, n, 0, (const struct sockaddr *)&msg.client, sizeof(struct sockaddr_in));
-		log_error("dns fifo is full:");
+		/* Only the receive thread reaches this path, so no external lock is needed. */
+		log_fifo_full(&dns->fifo_log, "dns fifo is full");
 	}
 
 	return true;
@@ -582,7 +639,7 @@ static void handle_query(dnsserver_t *dns, const dnsMessage_t *msg, int *upstrea
 		else
 		{
 			reply_error(dns, msg, ServerFailure_ResponseType);
-			log_error("NO DATA %s in %0.3fs%s",domain_resolve,time_taken,source);
+			log_no_data(dns, domain_resolve, time_taken, source);
 		}
 	}
 
@@ -640,7 +697,8 @@ void localdns_accept(dnsserver_t *dns)
 	{
 		__atomic_sub_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL);
 		close(fd);
-		log_error("dns TCP connection limit reached");
+		/* Only the receive thread reaches this path, so no external lock is needed. */
+		log_fifo_full(&dns->tcp_limit_log, "dns TCP connection limit reached");
 		return;
 	}
 	(void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
@@ -652,7 +710,8 @@ void localdns_accept(dnsserver_t *dns)
 	{
 		__atomic_sub_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL);
 		close(fd);
-		log_error("dns fifo is full: TCP connection dropped");
+		/* Only the receive thread reaches this path, so no external lock is needed. */
+		log_fifo_full(&dns->tcp_fifo_log, "dns fifo is full: TCP connection dropped");
 	}
 }
 

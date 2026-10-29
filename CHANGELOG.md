@@ -16,6 +16,8 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 
 ### DNS
 
+- Repeated DNS queue, TCP-capacity, and `NO DATA` error logs are rate-limited
+  to one line per second, with suppressed-message counts on the next line.
 - DNS option parsing now uses one configuration object with stable defaults;
   `DTIMEOUT` and other DNS options can precede `LDNS`, and repeated `LDNS`
   values use the last value.
