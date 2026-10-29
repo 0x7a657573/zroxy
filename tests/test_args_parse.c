@@ -501,6 +501,47 @@ static void test_dns_option_order_and_last_listener_wins(void)
     }
 }
 
+static void test_repeated_ldns_resets_default_port(void)
+{
+	zroxy_t cfg = {0};
+	char a0[] = "zroxy";
+	char a1[] = "-t";
+	char a2[] = "2";
+	char a3[] = "-d";
+	char a4[] = "127.0.0.1:5353";
+	char a5[] = "-d";
+	char a6[] = "127.0.0.1";
+	const char *argv[] = {a0, a1, a2, a3, a4, a5, a6};
+
+	reset_getopt();
+	expect_true(args_init(&cfg, 7, argv), "LDNS without port resets previous port");
+	if (cfg.dnsserver)
+	{
+		expect_u16(cfg.dnsserver->Local.port, 53, "LDNS default port replaces previous port");
+		expect_string(cfg.dnsserver->Local.ip, "127.0.0.1", "LDNS default-port address");
+		expect_int((int)cfg.dnsserver->timeout, 2, "LDNS replacement preserves timeout");
+	}
+	free_settings(&cfg);
+
+	{
+		zroxy_t next = {0};
+		char b0[] = "zroxy";
+		char b1[] = "-d";
+		char b2[] = "127.0.0.1";
+		char b3[] = "-d";
+		char b4[] = "127.0.0.2:5300";
+		const char *next_argv[] = {b0, b1, b2, b3, b4};
+		reset_getopt();
+		expect_true(args_init(&next, 5, next_argv), "LDNS with port replaces default port");
+		if (next.dnsserver)
+		{
+			expect_u16(next.dnsserver->Local.port, 5300, "LDNS explicit replacement port");
+			expect_string(next.dnsserver->Local.ip, "127.0.0.2", "LDNS explicit replacement address");
+		}
+		free_settings(&next);
+	}
+}
+
 static void test_config_dns_timeout_before_listener(void)
 {
     zroxy_t cfg = {0};
@@ -707,6 +748,7 @@ int main(void)
     test_cli_rejects_overlong_bind_and_bad_port();
     test_cli_accepts_long_dns_hostname();
     test_dns_option_order_and_last_listener_wins();
+    test_repeated_ldns_resets_default_port();
     test_config_dns_timeout_before_listener();
     test_dns_validation();
     test_dns_cache_and_ttl_ranges();
