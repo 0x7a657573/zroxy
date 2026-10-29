@@ -153,8 +153,8 @@ current working directory. To see the command-line help:
 ./build/zroxy -h
 ```
 
-The current source version is `1.3.1`; the authoritative value is defined in
-[`src/version.h`](src/version.h).
+The current source version is `1.4.0`; the authoritative value is defined in
+[`include/zroxy/version.h`](include/zroxy/version.h).
 
 ## Configuration
 

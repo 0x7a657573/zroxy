@@ -1,8 +1,8 @@
 # Changelog
 
-These notes describe the `1.3.1` release. Nothing here says the result is production-ready.
+These notes describe the `1.4.0` release. Nothing here says the result is production-ready.
 
-## Unreleased
+## 1.4.0 - 2026-10-29
 
 ### Security
 
