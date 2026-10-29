@@ -67,7 +67,7 @@ typedef struct
 
 typedef struct
 {
-	uint32_t next_ms;
+	uint32_t last_ms;	/* low 32 bits of the last logged time; 0 = never logged */
 	uint32_t suppressed;
 } log_throttle_t;
 
