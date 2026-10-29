@@ -314,7 +314,7 @@ bool args_validate(zroxy_t *ptr)
 		ptr->dnsserver->sni_ip[2] == 0 &&
 		ptr->dnsserver->sni_ip[3] == 0;
 	if (ptr->WhitePath && sni_ip_zero)
-		log_info("whitelisted names will resolve to 0.0.0.0");
+		log_warn("whitelisted names will resolve to 0.0.0.0");
 	return true;
 }
 
