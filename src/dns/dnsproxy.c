@@ -69,11 +69,11 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 		"\"CacheShared\" : %" PRIu64 ",\n"
 		"\"CacheEntries\" : %zu,\n"
 		"\"CacheEvictions\" : %" PRIu64 ",\n"
-		"\"QueueStaleDropped\" : %" PRIu64 ",\n"
-		"\"QueueFull\" : %" PRIu64 ",\n"
-		"\"AclDropped\" : %" PRIu64 ",\n"
-		"\"RateDropped\" : %" PRIu64 ",\n"
-		"\"TcpRefused\" : %" PRIu64 ",\n"
+		"\"QueueStaleDropped\" : %" PRIu32 ",\n"
+		"\"QueueFull\" : %" PRIu32 ",\n"
+		"\"AclDropped\" : %" PRIu32 ",\n"
+		"\"RateDropped\" : %" PRIu32 ",\n"
+		"\"TcpRefused\" : %" PRIu32 ",\n"
 		"\"TcpActive\" : %d",
 		c.hits, c.misses, c.shared, c.entries, c.evicted,
 		__atomic_load_n(&dns->stale_dropped, __ATOMIC_RELAXED),
@@ -88,7 +88,8 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 static bool throttle_take(log_throttle_t *t, int64_t now_ms, int64_t interval_ms,
 		uint32_t *dropped)
 {
-	int64_t next;
+	uint32_t next;
+	uint32_t now = (uint32_t)now_ms;
 
 	if (!t || !dropped || interval_ms < 0)
 		return false;
@@ -96,12 +97,13 @@ static bool throttle_take(log_throttle_t *t, int64_t now_ms, int64_t interval_ms
 	for (;;)
 	{
 		next = __atomic_load_n(&t->next_ms, __ATOMIC_ACQUIRE);
-		if (now_ms < next)
+		if ((int32_t)(now - next) < 0)
 		{
 			(void)__atomic_fetch_add(&t->suppressed, 1u, __ATOMIC_RELAXED);
 			return false;
 		}
-		if (__atomic_compare_exchange_n(&t->next_ms, &next, now_ms + interval_ms,
+		if (__atomic_compare_exchange_n(&t->next_ms, &next,
+				 now + (uint32_t)interval_ms,
 				false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 		{
 			*dropped = __atomic_exchange_n(&t->suppressed, 0u, __ATOMIC_ACQ_REL);

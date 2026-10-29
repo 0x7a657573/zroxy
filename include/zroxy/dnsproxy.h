@@ -67,7 +67,7 @@ typedef struct
 
 typedef struct
 {
-	int64_t next_ms;
+	uint32_t next_ms;
 	uint32_t suppressed;
 } log_throttle_t;
 
@@ -111,11 +111,12 @@ typedef struct dnsserver
 	log_throttle_t tcp_limit_log;
 	log_throttle_t tcp_fifo_log;
 	log_throttle_t no_data_log;
-	uint64_t stale_dropped;
-	uint64_t fifo_full;
-	uint64_t tcp_refused;
-	uint64_t acl_dropped;
-	uint64_t rate_dropped;
+	/* Monitoring counters may wrap; 32-bit atomics work on supported targets. */
+	uint32_t stale_dropped;
+	uint32_t fifo_full;
+	uint32_t tcp_refused;
+	uint32_t acl_dropped;
+	uint32_t rate_dropped;
 	dns_cidr_t *acl;
 	size_t acl_count;
 	dns_rate_t rate;
