@@ -300,6 +300,9 @@ IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
 directly or via the optional `DSOCKS` SOCKS5 connection. The SNI proxy itself
 resolves upstream names to IPv4 only.
 
+DNS settings may appear in any CLI or configuration-file order. The parser keeps
+one DNS configuration object and the last `LDNS` value wins.
+
 Forwarded answers are cached in memory (up to 2048 entries) for their TTL,
 capped at one hour, or five minutes for NXDOMAIN and NODATA. Identical queries
 that arrive while one is being fetched wait for that fetch instead of going
