@@ -300,7 +300,8 @@ IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
 directly or via the optional `DSOCKS` SOCKS5 connection. The SNI proxy itself
 resolves upstream names to IPv4 only.
 
-A failed upstream exchange or a full queue is answered with SERVFAIL. A
+A failed upstream exchange or a full queue is answered with SERVFAIL. An
+upstream reply whose id or question does not match the query is discarded. A
 response larger than the client's UDP size (512 bytes, or its EDNS0 size up to
 1232) is answered with TC set; zroxy has no local TCP DNS listener yet.
 

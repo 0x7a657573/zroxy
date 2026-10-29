@@ -499,6 +499,26 @@ static ssize_t local_exchange(filter_t *white, const uint8_t *query, size_t qlen
     return n;
 }
 
+static void test_dnsproxy_mismatched_reply(void)
+{
+    uint8_t wrong[sizeof(k_dns_response_payload)];
+    uint8_t reply[REPLY_MAX];
+    ssize_t n = -1;
+    bool server_ok = false;
+    dns_case_t in = { k_dns_query_example_com, sizeof(k_dns_query_example_com),
+                      wrong, sizeof(wrong), false };
+
+    memcpy(wrong, k_dns_response_payload, sizeof(wrong));
+    wrong[1] ^= 0xff;
+    expect_true(run_dnsproxy_case(&in, &server_ok, reply, &n), "run mismatched id case");
+    expect_rcode(reply, n, 0x1234, ServerFailure_ResponseType, "reply with another id becomes SERVFAIL");
+
+    memcpy(wrong, k_dns_response_payload, sizeof(wrong));
+    wrong[14] = 'z';
+    expect_true(run_dnsproxy_case(&in, &server_ok, reply, &n), "run mismatched question case");
+    expect_rcode(reply, n, 0x1234, ServerFailure_ResponseType, "reply for another name becomes SERVFAIL");
+}
+
 static void test_dnsproxy_local_answers(void)
 {
     const char *const entries[] = { "example.com" };
@@ -582,5 +602,6 @@ int main(void)
     test_dnsproxy_close_mid_prefix_servfail();
     test_dnsproxy_large_response();
     test_dnsproxy_local_answers();
+    test_dnsproxy_mismatched_reply();
     return failures == 0 ? 0 : 1;
 }
