@@ -6,6 +6,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import traceback
 
@@ -89,11 +90,67 @@ def test_sigint_clean_exit():
     _check_clean_exit(signal.SIGINT)
 
 
+def test_monitor_stop_race():
+    with zroxy_lab.Lab() as lab:
+        white = lab.write("white.txt", "first.test\n")
+        upstream = lab.dns_server(
+            mode="reply",
+            response_fn=lambda q: zroxy_lab.build_dns_response(q, (9, 9, 9, 9)),
+        )
+        sni_port = zroxy_lab.free_tcp_port()
+        ldns = zroxy_lab.free_udp_port()
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(
+            [
+                "-l", "0",
+                "-p", "127.0.0.1:%s" % sni_port,
+                "-m", str(mon_port),
+                "-d", "127.0.0.1:%s" % ldns,
+                "-u", "127.0.0.1:%s" % upstream.port,
+                "-t", "1",
+                "-i", "%d.%d.%d.%d" % SYNTHETIC_IP,
+                "-w", white,
+            ],
+            tcp_ports=[sni_port, mon_port],
+            udp_ports=[ldns],
+        )
+        stop = threading.Event()
+        errors = []
+
+        def poll_monitor():
+            while not stop.is_set():
+                try:
+                    zroxy_lab.fetch_monitor(mon_port, timeout=0.5)
+                except Exception as exc:
+                    if not stop.is_set() and not isinstance(exc, ConnectionResetError):
+                        errors.append(exc)
+                        return
+
+        thread = threading.Thread(target=poll_monitor)
+        thread.start()
+        try:
+            zroxy_lab.udp_exchange(ldns, zroxy_lab.build_dns_query("first.test"), 2.0)
+            time.sleep(0.1)
+            stop.set()
+            os.kill(proc.proc.pid, signal.SIGTERM)
+            code = _wait_exit(proc, 5.0)
+        finally:
+            stop.set()
+            thread.join(3.0)
+        if code != 0:
+            raise AssertionError("monitor race exit code %s\n%s" % (code, proc.log_text()))
+        if thread.is_alive():
+            raise AssertionError("monitor polling thread did not stop")
+        if errors:
+            raise AssertionError("monitor polling failed during shutdown: %s" % errors[0])
+
+
 def main():
     tests = [
         test_sighup_reloads_whitelist,
         test_sigterm_clean_exit,
         test_sigint_clean_exit,
+        test_monitor_stop_race,
     ]
     failed = 0
     for test in tests:

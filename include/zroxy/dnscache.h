@@ -27,6 +27,17 @@
 typedef struct dnscache dnscache_t;
 typedef struct dnscache_flight dnscache_flight;
 
+typedef struct
+{
+	uint64_t hits;
+	uint64_t misses;
+	uint64_t shared;
+	uint64_t stored;
+	uint64_t evicted;
+	uint64_t bypass;
+	size_t entries;
+} dnscache_counters;
+
 typedef enum
 {
 	DNSCACHE_HIT = 0,	/* the reply is in out */
@@ -62,5 +73,6 @@ size_t dnscache_follow(dnscache_t *cache, dnscache_flight *flight, const uint8_t
 		int64_t deadline_ms, uint8_t *out, size_t cap);
 
 size_t dnscache_count(dnscache_t *cache);
+void dnscache_get_counters(dnscache_t *cache, dnscache_counters *out);
 
 #endif /* DNSCACHE_H_ */

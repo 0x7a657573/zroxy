@@ -100,6 +100,15 @@ static void test_hit_age_and_expiry(void)
     expect_true(out[13] == 'A', "hit carries the new spelling");
     expect_int((long)answer_ttl(out, qlen), 40, "hit TTL aged by 20 s");
 
+    {
+        dnscache_counters counters;
+        dnscache_get_counters(c, &counters);
+        expect_int((long)counters.hits, 1, "cache hit counter");
+        expect_int((long)counters.misses, 1, "cache miss counter");
+        expect_int((long)counters.stored, 1, "cache store counter");
+        expect_int((long)counters.entries, 1, "cache entry counter");
+    }
+
     expect_int(dnscache_begin(c, q, qlen, 61000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "expired entry is a miss");
     expect_int((long)dnscache_count(c), 0, "expired entry removed");
     dnscache_finish(c, f, NULL, 0, 0, 61000);
@@ -181,6 +190,11 @@ static void test_lru_eviction(void)
     qlen = build_query(q, 'b', 1);
     expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "LRU entry evicted");
     dnscache_finish(c, f, NULL, 0, 0, 0);
+    {
+        dnscache_counters counters;
+        dnscache_get_counters(c, &counters);
+        expect_int((long)counters.evicted, 1, "cache eviction counter");
+    }
     dnscache_free(c);
 }
 

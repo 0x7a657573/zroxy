@@ -47,6 +47,13 @@ monitor still uses detached pthreads for accepted work, bounded to 32.
 pointer null and disables caching. `DTTL` is copied to the DNS service and is
 used for synthetic whitelist answers.
 
+The DNS service exposes cache, queue, and TCP-capacity counters through a
+generic statistics extra hook. The monitor takes the statistics object's lock,
+copies the base counters, and invokes that hook before closing the JSON object;
+the hook takes the cache mutex only after the statistics lock. DNS shutdown
+clears the hook before freeing the cache, so a monitor report cannot retain a
+DNS pointer after service teardown.
+
 Repeated DNS queue, TCP-capacity, and `NO DATA` errors use one-second
 throttles. Receive-loop throttles are receive-thread-owned; the worker-shared
 `NO DATA` throttle uses atomic state transitions and counters.
@@ -938,6 +945,10 @@ The monitor exposes one JSON document containing:
 - service uptime;
 - maximum, active, and total connections; and
 - total received/transmitted byte counts.
+
+The `DNS_Server` object also reports cache hits, misses, shared in-flight
+queries, current entries, evictions, stale queue drops, queue-full events,
+refused TCP connections, and active TCP connections.
 
 The statistics objects are registered for the SNI service and, when configured,
 the DNS service. Monitor requests take snapshots; they do not directly inspect

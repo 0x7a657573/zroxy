@@ -52,6 +52,7 @@ struct dnscache
 	dnscache_entry *lru_head;
 	dnscache_entry *lru_tail;
 	dnscache_flight flights[DNSCACHE_FLIGHTS];
+	dnscache_counters counters;
 };
 
 static uint32_t key_hash(const uint8_t *key, size_t len)
@@ -236,7 +237,12 @@ dnscache_result dnscache_begin(dnscache_t *c, const uint8_t *query, size_t qlen,
 		return DNSCACHE_BYPASS;
 	key_len = dns_cache_key(query, qlen, key, sizeof(key));
 	if (key_len == 0)
+	{
+		pthread_mutex_lock(&c->mu);
+		c->counters.bypass++;
+		pthread_mutex_unlock(&c->mu);
 		return DNSCACHE_BYPASS;
+	}
 	hash = key_hash(key, key_len);
 
 	pthread_mutex_lock(&c->mu);
@@ -248,6 +254,7 @@ dnscache_result dnscache_begin(dnscache_t *c, const uint8_t *query, size_t qlen,
 	}
 	if (e && e->len <= cap)
 	{
+		c->counters.hits++;
 		memcpy(out, e->data + e->key_len, e->len);
 		*out_len = e->len;
 		lru_unlink(c, e);
@@ -261,10 +268,12 @@ dnscache_result dnscache_begin(dnscache_t *c, const uint8_t *query, size_t qlen,
 		}
 		return DNSCACHE_HIT;
 	}
+	c->counters.misses++;
 
 	*flight = flight_find_locked(c, key, key_len, hash);
 	if (*flight)
 	{
+		c->counters.shared++;
 		(*flight)->refs++;
 		result = DNSCACHE_FOLLOW;
 	}
@@ -273,6 +282,8 @@ dnscache_result dnscache_begin(dnscache_t *c, const uint8_t *query, size_t qlen,
 		*flight = flight_claim_locked(c, key, key_len, hash);
 		if (*flight)
 			result = DNSCACHE_LEAD;
+		else
+			c->counters.bypass++;
 	}
 	pthread_mutex_unlock(&c->mu);
 	return result;
@@ -299,7 +310,10 @@ static void store_locked(dnscache_t *c, const dnscache_flight *f, const uint8_t 
 	if (e)
 		entry_remove_locked(c, e);
 	while (c->count >= c->max_entries && c->lru_tail)
+	{
+		c->counters.evicted++;
 		entry_remove_locked(c, c->lru_tail);
+	}
 
 	e = malloc(sizeof(*e) + f->key_len + len);
 	if (!e)
@@ -316,6 +330,7 @@ static void store_locked(dnscache_t *c, const dnscache_flight *f, const uint8_t 
 	c->buckets[e->hash & c->bucket_mask] = e;
 	lru_push_head(c, e);
 	c->count++;
+	c->counters.stored++;
 }
 
 void dnscache_finish(dnscache_t *c, dnscache_flight *f, const uint8_t *resp,
@@ -396,4 +411,17 @@ size_t dnscache_count(dnscache_t *c)
 	n = c->count;
 	pthread_mutex_unlock(&c->mu);
 	return n;
+}
+
+void dnscache_get_counters(dnscache_t *c, dnscache_counters *out)
+{
+	if (!out)
+		return;
+	memset(out, 0, sizeof(*out));
+	if (!c)
+		return;
+	pthread_mutex_lock(&c->mu);
+	*out = c->counters;
+	out->entries = c->count;
+	pthread_mutex_unlock(&c->mu);
 }

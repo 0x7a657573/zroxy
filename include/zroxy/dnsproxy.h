@@ -111,6 +111,9 @@ typedef struct dnsserver
 	log_throttle_t tcp_limit_log;
 	log_throttle_t tcp_fifo_log;
 	log_throttle_t no_data_log;
+	uint64_t stale_dropped;
+	uint64_t fifo_full;
+	uint64_t tcp_refused;
 	statistics_t  *Stat;
 }dnsserver_t;
 
@@ -140,5 +143,6 @@ void localdns_serve_tcp(dnsserver_t *dns, int fd, int *upstream_fd);
 /* Test hook for the time-injected throttle state machine. */
 bool dnsproxy_test_throttle_take(log_throttle_t *t, int64_t now_ms,
 		int64_t interval_ms, uint32_t *dropped);
+bool dns_stats_json(void *ctx, char **ptr, char *end);
 
 #endif /* DNSPROXY_H_ */

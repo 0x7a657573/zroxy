@@ -470,7 +470,7 @@ static bool mon_append(char **ptr, char *end, const char *fmt, ...)
 
 static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 {
-	char message[2048];
+	char message[4096];
 	char *ptr = message;
 	char *end = message + sizeof(message);
 	statistics_t *stat = NULL;
@@ -492,19 +492,32 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 	while(sta)
 	{
 		stat_t stdata;
-		stats_get(sta,&stdata);
+		stats_extra_fn extra;
+		void *extra_ctx;
 		time_t CurrentTime;
-		time ( &CurrentTime );
-		time_t LiveTime = CurrentTime - stdata.StartTime;
+		time_t LiveTime;
+		bool ok;
 
-		if (!mon_append(&ptr, end, "\"%s\" : {\n", sta->name) ||
-		    !mon_append(&ptr, end, "\"UpTime\" : %lu ,\n", LiveTime) ||
-		    !mon_append(&ptr, end, "\"MaxConnection\" : %i ,\n", stdata.MaxConnection) ||
-		    !mon_append(&ptr, end, "\"ActiveConnection\" : %i ,\n", stdata.ActiveConnection) ||
-		    !mon_append(&ptr, end, "\"TotalConnection\" : %i ,\n", stdata.TotalConnection) ||
-		    !mon_append(&ptr, end, "\"TotalRx\" : %lu ,\n", stdata.TotalRx) ||
-		    !mon_append(&ptr, end, "\"TotalTx\" : %lu", stdata.TotalTx) ||
-		    !mon_append(&ptr, end, "\n},\n"))
+		pthread_mutex_lock(&sta->Lock);
+		stdata = sta->stat;
+		extra = sta->extra;
+		extra_ctx = sta->extra_ctx;
+		time(&CurrentTime);
+		LiveTime = CurrentTime - stdata.StartTime;
+
+		ok = mon_append(&ptr, end, "\"%s\" : {\n", sta->name) &&
+		     mon_append(&ptr, end, "\"UpTime\" : %lu ,\n", LiveTime) &&
+		     mon_append(&ptr, end, "\"MaxConnection\" : %i ,\n", stdata.MaxConnection) &&
+		     mon_append(&ptr, end, "\"ActiveConnection\" : %i ,\n", stdata.ActiveConnection) &&
+		     mon_append(&ptr, end, "\"TotalConnection\" : %i ,\n", stdata.TotalConnection) &&
+		     mon_append(&ptr, end, "\"TotalRx\" : %lu ,\n", stdata.TotalRx) &&
+		     mon_append(&ptr, end, "\"TotalTx\" : %lu", stdata.TotalTx);
+		if (ok && extra)
+			ok = extra(extra_ctx, &ptr, end);
+		if (ok)
+			ok = mon_append(&ptr, end, "\n},\n");
+		pthread_mutex_unlock(&sta->Lock);
+		if (!ok)
 			return;
 
 		sta = (statistics_t*)sta->next;
