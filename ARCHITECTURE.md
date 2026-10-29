@@ -582,7 +582,12 @@ flowchart TD
     H -- yes --> C{DNS name matches whitelist?}
     C -- yes, A --> SA[synthetic A = SNIP]
     C -- yes, other type --> ND[NODATA]
-    C -- no --> T[upstream TCP query\non the worker's kept connection]
+    C -- no --> K{cache}
+    K -- fresh entry --> Reply
+    K -- same query in flight --> WAIT[wait for that worker's reply]
+    WAIT -- reply --> Reply
+    WAIT -- failed / timeout --> SF
+    K -- miss --> T[upstream TCP query\non the worker's kept connection]
     T --> D[direct TCP]
     T --> X[SOCKS5 TCP]
     D --> R2[read length-prefixed response]
@@ -615,22 +620,44 @@ flowchart TD
    HTTPS, SVCB, ...) gets NODATA, because IPv6 is not proxied and a real
    address would bypass the proxy. Anything else, including a message the
    decoder rejects, is forwarded upstream unchanged.
-5. Upstream DNS uses TCP framing: a two-byte network-order length followed by
+5. A forwarded query first consults the answer cache
+   (`src/dns/dnscache.c`); see below.
+6. Upstream DNS uses TCP framing: a two-byte network-order length followed by
    the DNS payload. Each write and read has the configured DNS timeout as a
    monotonic deadline for the whole exchange. Up to 1232 bytes of the response
    are kept and the rest is read and discarded, so the connection stays in
    step. A response larger than the client's UDP size (512, or its EDNS0 size
    clamped to 1232) is sent as header and question with TC set. There is no
    local TCP listener for the client's retry yet.
-6. A worker keeps its upstream connection open for the next query. Before
+7. A worker keeps its upstream connection open for the next query. Before
    reuse it drops the connection if the server already closed it (readable
    with no request outstanding). If a reused connection still fails, the query
    is retried once on a fresh connection; a failure on a fresh connection is
    final, so a broken upstream is not hammered.
-7. The worker sends the response back over UDP and updates statistics. A
+8. The worker sends the response back over UDP and updates statistics. A
    failed upstream exchange is answered with SERVFAIL instead of silence. A
    reply whose id or question differs from the query is treated as a failure
-   and its connection is closed, so it is never relayed.
+   and its connection is closed, so it is never relayed or cached.
+
+### DNS cache and coalescing
+
+- The key is the lowercased question (name, type, class) plus the RD and CD
+  bits, whether the query carries EDNS0, and its DO bit. The id and the
+  client's spelling of the name are not part of the key; a hit is rewritten
+  with both before it is sent.
+- Only complete NOERROR and NXDOMAIN replies without TC, of at most 1232
+  bytes, are stored. The lifetime is the smallest answer/authority TTL,
+  capped at 3600 s, or 300 s for NXDOMAIN and NODATA. TTLs are lowered by the
+  time spent in the cache. A TTL of 0 is not stored.
+- At most 2048 entries; the least recently used is evicted first. Expired
+  entries are removed when looked up or evicted.
+- While one worker fetches a key (the leader), workers with the same key wait
+  for its reply instead of going upstream, for up to twice the DNS timeout.
+  A failed fetch answers its followers with SERVFAIL. Up to 64 keys can be in
+  flight; beyond that a query is forwarded on its own.
+- One mutex guards entries and flights. Upstream I/O never runs with it held.
+- Whitelisted names are answered before the cache is consulted, so a
+  whitelist reload takes effect at once. There is no stale serving yet.
 
 `dnsserver_stop` writes to the wake pipe and joins the receive thread, then
 closes the FIFO: workers drain what is already queued, close their upstream

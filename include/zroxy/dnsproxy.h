@@ -15,6 +15,7 @@
 #include <zroxy/dnsserver.h>
 #include <zroxy/fifo.h>
 #include <zroxy/filter.h>
+#include <zroxy/dnscache.h>
 #include <pthread.h>
 
 #define DNS_MSG_SIZE	512
@@ -39,6 +40,9 @@ typedef struct dnsserver
 {
 	/* Fifo */
 	fifo_t		  *fifo;
+
+	/* answer cache and in-flight coalescing; NULL disables both */
+	dnscache_t	  *cache;
 	
 	/* whitelist*/
 	filter_t *whitelist;

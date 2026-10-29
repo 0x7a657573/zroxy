@@ -300,6 +300,11 @@ IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
 directly or via the optional `DSOCKS` SOCKS5 connection. The SNI proxy itself
 resolves upstream names to IPv4 only.
 
+Forwarded answers are cached in memory (up to 2048 entries) for their TTL,
+capped at one hour, or five minutes for NXDOMAIN and NODATA. Identical queries
+that arrive while one is being fetched wait for that fetch instead of going
+upstream again.
+
 A failed upstream exchange or a full queue is answered with SERVFAIL. An
 upstream reply whose id or question does not match the query is discarded. A
 response larger than the client's UDP size (512 bytes, or its EDNS0 size up to

@@ -17,6 +17,8 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 - A non-QUERY opcode is answered with NOTIMP and a QDCOUNT other than 1 with FORMERR. Datagrams shorter than a header, larger than 510 bytes, or with QR set are ignored.
 - Upstream responses larger than 510 bytes are no longer rejected. A response that exceeds the client's UDP size (512, or its EDNS0 size clamped to 1232) is sent with TC set and only the question.
 - Whitelisted names: AAAA, HTTPS, SVCB and other non-A types now get NODATA. Before, AAAA got `::` (which Linux dials as loopback) and other types got NOTIMP. Synthetic A records use a 300-second TTL instead of one hour, and set RA.
+- Forwarded answers are cached: up to 2048 entries, LRU eviction, TTL-based lifetime capped at 3600 s (300 s for NXDOMAIN and NODATA), TTLs aged on each hit. The key covers the question, RD, CD, EDNS presence and DO.
+- Identical queries in flight together share one upstream fetch.
 - An upstream reply with a different id or question is discarded and its connection closed.
 - SNI upstream lookups and `net_connect` ask for IPv4 only. IPv6 is not supported, and this avoids waiting on an AAAA lookup.
 

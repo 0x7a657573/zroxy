@@ -3,6 +3,7 @@
 
 import os
 import sys
+import threading
 import time
 import traceback
 
@@ -274,6 +275,52 @@ def test_dns_upstream_reuse():
         proc.check_alive()
 
 
+def test_dns_cache_and_coalescing():
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP),
+                                   fragment=1, fragment_gap=0.0)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns)
+
+        first = zroxy_lab.build_dns_query("cached.test", qid=0x5001)
+        _expect_exact(ldns, first, 3.0)
+        again = zroxy_lab.build_dns_query("Cached.TEST", qid=0x5002)
+        reply = zroxy_lab.udp_exchange(ldns, again, 3.0)
+        _expect_rcode(reply, again, 0)
+        parsed = zroxy_lab.parse_dns_message(reply)
+        if parsed["questions"][0][0] != "Cached.TEST":
+            raise AssertionError("cached reply did not keep the client's spelling: %r" % parsed)
+        if not parsed["answers"] or parsed["answers"][0]["rdata"] != bytes(UPSTREAM_IP):
+            raise AssertionError("cached reply lost its answer: %r" % parsed)
+        if parsed["answers"][0]["ttl"] > 60:
+            raise AssertionError("cached TTL grew: %r" % parsed)
+        if upstream.query_count() != 1:
+            raise AssertionError("cached name went upstream again: %d queries" % upstream.query_count())
+
+        # Identical queries in flight together share one upstream fetch.
+        slow = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP),
+                              fragment=1, fragment_gap=0.02)
+        ldns2 = zroxy_lab.free_udp_port()
+        _start(lab, slow, ldns2, dtimeout="3")
+        replies = [None] * 8
+
+        def ask(i):
+            query = zroxy_lab.build_dns_query("shared.test", qid=0x6000 + i)
+            replies[i] = (query, zroxy_lab.udp_exchange(ldns2, query, 4.0))
+
+        threads = [threading.Thread(target=ask, args=(i,)) for i in range(len(replies))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        for query, reply in replies:
+            _expect_rcode(reply, query, 0)
+        if slow.query_count() != 1:
+            raise AssertionError("%d concurrent identical queries made %d upstream fetches"
+                                 % (len(replies), slow.query_count()))
+        proc.check_alive()
+
+
 def main():
     tests = [
         test_dns_forward_fragmented,
@@ -281,6 +328,7 @@ def main():
         test_dns_whitelist_synthetic,
         test_dns_whitelist_reload,
         test_dns_upstream_reuse,
+        test_dns_cache_and_coalescing,
     ]
     failed = 0
     for test in tests:
