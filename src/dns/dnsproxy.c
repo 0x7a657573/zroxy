@@ -82,22 +82,32 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 static bool throttle_take(log_throttle_t *t, int64_t now_ms, int64_t interval_ms,
 		uint32_t *dropped)
 {
-	uint32_t next;
+	uint32_t last;
 	uint32_t now = (uint32_t)now_ms;
+	uint32_t interval;
 
 	if (!t || !dropped || interval_ms < 0)
 		return false;
 	*dropped = 0;
+	interval = interval_ms > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)interval_ms;
+	/* 0 marks "never logged", so a log at that exact millisecond is stored as 1. */
+	if (now == 0)
+		now = 1;
 	for (;;)
 	{
-		next = __atomic_load_n(&t->next_ms, __ATOMIC_ACQUIRE);
-		if ((int32_t)(now - next) < 0)
+		last = __atomic_load_n(&t->last_ms, __ATOMIC_ACQUIRE);
+		/*
+		 * The unsigned difference is the elapsed time modulo 2^32 ms, so it
+		 * survives the 32-bit wrap and any length of silence. Only a gap that
+		 * lands within interval of an exact multiple of 2^32 ms (49.7 days)
+		 * is throttled once more.
+		 */
+		if (last != 0 && now - last < interval)
 		{
 			(void)__atomic_fetch_add(&t->suppressed, 1u, __ATOMIC_RELAXED);
 			return false;
 		}
-		if (__atomic_compare_exchange_n(&t->next_ms, &next,
-				 now + (uint32_t)interval_ms,
+		if (__atomic_compare_exchange_n(&t->last_ms, &last, now,
 				false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 		{
 			*dropped = __atomic_exchange_n(&t->suppressed, 0u, __ATOMIC_ACQ_REL);
