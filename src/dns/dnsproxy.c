@@ -356,9 +356,10 @@ bool localdns_pull(dnsserver_t *dns)
 
 /*
  * Answer a whitelisted name. Only A gets a record, pointing at the SNI proxy.
- * Every other type, including AAAA, HTTPS and SVCB, gets NODATA: forwarding
- * those would hand the client real addresses that bypass the proxy, and IPv6
- * is not proxied at all. Returns the packet length, or 0.
+ * Every other type, including AAAA, HTTPS and SVCB, gets NODATA with a
+ * negative-caching SOA: forwarding those would hand the client real addresses
+ * that bypass the proxy, and IPv6 is not proxied at all. Returns the packet
+ * length, or 0.
  */
 static int localdns_answer_local(dnsserver_t *dns,struct Message *msg,uint8_t *buf)
 {
@@ -397,10 +398,48 @@ static int localdns_answer_local(dnsserver_t *dns,struct Message *msg,uint8_t *b
 		msg->answers = rr;
 		msg->anCount = 1;
 	}
+	else
+	{
+		rr = calloc(1, sizeof(struct ResourceRecord));
+		if (!rr)
+			return 0;
+		rr->name = strdup(msg->questions->qName);
+		rr->rd_data.soa_record.mname = strdup(msg->questions->qName);
+		rr->rd_data.soa_record.rname = strdup(msg->questions->qName);
+		if (!rr->name || !rr->rd_data.soa_record.mname || !rr->rd_data.soa_record.rname)
+		{
+			free(rr->name);
+			free(rr->rd_data.soa_record.mname);
+			free(rr->rd_data.soa_record.rname);
+			free(rr);
+			return 0;
+		}
+		rr->type = SOA_Resource_RecordType;
+		rr->class = DNS_CLASS_IN;
+		rr->ttl = dns->local_ttl;
+		rr->rd_data.soa_record.serial = 1;
+		rr->rd_data.soa_record.refresh = 3600;
+		rr->rd_data.soa_record.retry = 600;
+		rr->rd_data.soa_record.expire = 86400;
+		rr->rd_data.soa_record.minimum = dns->local_ttl;
+		msg->authorities = rr;
+		msg->nsCount = 1;
+	}
 
 	if (!dns_encode_msg_n(msg, buf, DNS_MSG_SIZE, &written) || written > DNS_MSG_SIZE)
 	{
-		return 0;
+		/* A long qname may not leave room for the SOA. Keep NODATA valid. */
+		if (msg->authorities)
+		{
+			free(msg->authorities->name);
+			free(msg->authorities->rd_data.soa_record.mname);
+			free(msg->authorities->rd_data.soa_record.rname);
+			free(msg->authorities);
+			msg->authorities = NULL;
+			msg->nsCount = 0;
+		}
+		if (!dns_encode_msg_n(msg, buf, DNS_MSG_SIZE, &written) || written > DNS_MSG_SIZE)
+			return 0;
 	}
 
 	return (int)written;

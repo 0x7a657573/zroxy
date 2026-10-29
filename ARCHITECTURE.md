@@ -47,6 +47,14 @@ monitor still uses detached pthreads for accepted work, bounded to 32.
 pointer null and disables caching. `DTTL` is copied to the DNS service and is
 used for synthetic whitelist answers.
 
+For a whitelisted non-A query, local DNS emits NOERROR/NODATA with one SOA in
+the authority section. The SOA owner, primary name server, and responsible
+name are the queried name; its serial is 1, its refresh/retry/expire values are
+3600/600/86400, and its minimum field follows `DTTL`. The encoder calculates
+the SOA RDLENGTH after writing its variable-length names. If the bounded UDP
+response cannot fit the SOA, the service retries as valid NODATA without an
+authority record rather than returning SERVFAIL.
+
 The DNS service exposes cache, queue, and TCP-capacity counters through a
 generic statistics extra hook. The monitor takes the statistics object's lock,
 copies the base counters, and invokes that hook before closing the JSON object;

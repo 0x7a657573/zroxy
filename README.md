@@ -178,7 +178,7 @@ use the key names in the last column.
 | `-t`, `--dtimeout` | seconds | DNS upstream timeout | `DTIMEOUT` |
 | `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
 | `-e`, `--dcache` | `0..65536` | DNS answer cache entries; `0` disables cache; counters are in the monitor | `DCACHE` |
-| `-r`, `--dttl` | `1..86400` | TTL of synthetic DNS answers | `DTTL` |
+| `-r`, `--dttl` | `1..86400` | TTL of synthetic DNS answers and negative SOA records | `DTTL` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
 `LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
@@ -302,7 +302,8 @@ When `LDNS` is configured, zroxy listens for DNS over UDP and TCP locally. White
 names receive a synthetic A answer using `SNIP` with a configurable TTL
 (`DTTL`, default 300 seconds). IPv6 is
 not proxied, so every other query type for a whitelisted name (AAAA, HTTPS,
-SVCB, ...) gets an empty NOERROR (NODATA) answer and the client falls back to
+SVCB, ...) gets an empty NOERROR (NODATA) answer with one SOA authority record
+using the same TTL for RFC 2308 negative caching, and the client falls back to
 IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
 directly or via the optional `DSOCKS` SOCKS5 connection. The SNI proxy itself
 resolves upstream names to IPv4 only.

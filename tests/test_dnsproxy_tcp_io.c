@@ -701,7 +701,14 @@ static void test_dnsproxy_tcp_local_pipelined(void)
                 memcmp(reply + r - 4, "\x0a\x09\x08\x07", 4) == 0, "TCP A answer is the SNI address");
     r = read_framed(sv[0], reply, sizeof(reply));
     expect_rcode(reply, r, 0x1235, 0, "TCP whitelisted AAAA");
-    expect_true(r >= DNS_HEADER_SIZE && be16(reply + 6) == 0, "TCP AAAA is NODATA");
+    expect_true(r >= DNS_HEADER_SIZE && be16(reply + 6) == 0 && be16(reply + 8) == 1,
+                "TCP AAAA is NODATA with one authority");
+    if (r >= DNS_HEADER_SIZE && be16(reply + 8) == 1)
+    {
+        size_t off = sizeof(k_dns_query_example_com) + 13;
+        expect_true(be16(reply + off) == SOA_Resource_RecordType,
+                    "TCP AAAA authority is SOA");
+    }
 
     /* A response sent as a query ends the connection. */
     qlen = build_query(q, A_Resource_RecordType, 0);

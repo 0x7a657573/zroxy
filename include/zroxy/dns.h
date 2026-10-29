@@ -111,6 +111,16 @@ union ResourceData
   {
     uint8_t addr[16];
   } aaaa_record;
+  struct
+  {
+    char *mname;
+    char *rname;
+    uint32_t serial;
+    uint32_t refresh;
+    uint32_t retry;
+    uint32_t expire;
+    uint32_t minimum;
+  } soa_record;
 };
 
 /* Resource Record Section */
