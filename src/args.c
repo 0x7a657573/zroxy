@@ -117,6 +117,7 @@ static bool parse_sni_ip(zroxy_t *ptr,char *str);
 static bool parse_dns_timeout(zroxy_t *ptr,char *str);
 static bool parse_dns_cache(zroxy_t *ptr,char *str);
 static bool parse_dns_ttl(zroxy_t *ptr,char *str);
+static bool parse_dns_acl(zroxy_t *ptr,char *str);
 static bool parse_log_level(zroxy_t *ptr,char *str);
 static bool parse_sni_timeout(zroxy_t *ptr,char *str);
 
@@ -173,6 +174,7 @@ static arg_option options[] =
 	{ "snip", 'i', "IPv4", required_argument, "synthetic address for whitelisted DNS names", OPTION_SECTION_DNS },
 	{ "dcache", 'e', "ENTRIES", required_argument, "DNS answer cache size, 0 disables (default: 2048)", OPTION_SECTION_DNS },
 	{ "dttl", 'r', "SECONDS", required_argument, "TTL of synthetic DNS answers (default: 300)", OPTION_SECTION_DNS },
+	{ "dacl", 'A', "CIDR[,CIDR...]", required_argument, "IPv4 networks allowed to query DNS", OPTION_SECTION_DNS },
 
 	{ "monitor", 'm', "[BIND-IP:]PORT", required_argument, "enable the HTTP monitor (default bind: 127.0.0.1)", OPTION_SECTION_MONITOR },
 	{ "monitortoken", 'k', "TOKEN", required_argument, "require Bearer TOKEN for the monitor", OPTION_SECTION_MONITOR },
@@ -296,7 +298,7 @@ bool args_validate(zroxy_t *ptr)
 		return true;
 	if (!ptr->dnsserver->listen_set)
 	{
-		log_error("DNS, SNIP, DSOCKS and DTIMEOUT need LDNS; add \"LDNS = 127.0.0.1:53\" for the previous behaviour");
+		log_error("DNS, SNIP, DSOCKS, DTIMEOUT and DACL need LDNS; add \"LDNS = 127.0.0.1:53\" for the previous behaviour");
 		return false;
 	}
 	if (ptr->dnsserver->Remote.ip[0] == '\0')
@@ -339,6 +341,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 't': if (!parse_dns_timeout(setting,arg)) return -1; break;
 		case 'e': if (!parse_dns_cache(setting,arg)) return -1; break;
 		case 'r': if (!parse_dns_ttl(setting,arg)) return -1; break;
+		case 'A': if (!parse_dns_acl(setting,arg)) return -1; break;
 		case 'l': if (!parse_log_level(setting,arg)) return -1; break;
 		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);
@@ -596,6 +599,25 @@ static bool parse_dns_ttl(zroxy_t *ptr,char *str)
 	return true;
 }
 
+static bool parse_dns_acl(zroxy_t *ptr,char *str)
+{
+	dns_cidr_t parsed[32];
+	dns_cidr_t *copy;
+	size_t count = 0;
+	dnshost_t *dns = dns_config(ptr);
+	if (!dns || !dns_acl_parse(str, parsed, sizeof(parsed) / sizeof(parsed[0]), &count))
+		return false;
+	copy = malloc(count * sizeof(*copy));
+	if (!copy)
+		return false;
+	memcpy(copy, parsed, count * sizeof(*copy));
+	free(dns->acl);
+	dns->acl = copy;
+	dns->acl_count = count;
+	dns->acl_set = true;
+	return true;
+}
+
 static bool parse_dns_server(zroxy_t *ptr,char *str)
 {
 	char *endname;
@@ -848,6 +870,7 @@ void args_free_dns(zroxy_t *ptr)
 			free(ptr->dnsserver->Socks->pass);
 			free(ptr->dnsserver->Socks);
 		}
+		free(ptr->dnsserver->acl);
 		free(ptr->dnsserver);
 		ptr->dnsserver = NULL;
 	}

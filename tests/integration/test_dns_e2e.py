@@ -255,6 +255,52 @@ def test_dns_whitelist_reload():
         proc.check_alive()
 
 
+def test_dns_acl():
+    query = zroxy_lab.build_dns_query("example.test", qid=0x3301)
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        denied_port = zroxy_lab.free_udp_port()
+        denied = lab.zroxy(
+            [
+                "-l", "0",
+                "-d", "127.0.0.1:%s" % denied_port,
+                "-u", "127.0.0.1:%s" % upstream.port,
+                "-A", "10.0.0.0/8",
+            ],
+            tcp_ports=[denied_port],
+            udp_ports=[denied_port],
+        )
+        if zroxy_lab.udp_exchange(denied_port, query, 0.5) is not None:
+            raise AssertionError("ACL-denied UDP query received a reply")
+        try:
+            _tcp_dns(denied_port, query, 1.0)
+        except (ConnectionError, TimeoutError):
+            pass
+        else:
+            raise AssertionError("ACL-denied TCP query received a reply")
+        if upstream.query_count() != 0:
+            raise AssertionError("ACL-denied queries reached upstream")
+        denied.check_alive()
+
+        allowed_port = zroxy_lab.free_udp_port()
+        allowed = lab.zroxy(
+            [
+                "-l", "0",
+                "-d", "127.0.0.1:%s" % allowed_port,
+                "-u", "127.0.0.1:%s" % upstream.port,
+                "-A", "127.0.0.0/8",
+            ],
+            tcp_ports=[allowed_port],
+            udp_ports=[allowed_port],
+        )
+        if zroxy_lab.udp_exchange(allowed_port, query, 3.0) != _answer_with(UPSTREAM_IP)(query):
+            raise AssertionError("loopback-allowed UDP query failed")
+        tcp_query = zroxy_lab.build_dns_query("example.test", qid=0x3302)
+        if _tcp_dns(allowed_port, tcp_query, 3.0) != _answer_with(UPSTREAM_IP)(tcp_query):
+            raise AssertionError("loopback-allowed TCP query failed")
+        allowed.check_alive()
+
+
 def test_dns_upstream_reuse():
     # Each DNS worker keeps its upstream connection, so once every worker has
     # connected, further queries must not open new connections.
@@ -400,6 +446,7 @@ def main():
         test_dns_bounded_failures,
         test_dns_whitelist_synthetic,
         test_dns_whitelist_reload,
+        test_dns_acl,
         test_dns_upstream_reuse,
         test_dns_cache_and_coalescing,
         test_dns_cache_disabled,

@@ -179,6 +179,7 @@ use the key names in the last column.
 | `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
 | `-e`, `--dcache` | `0..65536` | DNS answer cache entries; `0` disables cache; counters are in the monitor | `DCACHE` |
 | `-r`, `--dttl` | `1..86400` | TTL of synthetic DNS answers and negative SOA records | `DTTL` |
+| `-A`, `--dacl` | `CIDR[,CIDR...]` | IPv4 networks allowed to query the local DNS listener | `DACL` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
 `LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
@@ -328,8 +329,14 @@ If the TCP port cannot be bound, zroxy logs it and keeps serving UDP.
 
 The `DNS_Server` monitor object adds `CacheHits`, `CacheMisses`, `CacheShared`,
 `CacheEntries`, `CacheEvictions`, `QueueStaleDropped`, `QueueFull`,
-`TcpRefused`, and `TcpActive`. These counters are detached before the DNS
+`AclDropped`, `TcpRefused`, and `TcpActive`. These counters are detached before the DNS
 service is freed during shutdown.
+
+`DACL` silently drops UDP datagrams and closes TCP connections whose source
+address is not in one of the listed IPv4 networks. With no `DACL`, a loopback
+listener has no additional restriction; a non-loopback listener allows only
+loopback, RFC 1918, and shared-address-space networks. Use `DACL = 0.0.0.0/0`
+to explicitly allow every IPv4 source.
 
 Repeated queue, TCP-capacity, and upstream-failure logs are limited to one line
 per second; a later line reports how many messages were suppressed.
