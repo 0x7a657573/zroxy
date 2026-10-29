@@ -812,6 +812,11 @@ before it frees the configuration they reference. The whitelist and monitor
 objects are not freed: the watcher and monitor threads may still read them
 until the process exits.
 
+The argument parser allocates one `dnshost_t` for all DNS-related options, so
+CLI and configuration-file option order does not change defaults. `LDNS` marks
+the listener as explicitly enabled; later validation decides whether the
+configured DNS options are sufficient to start the service.
+
 ## Concurrency and locking
 
 | Resource | Protected by | Used by |

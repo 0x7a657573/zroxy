@@ -31,6 +31,7 @@ typedef struct
 	sockshost_t	  *Socks;
 	statistics_t  *Stat;
 	uint32_t	  timeout;
+	bool		  listen_set;
 }dnshost_t;
 
 struct dnsserver;

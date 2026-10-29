@@ -463,6 +463,69 @@ static void test_cli_accepts_long_dns_hostname(void)
     free_settings(&cfg);
 }
 
+static void test_dns_option_order_and_last_listener_wins(void)
+{
+    zroxy_t cfg = {0};
+    char arg0[] = "zroxy";
+    char arg1[] = "-t";
+    char arg2[] = "2";
+    char arg3[] = "-d";
+    char arg4[] = "127.0.0.1:5353";
+    char arg5[] = "-u";
+    char arg6[] = "1.1.1.1";
+    const char *argv[] = {arg0, arg1, arg2, arg3, arg4, arg5, arg6};
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 7, argv), "DNS options are order independent");
+    expect_true(cfg.dnsserver != NULL, "DNS config exists after ordered options");
+    if (cfg.dnsserver)
+    {
+        expect_int((int)cfg.dnsserver->timeout, 2, "DNS timeout survives LDNS");
+        expect_string(cfg.dnsserver->Remote.ip, "1.1.1.1", "DNS upstream after LDNS");
+    }
+    free_settings(&cfg);
+
+    {
+        zroxy_t last = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-d";
+        char a2[] = "127.0.0.1:5353";
+        char a3[] = "-d";
+        char a4[] = "127.0.0.1:5454";
+        const char *last_argv[] = {a0, a1, a2, a3, a4};
+        reset_getopt();
+        expect_true(args_init(&last, 5, last_argv), "repeated LDNS parses");
+        if (last.dnsserver)
+            expect_u16(last.dnsserver->Local.port, 5454, "last LDNS wins");
+        free_settings(&last);
+    }
+}
+
+static void test_config_dns_timeout_before_listener(void)
+{
+    zroxy_t cfg = {0};
+    char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+    int fd = mkstemp(template_path);
+    const char *config_data =
+        "DTIMEOUT = 2\n"
+        "LDNS = 127.0.0.1:5353\n"
+        "DNS = 1.1.1.1\n";
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return;
+    }
+    write_all_or_fail(fd, config_data);
+    close(fd);
+    expect_true(args_parse_config(&cfg, template_path), "config timeout before LDNS parses");
+    if (cfg.dnsserver)
+        expect_int((int)cfg.dnsserver->timeout, 2, "config timeout survives LDNS");
+    unlink(template_path);
+    free_settings(&cfg);
+}
+
 static void test_config_rejects_blank_value(void)
 {
     zroxy_t cfg = {0};
@@ -530,6 +593,8 @@ int main(void)
     test_config_dns_with_snip_cleanup_safe();
     test_cli_rejects_overlong_bind_and_bad_port();
     test_cli_accepts_long_dns_hostname();
+    test_dns_option_order_and_last_listener_wins();
+    test_config_dns_timeout_before_listener();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();
 

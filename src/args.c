@@ -118,6 +118,20 @@ static bool parse_dns_timeout(zroxy_t *ptr,char *str);
 static bool parse_log_level(zroxy_t *ptr,char *str);
 static bool parse_sni_timeout(zroxy_t *ptr,char *str);
 
+static dnshost_t *dns_config(zroxy_t *ptr)
+{
+	if (!ptr->dnsserver)
+	{
+		ptr->dnsserver = (dnshost_t*)calloc(1, sizeof(dnshost_t));
+		if (!ptr->dnsserver)
+			return NULL;
+		ptr->dnsserver->Local.port = 53;
+		ptr->dnsserver->timeout = 5;
+		memcpy(ptr->dnsserver->Local.ip, "127.0.0.1", sizeof("127.0.0.1"));
+	}
+	return ptr->dnsserver;
+}
+
 typedef struct 
 {
 	const char *name;
@@ -148,7 +162,7 @@ static arg_option options[] =
 	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
 	{ "white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI },
 
-	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local UDP DNS listener", OPTION_SECTION_DNS },
+	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS },
 	{ "dns", 'u', "HOST[:PORT]", required_argument, "set the upstream DNS server (default port: 53)", OPTION_SECTION_DNS },
 	{ "dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS },
 	{ "dtimeout", 't', "SECONDS", required_argument, "DNS upstream timeout (default: 5)", OPTION_SECTION_DNS },
@@ -520,14 +534,12 @@ static bool parse_monitor_timeout(zroxy_t *ptr,char *str)
 static bool parse_dns_timeout(zroxy_t *ptr,char *str)
 {
 	int timeout;
-	if(!ptr->dnsserver)
-	{
-		log_error("before set dns timeout enable dns server!");
+	dnshost_t *dns = dns_config(ptr);
+	if (!dns)
 		return false;
-	}
 	if (!parse_i32_range(str, &timeout, 0, 86400))
 		return false;
-	ptr->dnsserver->timeout = (uint32_t)timeout;
+	dns->timeout = (uint32_t)timeout;
 	return true;
 }
 
@@ -535,18 +547,10 @@ static bool parse_dns_server(zroxy_t *ptr,char *str)
 {
 	char *endname;
 	uint16_t port = 53;
+	dnshost_t *dns = dns_config(ptr);
 
-	if(!ptr->dnsserver)
-	{
-		ptr->dnsserver = (dnshost_t*)calloc(1, sizeof(dnshost_t));
-		if (!ptr->dnsserver)
-			return false;
-	}
-
-	ptr->dnsserver->Local.port	= 53;
-	ptr->dnsserver->timeout		= 5;
-	memset(ptr->dnsserver->Local.ip, 0, sizeof(ptr->dnsserver->Local.ip));
-	memcpy(ptr->dnsserver->Local.ip, "127.0.0.1", sizeof("127.0.0.1"));
+	if (!dns)
+		return false;
 
 	endname = strchr(str,':');
 	if(endname)
@@ -554,13 +558,14 @@ static bool parse_dns_server(zroxy_t *ptr,char *str)
 		*endname++ = 0;
 		if (!parse_u16(endname, &port, 0, 65535))
 			return false;
-		ptr->dnsserver->Local.port = port;
+		dns->Local.port = port;
 	}
-	if (!validate_ip(str) || !copy_bounded(ptr->dnsserver->Local.ip, sizeof(ptr->dnsserver->Local.ip), str))
+	if (!validate_ip(str) || !copy_bounded(dns->Local.ip, sizeof(dns->Local.ip), str))
 	{
 		log_error("invalid local DNS address");
 		return false;
 	}
+	dns->listen_set = true;
 	return true;
 }
 
@@ -569,26 +574,21 @@ static bool parse_sni_ip(zroxy_t *ptr,char *str)
 	unsigned int si[4];
 	char tail = '\0';
 	uint8_t *sni_ip;
+	dnshost_t *dns;
 
 	while(*str==' ')
 		str++;
 
-	/*check dns config is exisit*/
-	if(!ptr->dnsserver)
-	{
-		ptr->dnsserver = (dnshost_t*)calloc(1, sizeof(dnshost_t));
-		if (!ptr->dnsserver)
-			return false;
-		ptr->dnsserver->Local.port = 53;
-		memcpy(ptr->dnsserver->Local.ip, "127.0.0.1", sizeof("127.0.0.1"));
-	}
+	dns = dns_config(ptr);
+	if (!dns)
+		return false;
 
 	if (sscanf(str, "%u.%u.%u.%u%c", &si[0], &si[1], &si[2], &si[3], &tail) != 4)
 		return false;
 	if (si[0] > 255 || si[1] > 255 || si[2] > 255 || si[3] > 255)
 		return false;
 
-	sni_ip = ptr->dnsserver->sni_ip;
+	sni_ip = dns->sni_ip;
 	sni_ip[0] = (uint8_t)si[0];
 	sni_ip[1] = (uint8_t)si[1];
 	sni_ip[2] = (uint8_t)si[2];
@@ -600,16 +600,10 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 {
 	char *endname;
 	uint16_t port = 53;
+	dnshost_t *dns = dns_config(ptr);
 
-	/*check dns config is exisit*/
-	if(!ptr->dnsserver)
-	{
-		ptr->dnsserver = (dnshost_t*)calloc(1, sizeof(dnshost_t));
-		if (!ptr->dnsserver)
-			return false;
-		ptr->dnsserver->Local.port = 53;
-		memcpy(ptr->dnsserver->Local.ip, "127.0.0.1", sizeof("127.0.0.1"));
-	}
+	if (!dns)
+		return false;
 
 	endname = strchr(str,':');
 	if(endname)
@@ -618,9 +612,9 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 		if (!parse_u16(endname, &port, 1, 65535))
 			return false;
 	}
-	if (!copy_bounded(ptr->dnsserver->Remote.ip, sizeof(ptr->dnsserver->Remote.ip), str))
+	if (!copy_bounded(dns->Remote.ip, sizeof(dns->Remote.ip), str))
 		return false;
-	ptr->dnsserver->Remote.port = port;
+	dns->Remote.port = port;
 	return true;
 }
 
@@ -809,11 +803,9 @@ void args_free_dns(zroxy_t *ptr)
 static bool parse_dns_socks(zroxy_t *ptr,char *str)
 {
 	sockshost_t *socks;
-	if (!ptr->dnsserver)
-	{
-		log_error("DNS SOCKS set before DNS server");
+	dnshost_t *dns = dns_config(ptr);
+	if (!dns)
 		return false;
-	}
 	socks = (sockshost_t*)calloc(1, sizeof(sockshost_t));
 	if (!socks)
 		return false;
@@ -822,8 +814,8 @@ static bool parse_dns_socks(zroxy_t *ptr,char *str)
 		free_sockshost(socks);
 		return false;
 	}
-	free_sockshost(ptr->dnsserver->Socks);
-	ptr->dnsserver->Socks = socks;
+	free_sockshost(dns->Socks);
+	dns->Socks = socks;
 	return true;
 }
 
