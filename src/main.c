@@ -75,6 +75,11 @@ int main(int argc, const char **argv)
 		args_print_usage();
 		return 1;
 	}
+	if (!args_validate(&prg_setting))
+	{
+		args_print_usage();
+		return 1;
+	}
 
 	/*check white list before listeners so a bad file does not become an open proxy*/
 	if(prg_setting.WhitePath)

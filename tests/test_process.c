@@ -384,6 +384,12 @@ static void test_invalid_configuration(const char *logpath)
     test_exit_code(argv_ip, logpath, "non-IP bind address exits 1");
 }
 
+static void test_dns_requires_listener(const char *logpath)
+{
+    char *argv[] = {ZROXY_BIN, "-u", "127.0.0.1:9", NULL};
+    test_exit_code_log(argv, logpath, "DNS upstream without LDNS exits 1", "need LDNS");
+}
+
 static bool content_length_matches(const char *response)
 {
     const char *hdr = strstr(response, "Content-Length:");
@@ -1096,6 +1102,8 @@ int main(void)
     test_missing_whitelist(logpath);
     test_phase = "invalid configuration";
     test_invalid_configuration(logpath);
+    test_phase = "DNS configuration validation";
+    test_dns_requires_listener(logpath);
     test_phase = "absent services";
     test_absent_services_stay_up(logpath);
     test_phase = "occupied ports";

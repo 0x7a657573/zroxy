@@ -179,6 +179,10 @@ use the key names in the last column.
 | `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
+`LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
+`DTIMEOUT`, and `SNIP` require `LDNS`; when `LDNS` is set, an upstream `DNS`
+must also be provided.
+
 ### Configuration-file rules
 
 - Keys are case-insensitive.

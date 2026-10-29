@@ -282,6 +282,31 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
     return true;
 }
 
+bool args_validate(zroxy_t *ptr)
+{
+	bool sni_ip_zero;
+
+	if (!ptr || !ptr->dnsserver)
+		return true;
+	if (!ptr->dnsserver->listen_set)
+	{
+		log_error("DNS, SNIP, DSOCKS and DTIMEOUT need LDNS; add \"LDNS = 127.0.0.1:53\" for the previous behaviour");
+		return false;
+	}
+	if (ptr->dnsserver->Remote.ip[0] == '\0')
+	{
+		log_error("LDNS needs an upstream DNS (DNS = HOST[:PORT])");
+		return false;
+	}
+	sni_ip_zero = ptr->dnsserver->sni_ip[0] == 0 &&
+		ptr->dnsserver->sni_ip[1] == 0 &&
+		ptr->dnsserver->sni_ip[2] == 0 &&
+		ptr->dnsserver->sni_ip[3] == 0;
+	if (ptr->WhitePath && sni_ip_zero)
+		log_info("whitelisted names will resolve to 0.0.0.0");
+	return true;
+}
+
 static int parse_opt(int key, char *arg, void *userprm)
 {
 	zroxy_t *setting = (zroxy_t*)userprm;
