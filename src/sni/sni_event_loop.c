@@ -1165,7 +1165,7 @@ static void submit_resolve(sni_engine *e, sni_conn *c, const char *host, uint16_
 	c->resolve_deadline = now + (int64_t)c->io_ms;
 	c->state = SNI_ST_RESOLVE;
 	rc = sni_resolver_submit(e->sink, c->index, c->generation, host, port,
-			AF_UNSPEC, c->resolve_deadline, &slot, &req);
+			AF_INET, c->resolve_deadline, &slot, &req);
 	if (rc != SNI_SUBMIT_OK) {
 		log_trace("resolve_overflow");
 		conn_kill(e, c);

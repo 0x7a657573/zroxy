@@ -530,7 +530,8 @@ static int listen_localhost(uint16_t *port)
     int on = 1;
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    /* The proxy resolves upstream names to IPv4 only. */
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     if (getaddrinfo("localhost", NULL, &hints, &res) != 0 || !res)

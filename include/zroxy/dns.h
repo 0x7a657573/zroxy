@@ -167,4 +167,22 @@ bool dns_encode_msg_n(struct Message *msg, uint8_t *buffer, size_t capacity, siz
 /*free dns message struct*/
 void dns_free_msg(struct Message *msg);
 
+#define DNS_HEADER_SIZE      12
+#define DNS_CLASS_IN         1
+#define DNS_OPT_RECORD_TYPE  41
+/* Plain UDP limit, and the largest EDNS0 size honoured (DNS flag day 2020). */
+#define DNS_UDP_MIN_PAYLOAD  512
+#define DNS_UDP_MAX_PAYLOAD  1232
+
+/*
+ * Wire-level helpers that work on raw packets, so they also cover messages
+ * the decoder rejects. Each returns the written length, or 0.
+ */
+/* Reply to query with rcode: its id, opcode, RD and its question when that parses. */
+size_t dns_build_error(const uint8_t *query, size_t qlen, uint8_t rcode, uint8_t *out, size_t cap);
+/* resp's header and question with TC set and every record dropped. resp may be a prefix. */
+size_t dns_build_truncated(const uint8_t *resp, size_t rlen, uint8_t *out, size_t cap);
+/* UDP size the sender of query accepts: 512, or its EDNS0 size clamped to [512, max]. */
+size_t dns_udp_limit(const uint8_t *query, size_t qlen, size_t max);
+
 #endif /* dns.h */

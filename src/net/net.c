@@ -133,7 +133,8 @@ bool net_connect(int *sockfd,const char *hostname, uint16_t port, int timeout_se
     struct addrinfo *addrs=NULL;
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    /* IPv6 is not supported; asking for A only also skips the AAAA lookup. */
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     snprintf(port_str,7,"%i",port);

@@ -372,9 +372,12 @@ static int do_resolve(const char *host, int family, sni_resolved_addr *out, size
 	int attempts = 0;
 	*count = 0;
 	memset(&hints, 0, sizeof(hints));
-	/* Family is recorded for tests. The lookup itself is always dual-stack. */
+	/*
+	 * Family is recorded for tests. IPv6 is not proxied, so the lookup asks
+	 * for A only and never waits on an AAAA query the upstream drops.
+	 */
 	(void)family;
-	hints.ai_family = AF_UNSPEC;
+	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 	do {
@@ -1067,7 +1070,7 @@ static int submit_infra_locked(const char *norm, uint16_t port)
 		slot->deadline_ms = 0;
 	memcpy(slot->hostname, norm, strlen(norm) + 1);
 	slot->port = port;
-	slot->family_policy = AF_UNSPEC;
+	slot->family_policy = AF_INET;
 	slot->address_count = 0;
 	slot->sink = NULL;
 	slot->in_ring = 0;
