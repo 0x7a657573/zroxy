@@ -8,11 +8,18 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.3.1"
+#define version	 "1.4.0"
+/*
+* dns : add bounded worker pool, caching, TCP service, ACL, rate limiting,
+*       synthetic answers, stale queue handling, and upstream validation
+* sni : bound relay work and harden listener shutdown
+* process : add graceful signal-driven shutdown and whitelist reload
+* build : reorganize public headers and enable shadow/conversion diagnostics
+*/
+//#define version	 "1.3.1"
 /*
 * cli : improve command-line help layout, descriptions, and examples
 */
-//#define version	 "1.3.0"
 /*
 * sni : replace one pthread per client with one event loop per listener
 * sni : move hostname resolution to a bounded process-wide resolver pool
