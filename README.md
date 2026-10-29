@@ -177,6 +177,8 @@ use the key names in the last column.
 | `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP | `DSOCKS` |
 | `-t`, `--dtimeout` | seconds | DNS upstream timeout | `DTIMEOUT` |
 | `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
+| `-e`, `--dcache` | `0..65536` | DNS answer cache entries; `0` disables cache | `DCACHE` |
+| `-r`, `--dttl` | `1..86400` | TTL of synthetic DNS answers | `DTTL` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
 `LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
@@ -297,7 +299,8 @@ controls.
 ## DNS forwarding
 
 When `LDNS` is configured, zroxy listens for DNS over UDP and TCP locally. Whitelisted
-names receive a synthetic A answer using `SNIP` with a 300-second TTL. IPv6 is
+names receive a synthetic A answer using `SNIP` with a configurable TTL
+(`DTTL`, default 300 seconds). IPv6 is
 not proxied, so every other query type for a whitelisted name (AAAA, HTTPS,
 SVCB, ...) gets an empty NOERROR (NODATA) answer and the client falls back to
 IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
@@ -307,7 +310,8 @@ resolves upstream names to IPv4 only.
 DNS settings may appear in any CLI or configuration-file order. The parser keeps
 one DNS configuration object and the last `LDNS` value wins.
 
-Forwarded answers are cached in memory (up to 2048 entries) for their TTL,
+Forwarded answers are cached in memory (up to `DCACHE` entries, default 2048)
+for their TTL; `DCACHE = 0` disables the cache,
 capped at one hour, or five minutes for NXDOMAIN and NODATA. Identical queries
 that arrive while one is being fetched wait for that fetch instead of going
 upstream again. A query that waited more than three seconds in the queue is

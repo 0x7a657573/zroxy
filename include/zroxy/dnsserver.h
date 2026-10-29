@@ -32,6 +32,8 @@ typedef struct
 	statistics_t  *Stat;
 	uint32_t	  timeout;
 	bool		  listen_set;
+	uint32_t	  cache_entries;
+	uint32_t	  local_ttl;
 }dnshost_t;
 
 struct dnsserver;
