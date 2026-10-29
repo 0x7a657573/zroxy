@@ -526,6 +526,61 @@ static void test_config_dns_timeout_before_listener(void)
     free_settings(&cfg);
 }
 
+static void test_dns_validation(void)
+{
+    {
+        zroxy_t cfg = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-u";
+        char a2[] = "1.1.1.1";
+        const char *argv[] = {a0, a1, a2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "upstream-only parser accepts");
+        expect_true(!args_validate(&cfg), "upstream-only validation rejects");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-i";
+        char a2[] = "192.0.2.10";
+        const char *argv[] = {a0, a1, a2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "SNIP-only parser accepts");
+        expect_true(!args_validate(&cfg), "SNIP-only validation rejects");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-d";
+        char a2[] = "127.0.0.1:5353";
+        const char *argv[] = {a0, a1, a2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "LDNS-only parser accepts");
+        expect_true(!args_validate(&cfg), "LDNS without upstream rejects");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-d";
+        char a2[] = "127.0.0.1:5353";
+        char a3[] = "-u";
+        char a4[] = "1.1.1.1";
+        const char *argv[] = {a0, a1, a2, a3, a4};
+        reset_getopt();
+        expect_true(args_init(&cfg, 5, argv), "LDNS with upstream parses");
+        expect_true(args_validate(&cfg), "LDNS with upstream validates");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        expect_true(args_validate(&cfg), "no DNS options validate");
+        free_settings(&cfg);
+    }
+}
+
 static void test_config_rejects_blank_value(void)
 {
     zroxy_t cfg = {0};
@@ -595,6 +650,7 @@ int main(void)
     test_cli_accepts_long_dns_hostname();
     test_dns_option_order_and_last_listener_wins();
     test_config_dns_timeout_before_listener();
+    test_dns_validation();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();
 

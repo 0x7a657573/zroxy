@@ -28,6 +28,7 @@ typedef struct
 }zroxy_t;
 
 bool args_init(zroxy_t *pgp,int argc, const char **argv);
+bool args_validate(zroxy_t *pgp);
 void args_print_usage(void);
 void args_free_ports(zroxy_t *ptr);
 void args_free_dns(zroxy_t *ptr);

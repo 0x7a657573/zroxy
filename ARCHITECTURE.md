@@ -186,6 +186,8 @@ sequenceDiagram
 ### Startup failure semantics
 
 - Invalid CLI/configuration input returns `1` before services start.
+- DNS options without `LDNS` return `1`; `LDNS` without an upstream `DNS` also
+  returns `1`. A whitelist without `SNIP` logs a warning and uses `0.0.0.0`.
 - A configured whitelist that cannot be loaded returns `1`.
 - A configured monitor that cannot bind or create its accept thread returns
   `1`.

@@ -8,6 +8,12 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 
 - A plain whitelist entry no longer matches longer names that start with it. Before, `example.com` also allowed `example.com.attacker.net` and `example.community`.
 
+### Breaking
+
+- DNS options now require `LDNS`, and `LDNS` requires an explicit `DNS`
+  upstream. Add `LDNS = 127.0.0.1:53` and `DNS = HOST[:PORT]` when migrating
+  configurations that relied on the previous implicit listener behavior.
+
 ### DNS
 
 - DNS option parsing now uses one configuration object with stable defaults;
