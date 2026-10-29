@@ -327,6 +327,22 @@ def test_dns_cache_and_coalescing():
         proc.check_alive()
 
 
+def test_dns_cache_disabled():
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = lab.zroxy(
+            ["-l", "0", "-d", "127.0.0.1:%s" % ldns,
+             "-u", "127.0.0.1:%s" % upstream.port, "-e", "0"],
+            udp_ports=[ldns],
+        )
+        for qid in (0x5101, 0x5102):
+            _expect_exact(ldns, zroxy_lab.build_dns_query("uncached.test", qid=qid), 3.0)
+        if upstream.query_count() != 2:
+            raise AssertionError("cache-disabled queries were cached: %d" % upstream.query_count())
+        proc.check_alive()
+
+
 def _large_answer(query):
     """The query plus enough TXT records to pass 1232 bytes."""
     msg = bytearray(zroxy_lab.build_dns_response(query, UPSTREAM_IP))
@@ -383,6 +399,7 @@ def main():
         test_dns_whitelist_reload,
         test_dns_upstream_reuse,
         test_dns_cache_and_coalescing,
+        test_dns_cache_disabled,
         test_dns_tcp_fallback,
     ]
     failed = 0

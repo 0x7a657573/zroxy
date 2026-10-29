@@ -581,6 +581,64 @@ static void test_dns_validation(void)
     }
 }
 
+static void test_dns_cache_and_ttl_ranges(void)
+{
+    {
+        zroxy_t cfg = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-e";
+        char a2[] = "0";
+        char a3[] = "-r";
+        char a4[] = "86400";
+        const char *argv[] = {a0, a1, a2, a3, a4};
+        reset_getopt();
+        expect_true(args_init(&cfg, 5, argv), "cache and TTL lower/upper ranges parse");
+        if (cfg.dnsserver)
+        {
+            expect_int((int)cfg.dnsserver->cache_entries, 0, "zero cache disables cache");
+            expect_int((int)cfg.dnsserver->local_ttl, 86400, "maximum synthetic TTL parses");
+        }
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-e";
+        char a2[] = "65536";
+        const char *argv[] = {a0, a1, a2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "maximum cache size parses");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char a0[] = "zroxy";
+        char a1[] = "-e";
+        char a2[] = "65537";
+        const char *argv[] = {a0, a1, a2};
+        reset_getopt();
+        expect_true(!args_init(&cfg, 3, argv), "cache size above maximum rejects");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        const char *data = "DCACHE = 65536\nDTTL = 1\n";
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        write_all_or_fail(fd, data);
+        close(fd);
+        expect_true(args_parse_config(&cfg, template_path), "cache and TTL config ranges parse");
+        unlink(template_path);
+        free_settings(&cfg);
+    }
+}
+
 static void test_config_rejects_blank_value(void)
 {
     zroxy_t cfg = {0};
@@ -651,6 +709,7 @@ int main(void)
     test_dns_option_order_and_last_listener_wins();
     test_config_dns_timeout_before_listener();
     test_dns_validation();
+    test_dns_cache_and_ttl_ranges();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();
 

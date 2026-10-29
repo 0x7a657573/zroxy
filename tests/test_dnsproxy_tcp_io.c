@@ -488,6 +488,7 @@ static ssize_t local_exchange_at(filter_t *white, const uint8_t *query, size_t q
     strcpy(dns.upstream.ip, "127.0.0.1");
     dns.upstream.port = 9;
     dns.timeout = 1;
+    dns.local_ttl = 60;
     msg.len = (uint16_t)qlen;
     msg.received_ms = received_ms;
     memcpy(msg.message + 2, query, qlen);
@@ -557,7 +558,7 @@ static void test_dnsproxy_local_answers(void)
         expect_true(be16(reply + 6) == 1, "whitelisted A has one answer");
         expect_true((reply[3] & 0x80) != 0, "local answer sets RA");
         /* TTL sits before RDLENGTH (2) and the IPv4 address (4). */
-        expect_true(memcmp(reply + n - 10, "\x00\x00\x01\x2c", 4) == 0, "local answer TTL is 300");
+		expect_true(memcmp(reply + n - 10, "\x00\x00\x00\x3c", 4) == 0, "local answer TTL is 60");
         expect_true(memcmp(reply + n - 4, "\x0a\x09\x08\x07", 4) == 0, "whitelisted A is the SNI address");
     }
     else

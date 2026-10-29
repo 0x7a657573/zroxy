@@ -135,8 +135,9 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	snprintf(ptr->listen_port, sizeof(ptr->listen_port), "%u", (unsigned)conf->Local.port);
 	ptr->socks = conf->Socks;
 
-	ptr->cache = dnscache_create(DNSCACHE_ENTRIES);
-	if (!ptr->cache)
+	if (conf->cache_entries > 0)
+		ptr->cache = dnscache_create(conf->cache_entries);
+	if (conf->cache_entries > 0 && !ptr->cache)
 	{
 		log_error("[!] DNS cache not set");
 		localdns_free(ptr);
@@ -157,6 +158,7 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 
 	// copy timeout
 	ptr->timeout = conf->timeout;
+	ptr->local_ttl = conf->local_ttl;
 
 	return ptr;
 }
@@ -346,7 +348,7 @@ static int localdns_answer_local(dnsserver_t *dns,struct Message *msg,uint8_t *b
 		}
 		rr->type = A_Resource_RecordType;
 		rr->class = DNS_CLASS_IN;
-		rr->ttl = DNS_LOCAL_TTL;
+		rr->ttl = dns->local_ttl;
 		rr->rd_length = 4;
 		memcpy(rr->rd_data.a_record.addr, dns->sni_ip, 4);
 		msg->answers = rr;

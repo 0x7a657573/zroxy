@@ -100,6 +100,7 @@ typedef struct dnsserver
 	dnsStream_t   upstream;
 	sockshost_t	  *socks;
 	uint32_t	  timeout;
+	uint32_t	  local_ttl;
 	
 	/*socket file handler*/
 	int local_sock;

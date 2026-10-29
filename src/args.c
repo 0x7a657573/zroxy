@@ -115,6 +115,8 @@ static bool parse_dns_socks(zroxy_t *ptr,char *str);
 bool args_parse_config(zroxy_t *ptr,char *str);
 static bool parse_sni_ip(zroxy_t *ptr,char *str);
 static bool parse_dns_timeout(zroxy_t *ptr,char *str);
+static bool parse_dns_cache(zroxy_t *ptr,char *str);
+static bool parse_dns_ttl(zroxy_t *ptr,char *str);
 static bool parse_log_level(zroxy_t *ptr,char *str);
 static bool parse_sni_timeout(zroxy_t *ptr,char *str);
 
@@ -127,6 +129,8 @@ static dnshost_t *dns_config(zroxy_t *ptr)
 			return NULL;
 		ptr->dnsserver->Local.port = 53;
 		ptr->dnsserver->timeout = 5;
+		ptr->dnsserver->cache_entries = 2048;
+		ptr->dnsserver->local_ttl = 300;
 		memcpy(ptr->dnsserver->Local.ip, "127.0.0.1", sizeof("127.0.0.1"));
 	}
 	return ptr->dnsserver;
@@ -167,6 +171,8 @@ static arg_option options[] =
 	{ "dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS },
 	{ "dtimeout", 't', "SECONDS", required_argument, "DNS upstream timeout (default: 5)", OPTION_SECTION_DNS },
 	{ "snip", 'i', "IPv4", required_argument, "synthetic address for whitelisted DNS names", OPTION_SECTION_DNS },
+	{ "dcache", 'e', "ENTRIES", required_argument, "DNS answer cache size, 0 disables (default: 2048)", OPTION_SECTION_DNS },
+	{ "dttl", 'r', "SECONDS", required_argument, "TTL of synthetic DNS answers (default: 300)", OPTION_SECTION_DNS },
 
 	{ "monitor", 'm', "[BIND-IP:]PORT", required_argument, "enable the HTTP monitor (default bind: 127.0.0.1)", OPTION_SECTION_MONITOR },
 	{ "monitortoken", 'k', "TOKEN", required_argument, "require Bearer TOKEN for the monitor", OPTION_SECTION_MONITOR },
@@ -331,6 +337,8 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'x': if (!parse_dns_socks(setting,arg)) return -1; break;
 		case 'i': if (!parse_sni_ip(setting,arg)) return -1; break;
 		case 't': if (!parse_dns_timeout(setting,arg)) return -1; break;
+		case 'e': if (!parse_dns_cache(setting,arg)) return -1; break;
+		case 'r': if (!parse_dns_ttl(setting,arg)) return -1; break;
 		case 'l': if (!parse_log_level(setting,arg)) return -1; break;
 		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);
@@ -565,6 +573,26 @@ static bool parse_dns_timeout(zroxy_t *ptr,char *str)
 	if (!parse_i32_range(str, &timeout, 0, 86400))
 		return false;
 	dns->timeout = (uint32_t)timeout;
+	return true;
+}
+
+static bool parse_dns_cache(zroxy_t *ptr,char *str)
+{
+	int entries;
+	dnshost_t *dns = dns_config(ptr);
+	if (!dns || !parse_i32_range(str, &entries, 0, 65536))
+		return false;
+	dns->cache_entries = (uint32_t)entries;
+	return true;
+}
+
+static bool parse_dns_ttl(zroxy_t *ptr,char *str)
+{
+	int ttl;
+	dnshost_t *dns = dns_config(ptr);
+	if (!dns || !parse_i32_range(str, &ttl, 1, 86400))
+		return false;
+	dns->local_ttl = (uint32_t)ttl;
 	return true;
 }
 

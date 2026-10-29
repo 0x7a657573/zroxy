@@ -6,6 +6,7 @@ connection to a TCP listener, or a UDP socket that belongs to the zroxy
 process. Process startup alone is not readiness.
 """
 
+import errno
 import os
 import select
 import signal
@@ -64,14 +65,23 @@ def free_tcp_port():
 
 
 def free_udp_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-    except OSError as exc:
-        _loopback_or_die(exc)
-    finally:
-        sock.close()
+    for _attempt in range(50):
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            udp.bind(("127.0.0.1", 0))
+            port = udp.getsockname()[1]
+            tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            tcp.bind(("127.0.0.1", port))
+            return port
+        except OSError as exc:
+            if exc.errno in (errno.EADDRINUSE, errno.EADDRNOTAVAIL):
+                continue
+            _loopback_or_die(exc)
+        finally:
+            tcp.close()
+            udp.close()
+    raise LabError("could not find a UDP/TCP-compatible loopback port")
 
 
 def client_hello(server_name="localhost"):

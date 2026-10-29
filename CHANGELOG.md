@@ -16,6 +16,8 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 
 ### DNS
 
+- Add `DCACHE` to select 0..65536 forwarded-answer entries (`0` disables the
+  cache) and `DTTL` to select the 1..86400 second synthetic-answer TTL.
 - Repeated DNS queue, TCP-capacity, and `NO DATA` error logs are rate-limited
   to one line per second, with suppressed-message counts on the next line.
 - DNS option parsing now uses one configuration object with stable defaults;
