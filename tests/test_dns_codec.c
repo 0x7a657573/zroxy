@@ -212,6 +212,54 @@ static void test_encode_local_a_response(void)
     expect_u8(out[55], 10, "answer ip byte3");
 }
 
+static void test_encode_soa_response(void)
+{
+    struct Question q = {0};
+    struct ResourceRecord soa = {0};
+    struct Message msg = {0};
+    uint8_t out[128] = {0};
+    uint8_t short_out[97] = {0};
+    size_t written = 0;
+
+    q.qName = "example.com";
+    q.qType = AAAA_Resource_RecordType;
+    q.qClass = DNS_CLASS_IN;
+    soa.name = "example.com";
+    soa.type = SOA_Resource_RecordType;
+    soa.class = DNS_CLASS_IN;
+    soa.ttl = 60;
+    soa.rd_data.soa_record.mname = "example.com";
+    soa.rd_data.soa_record.rname = "example.com";
+    soa.rd_data.soa_record.serial = 1;
+    soa.rd_data.soa_record.refresh = 3600;
+    soa.rd_data.soa_record.retry = 600;
+    soa.rd_data.soa_record.expire = 86400;
+    soa.rd_data.soa_record.minimum = 60;
+
+    msg.id = 0x1234;
+    msg.qr = 1;
+    msg.qdCount = 1;
+    msg.nsCount = 1;
+    msg.questions = &q;
+    msg.authorities = &soa;
+
+    expect_true(dns_encode_msg_n(&msg, out, sizeof(out), &written), "encode SOA authority");
+    expect_u16((uint16_t)written, 98, "SOA response length");
+    expect_u8(out[50], 0x00, "SOA rdlength high byte");
+    expect_u8(out[51], 0x2e, "SOA rdlength low byte");
+    expect_u8(out[52], 0x07, "SOA mname label");
+    expect_u8(out[65], 0x07, "SOA rname label");
+    expect_u8(out[78], 0x00, "SOA serial high byte");
+    expect_u8(out[81], 0x01, "SOA serial low byte");
+    expect_u8(out[85], 0x10, "SOA refresh low byte");
+    expect_u8(out[89], 0x58, "SOA retry low byte");
+    expect_u8(out[90], 0x00, "SOA expire high byte");
+    expect_u8(out[93], 0x80, "SOA expire low byte");
+    expect_u8(out[97], 0x3c, "SOA minimum low byte");
+    expect_true(!dns_encode_msg_n(&msg, short_out, sizeof(short_out), &written),
+                "SOA encode rejects a short buffer");
+}
+
 static void test_encode_dns_flags(void)
 {
     struct Question q = {0};
@@ -622,6 +670,7 @@ int main(void)
     test_transaction_id_preserved_on_encode();
     test_decode_rd_ra_preservation();
     test_encode_local_a_response();
+    test_encode_soa_response();
     test_encode_dns_flags();
     test_decode_rejects_truncated_and_loops();
     test_decode_more_malformed();

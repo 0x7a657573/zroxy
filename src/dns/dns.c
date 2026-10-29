@@ -305,6 +305,13 @@ static void free_resource_records(struct ResourceRecord *rr)
   while (rr)
   {
     free(rr->name);
+    if (rr->type == SOA_Resource_RecordType)
+    {
+      free(rr->rd_data.soa_record.mname);
+      free(rr->rd_data.soa_record.rname);
+    }
+    else if (rr->type == TXT_Resource_RecordType)
+      free(rr->rd_data.txt_record.txt_data);
     next = rr->next;
     free(rr);
     rr = next;
@@ -327,13 +334,23 @@ static bool encode_resource_records(struct ResourceRecord *rr, dns_writer *w)
   while (rr)
   {
     int i;
+    uint8_t *rd_length_pos = NULL;
+    uint8_t *rd_data_pos = NULL;
     if (!rr->name || !encode_domain_name(w, rr->name))
       return false;
     if (!writer_u16(w, rr->type) ||
         !writer_u16(w, rr->class) ||
-        !writer_u32(w, rr->ttl) ||
-        !writer_u16(w, rr->rd_length))
+        !writer_u32(w, rr->ttl))
       return false;
+	if (rr->type == SOA_Resource_RecordType)
+	{
+		rd_length_pos = w->p;
+		if (!writer_u16(w, 0))
+			return false;
+		rd_data_pos = w->p;
+	}
+	else if (!writer_u16(w, rr->rd_length))
+		return false;
 
     switch (rr->type)
     {
@@ -365,6 +382,21 @@ static bool encode_resource_records(struct ResourceRecord *rr, dns_writer *w)
           if (!writer_u8(w, (uint8_t)rr->rd_data.txt_record.txt_data[i]))
             return false;
         }
+        break;
+      case SOA_Resource_RecordType:
+        if (!rr->rd_data.soa_record.mname || !rr->rd_data.soa_record.rname ||
+            !encode_domain_name(w, rr->rd_data.soa_record.mname) ||
+            !encode_domain_name(w, rr->rd_data.soa_record.rname) ||
+            !writer_u32(w, rr->rd_data.soa_record.serial) ||
+            !writer_u32(w, rr->rd_data.soa_record.refresh) ||
+            !writer_u32(w, rr->rd_data.soa_record.retry) ||
+            !writer_u32(w, rr->rd_data.soa_record.expire) ||
+            !writer_u32(w, rr->rd_data.soa_record.minimum))
+          return false;
+        if ((size_t)(w->p - rd_data_pos) > UINT16_MAX)
+          return false;
+        rd_length_pos[0] = (uint8_t)((w->p - rd_data_pos) >> 8);
+        rd_length_pos[1] = (uint8_t)((w->p - rd_data_pos) & 0xff);
         break;
       default:
         log_error("Unknown type %u. => Ignore resource record.", rr->type);

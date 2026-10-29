@@ -188,25 +188,33 @@ def parse_dns_message(msg):
         qtype, qclass = struct.unpack_from("!HH", msg, off)
         off += 4
         questions.append((name, qtype, qclass))
-    answers = []
-    for _ in range(an):
-        name, off = _read_dns_name(msg, off)
-        rtype, rclass, ttl, rdlen = struct.unpack_from("!HHIH", msg, off)
-        off += 10
-        rdata = bytes(msg[off:off + rdlen])
-        off += rdlen
-        answers.append({
-            "name": name,
-            "type": rtype,
-            "class": rclass,
-            "ttl": ttl,
-            "rdata": rdata,
-        })
+    def read_records(count):
+        records = []
+        nonlocal off
+        for _ in range(count):
+            name, off = _read_dns_name(msg, off)
+            rtype, rclass, ttl, rdlen = struct.unpack_from("!HHIH", msg, off)
+            off += 10
+            rdata = bytes(msg[off:off + rdlen])
+            off += rdlen
+            records.append({
+                "name": name,
+                "type": rtype,
+                "class": rclass,
+                "ttl": ttl,
+                "rdata": rdata,
+            })
+        return records
+
+    answers = read_records(an)
+    authorities = read_records(_ns)
+    read_records(_ar)
     return {
         "id": qid,
         "flags": flags,
         "questions": questions,
         "answers": answers,
+        "authorities": authorities,
     }
 
 

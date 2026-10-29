@@ -193,8 +193,11 @@ def test_dns_whitelist_synthetic():
             query = zroxy_lab.build_dns_query("allowed.test", qid=0x1113, qtype=qtype)
             reply = zroxy_lab.udp_exchange(ldns, query, 3.0)
             _expect_rcode(reply, query, 0)
-            if zroxy_lab.parse_dns_message(reply)["answers"]:
+            nodata = zroxy_lab.parse_dns_message(reply)
+            if nodata["answers"]:
                 raise AssertionError("whitelisted type %d was not NODATA: %r" % (qtype, reply))
+            if len(nodata["authorities"]) != 1 or nodata["authorities"][0]["type"] != 6:
+                raise AssertionError("whitelisted type %d did not carry an SOA: %r" % (qtype, nodata))
         if upstream.query_count() != 0:
             raise AssertionError("whitelisted AAAA/HTTPS was forwarded upstream")
 

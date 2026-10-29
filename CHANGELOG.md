@@ -21,6 +21,9 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 - The monitor's `DNS_Server` object now reports cache hits, misses, shared
   in-flight queries, current entries, evictions, stale queue drops, queue-full
   events, refused TCP connections, and active TCP connections.
+- Synthetic non-A whitelist answers now include an SOA authority record for
+  RFC 2308 negative caching; its TTL follows `DTTL`, with a bounded fallback to
+  NODATA without the SOA when the response cannot fit.
 - Repeated DNS queue, TCP-capacity, and `NO DATA` error logs are rate-limited
   to one line per second, with suppressed-message counts on the next line.
 - DNS option parsing now uses one configuration object with stable defaults;
