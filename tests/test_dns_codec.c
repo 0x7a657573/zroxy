@@ -441,6 +441,68 @@ static void test_encode_rejects_short_buffer(void)
     expect_true(written > sizeof(tiny) && written <= sizeof(enough), "bounded encode length");
 }
 
+static void test_wire_error_and_truncation(void)
+{
+    uint8_t out[64];
+    uint8_t garbage[16];
+    uint8_t resp[sizeof(k_query_example_com) + 16];
+    size_t n;
+
+    n = dns_build_error(k_query_example_com, sizeof(k_query_example_com),
+                        ServerFailure_ResponseType, out, sizeof(out));
+    expect_true(n == sizeof(k_query_example_com), "error reply keeps header and question");
+    expect_u8(out[0], 0x12, "error reply id hi");
+    expect_u8(out[1], 0x34, "error reply id lo");
+    expect_u8(out[2], 0x81, "error reply QR and RD");
+    expect_u8(out[3], 0x82, "error reply RA and SERVFAIL");
+    expect_true(memcmp(out + 12, k_query_example_com + 12, n - 12) == 0, "error reply question bytes");
+    expect_true(dns_build_error(k_query_example_com, 11, 2, out, sizeof(out)) == 0, "error reply needs a header");
+    expect_true(dns_build_error(k_query_example_com, sizeof(k_query_example_com), 2, out, 20) == 0,
+                "error reply respects capacity");
+
+    /* A question that does not parse is left out and QDCOUNT becomes 0. */
+    memset(garbage, 0xff, sizeof(garbage));
+    memcpy(garbage, k_query_example_com, 12);
+    n = dns_build_error(garbage, sizeof(garbage), FormatError_ResponseType, out, sizeof(out));
+    expect_true(n == 12, "error reply without a parsable question");
+    expect_u8(out[5], 0, "error reply QDCOUNT 0");
+    expect_u8(out[3], 0x81, "error reply FORMERR");
+
+    /* A response with records and an OPT is cut to header and question with TC. */
+    memcpy(resp, k_query_example_com, sizeof(k_query_example_com));
+    resp[2] = 0x81;
+    resp[3] = 0x80;
+    resp[7] = 1;
+    resp[11] = 1;
+    memset(resp + sizeof(k_query_example_com), 0xee, 16);
+    n = dns_build_truncated(resp, sizeof(resp), out, sizeof(out));
+    expect_true(n == sizeof(k_query_example_com), "truncated reply length");
+    expect_u8(out[2], 0x83, "truncated reply sets TC and keeps QR/RD");
+    expect_u8(out[3], 0x80, "truncated reply keeps RA and rcode");
+    expect_u8(out[7], 0, "truncated reply ANCOUNT 0");
+    expect_u8(out[11], 0, "truncated reply ARCOUNT 0");
+}
+
+static void test_wire_udp_limit(void)
+{
+    uint8_t q[sizeof(k_query_example_com) + 11];
+    const uint8_t opt[] = { 0x00, 0x00, 0x29, 0x10, 0x00, 0, 0, 0, 0, 0, 0 };
+
+    expect_true(dns_udp_limit(k_query_example_com, sizeof(k_query_example_com), 1232) == 512,
+                "no EDNS gives 512");
+    memcpy(q, k_query_example_com, sizeof(k_query_example_com));
+    memcpy(q + sizeof(k_query_example_com), opt, sizeof(opt));
+    q[11] = 1;
+    expect_true(dns_udp_limit(q, sizeof(q), 1232) == 1232, "EDNS 4096 clamped to 1232");
+    q[sizeof(k_query_example_com) + 3] = 0x04;
+    q[sizeof(k_query_example_com) + 4] = 0x00;
+    expect_true(dns_udp_limit(q, sizeof(q), 1232) == 1024, "EDNS 1024 honoured");
+    q[sizeof(k_query_example_com) + 3] = 0x00;
+    q[sizeof(k_query_example_com) + 4] = 0x10;
+    expect_true(dns_udp_limit(q, sizeof(q), 1232) == 512, "EDNS below 512 gives 512");
+    expect_true(dns_udp_limit(q, sizeof(q) - 3, 1232) == 512, "cut OPT record gives 512");
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -454,6 +516,8 @@ int main(void)
     test_decode_more_malformed();
     test_decode_valid_compression_pointer();
     test_encode_rejects_short_buffer();
+    test_wire_error_and_truncation();
+    test_wire_udp_limit();
 
     return failures == 0 ? 0 : 1;
 }

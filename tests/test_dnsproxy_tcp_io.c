@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 #include <zroxy/dnsproxy.h>
+#include <zroxy/dns.h>
+#include <zroxy/filter.h>
 #include <zroxy/log.h>
 
 typedef struct
@@ -33,6 +35,8 @@ static void *handle_request_thread(void *arg)
 
 static int failures = 0;
 
+#define REPLY_MAX 2048
+
 static const uint8_t k_dns_query_example_com[] = {
     0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
@@ -50,15 +54,6 @@ static void expect_true(bool value, const char *name)
     if (!value)
     {
         fprintf(stderr, "FAIL: %s expected true\n", name);
-        failures++;
-    }
-}
-
-static void expect_false(bool value, const char *name)
-{
-    if (value)
-    {
-        fprintf(stderr, "FAIL: %s expected false\n", name);
         failures++;
     }
 }
@@ -126,6 +121,9 @@ typedef struct
 {
     int listen_fd;
     bool close_after_one_len_byte;
+    size_t query_len;
+    const uint8_t *response;
+    size_t response_len;
     bool ok;
 } upstream_server_t;
 
@@ -140,8 +138,8 @@ static void *upstream_server_thread(void *arg)
         return NULL;
     }
 
-    uint8_t req[2 + sizeof(k_dns_query_example_com)];
-    if (!read_exact_fd(fd, req, sizeof(req)))
+    uint8_t req[2 + DNS_MSG_SIZE];
+    if (srv->query_len > DNS_MSG_SIZE || !read_exact_fd(fd, req, 2 + srv->query_len))
     {
         close(fd);
         return NULL;
@@ -149,7 +147,7 @@ static void *upstream_server_thread(void *arg)
 
     if (srv->close_after_one_len_byte)
     {
-        uint8_t len_hi = (uint8_t)((sizeof(k_dns_response_payload) >> 8) & 0xff);
+        uint8_t len_hi = (uint8_t)((srv->response_len >> 8) & 0xff);
         if (!write_all_fd(fd, &len_hi, 1))
         {
             close(fd);
@@ -161,8 +159,8 @@ static void *upstream_server_thread(void *arg)
     }
 
     uint8_t len_prefix[2] = {
-        (uint8_t)((sizeof(k_dns_response_payload) >> 8) & 0xff),
-        (uint8_t)(sizeof(k_dns_response_payload) & 0xff)
+        (uint8_t)((srv->response_len >> 8) & 0xff),
+        (uint8_t)(srv->response_len & 0xff)
     };
 
     if (!write_all_fd(fd, len_prefix, 1) || !write_all_fd(fd, len_prefix + 1, 1))
@@ -171,14 +169,14 @@ static void *upstream_server_thread(void *arg)
         return NULL;
     }
 
-    for (size_t i = 0; i < sizeof(k_dns_response_payload); i += 3)
+    for (size_t i = 0; i < srv->response_len; i += 3)
     {
-        size_t chunk = sizeof(k_dns_response_payload) - i;
+        size_t chunk = srv->response_len - i;
         if (chunk > 3)
         {
             chunk = 3;
         }
-        if (!write_all_fd(fd, k_dns_response_payload + i, chunk))
+        if (!write_all_fd(fd, srv->response + i, chunk))
         {
             close(fd);
             return NULL;
@@ -219,7 +217,17 @@ static bool make_udp_bound_socket(int *fd, struct sockaddr_in *bound_addr)
     return true;
 }
 
-static bool run_dnsproxy_case(bool close_mid_prefix, bool *server_ok, bool *received_udp)
+typedef struct
+{
+    const uint8_t *query;
+    size_t query_len;
+    const uint8_t *response;
+    size_t response_len;
+    bool close_mid_prefix;
+} dns_case_t;
+
+/* Forward one query through a fake upstream; *reply_len is -1 when no UDP reply came. */
+static bool run_dnsproxy_case(const dns_case_t *in, bool *server_ok, uint8_t *reply, ssize_t *reply_len)
 {
     int listen_fd = -1;
     int local_udp_fd = -1;
@@ -233,11 +241,10 @@ static bool run_dnsproxy_case(bool close_mid_prefix, bool *server_ok, bool *rece
     upstream_server_t server = {0};
     dnsserver_t dns = {0};
     dnsThread_test_t *worker_input = NULL;
-    uint8_t udp_rx[DNS_MSG_SIZE];
     struct timeval tv = {0};
 
     *server_ok = false;
-    *received_udp = false;
+    *reply_len = -1;
 
     listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0)
@@ -266,7 +273,10 @@ static bool run_dnsproxy_case(bool close_mid_prefix, bool *server_ok, bool *rece
     }
 
     server.listen_fd = listen_fd;
-    server.close_after_one_len_byte = close_mid_prefix;
+    server.close_after_one_len_byte = in->close_mid_prefix;
+    server.query_len = in->query_len;
+    server.response = in->response;
+    server.response_len = in->response_len;
     server.ok = false;
     if (pthread_create(&upstream_tid, NULL, upstream_server_thread, &server) != 0)
     {
@@ -295,10 +305,10 @@ static bool run_dnsproxy_case(bool close_mid_prefix, bool *server_ok, bool *rece
     }
 
     worker_input->dns = &dns;
-    worker_input->msg.len = sizeof(k_dns_query_example_com);
+    worker_input->msg.len = (uint16_t)in->query_len;
     worker_input->msg.message[0] = (char)((worker_input->msg.len >> 8) & 0xff);
     worker_input->msg.message[1] = (char)(worker_input->msg.len & 0xff);
-    memcpy(worker_input->msg.message + 2, k_dns_query_example_com, sizeof(k_dns_query_example_com));
+    memcpy(worker_input->msg.message + 2, in->query, in->query_len);
     worker_input->msg.client = client_addr;
 
     if (pthread_create(&handler_tid, NULL, handle_request_thread, worker_input) != 0)
@@ -311,24 +321,11 @@ static bool run_dnsproxy_case(bool close_mid_prefix, bool *server_ok, bool *rece
         return false;
     }
 
-    tv.tv_sec = 0;
-    tv.tv_usec = 200000;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
     setsockopt(client_udp_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    ssize_t n = recvfrom(client_udp_fd, udp_rx, sizeof(udp_rx), 0, NULL, NULL);
-    if (n > 0)
-    {
-        *received_udp = true;
-        if (!close_mid_prefix)
-        {
-            if ((size_t)n != sizeof(k_dns_response_payload) ||
-                memcmp(udp_rx, k_dns_response_payload, sizeof(k_dns_response_payload)) != 0)
-            {
-                failures++;
-                fprintf(stderr, "FAIL: forwarded UDP payload mismatch\n");
-            }
-        }
-    }
+    *reply_len = recvfrom(client_udp_fd, reply, REPLY_MAX, 0, NULL, NULL);
 
     pthread_join(handler_tid, NULL);
     pthread_join(upstream_tid, NULL);
@@ -340,22 +337,236 @@ static bool run_dnsproxy_case(bool close_mid_prefix, bool *server_ok, bool *rece
     return true;
 }
 
-static void test_dnsproxy_split_prefix_and_payload_forwarding(void)
+static uint16_t be16(const uint8_t *p)
 {
-    bool server_ok = false;
-    bool received_udp = false;
-    expect_true(run_dnsproxy_case(false, &server_ok, &received_udp), "run dnsproxy split I/O case");
-    expect_true(server_ok, "upstream server completed split response");
-    expect_true(received_udp, "udp client received forwarded dns payload");
+    return (uint16_t)((p[0] << 8) | p[1]);
 }
 
-static void test_dnsproxy_close_mid_prefix_no_udp_reply(void)
+static void expect_rcode(const uint8_t *reply, ssize_t n, uint16_t id, unsigned rcode, const char *name)
 {
+    if (n < DNS_HEADER_SIZE)
+    {
+        fprintf(stderr, "FAIL: %s: no DNS reply (%zd)\n", name, n);
+        failures++;
+        return;
+    }
+    if (be16(reply) != id || (reply[2] & 0x80) == 0 || (reply[3] & 0x0F) != rcode)
+    {
+        fprintf(stderr, "FAIL: %s: id %04x flags %02x%02x, want id %04x rcode %u\n",
+                name, be16(reply), reply[2], reply[3], id, rcode);
+        failures++;
+    }
+}
+
+static void test_dnsproxy_split_prefix_and_payload_forwarding(void)
+{
+    dns_case_t in = { k_dns_query_example_com, sizeof(k_dns_query_example_com),
+                      k_dns_response_payload, sizeof(k_dns_response_payload), false };
+    uint8_t reply[REPLY_MAX];
+    ssize_t n = -1;
     bool server_ok = false;
-    bool received_udp = false;
-    expect_true(run_dnsproxy_case(true, &server_ok, &received_udp), "run dnsproxy close-mid-prefix case");
+    expect_true(run_dnsproxy_case(&in, &server_ok, reply, &n), "run dnsproxy split I/O case");
+    expect_true(server_ok, "upstream server completed split response");
+    expect_true(n == (ssize_t)sizeof(k_dns_response_payload) &&
+                memcmp(reply, k_dns_response_payload, sizeof(k_dns_response_payload)) == 0,
+                "udp client received forwarded dns payload");
+}
+
+static void test_dnsproxy_close_mid_prefix_servfail(void)
+{
+    dns_case_t in = { k_dns_query_example_com, sizeof(k_dns_query_example_com),
+                      k_dns_response_payload, sizeof(k_dns_response_payload), true };
+    uint8_t reply[REPLY_MAX];
+    ssize_t n = -1;
+    bool server_ok = false;
+    expect_true(run_dnsproxy_case(&in, &server_ok, reply, &n), "run dnsproxy close-mid-prefix case");
     expect_true(server_ok, "upstream server closed mid-prefix as planned");
-    expect_false(received_udp, "no udp reply when upstream closes mid-prefix");
+    expect_rcode(reply, n, 0x1234, ServerFailure_ResponseType, "upstream failure answers SERVFAIL");
+    expect_true(n == (ssize_t)sizeof(k_dns_query_example_com), "SERVFAIL carries the question");
+}
+
+/* Query for example.com A, optionally with an EDNS0 OPT record advertising size. */
+static size_t build_query(uint8_t *out, uint16_t qtype, uint16_t edns_size)
+{
+    size_t n = sizeof(k_dns_query_example_com);
+    memcpy(out, k_dns_query_example_com, n);
+    out[n - 4] = (uint8_t)(qtype >> 8);
+    out[n - 3] = (uint8_t)qtype;
+    if (edns_size)
+    {
+        const uint8_t opt[] = { 0x00, 0x00, 0x29, (uint8_t)(edns_size >> 8), (uint8_t)edns_size,
+                                0, 0, 0, 0, 0, 0 };
+        out[11] = 1;
+        memcpy(out + n, opt, sizeof(opt));
+        n += sizeof(opt);
+    }
+    return n;
+}
+
+/* A 1500-byte response: the question plus TXT records. */
+static size_t build_large_response(uint8_t *out, size_t cap)
+{
+    size_t n = sizeof(k_dns_response_payload);
+    uint16_t an = 0;
+    memcpy(out, k_dns_response_payload, n);
+    while (n + 12 + 200 <= cap && n < 1500)
+    {
+        const uint8_t rr[] = { 0xc0, 0x0c, 0x00, 0x10, 0x00, 0x01, 0, 0, 0, 60, 0x00, 200 };
+        memcpy(out + n, rr, sizeof(rr));
+        n += sizeof(rr);
+        out[n] = 199;
+        memset(out + n + 1, 't', 199);
+        n += 200;
+        an++;
+    }
+    out[6] = (uint8_t)(an >> 8);
+    out[7] = (uint8_t)an;
+    return n;
+}
+
+static void test_dnsproxy_large_response(void)
+{
+    uint8_t query[64];
+    uint8_t big[2048];
+    uint8_t reply[REPLY_MAX];
+    size_t big_len = build_large_response(big, sizeof(big));
+    ssize_t n = -1;
+    bool server_ok = false;
+    dns_case_t in = { query, 0, big, big_len, false };
+
+    /* Plain UDP client: larger than 512, so TC with the question only. */
+    in.query_len = build_query(query, A_Resource_RecordType, 0);
+    expect_true(run_dnsproxy_case(&in, &server_ok, reply, &n), "run large response without EDNS");
+    expect_true(server_ok, "upstream sent large response");
+    expect_rcode(reply, n, 0x1234, 0, "truncated large response");
+    if (n >= DNS_HEADER_SIZE)
+    {
+        expect_true((reply[2] & 0x02) != 0, "large response sets TC");
+        expect_true(be16(reply + 6) == 0, "truncated response drops records");
+        expect_true(n == (ssize_t)sizeof(k_dns_query_example_com), "truncated response keeps the question");
+    }
+
+    /* EDNS 4096 is clamped to 1232; 1500 bytes still do not fit. */
+    in.query_len = build_query(query, A_Resource_RecordType, 4096);
+    expect_true(run_dnsproxy_case(&in, &server_ok, reply, &n), "run large response with EDNS 4096");
+    expect_true(n >= DNS_HEADER_SIZE && (reply[2] & 0x02) != 0, "EDNS size is clamped to 1232");
+
+    /* An 1100-byte answer fits an EDNS client and is delivered whole. */
+    big_len = sizeof(k_dns_response_payload) + 5 * 212;
+    big[7] = 5;
+    in.response_len = big_len;
+    in.query_len = build_query(query, A_Resource_RecordType, 1232);
+    expect_true(run_dnsproxy_case(&in, &server_ok, reply, &n), "run 1100-byte response with EDNS");
+    expect_true(n == (ssize_t)big_len && memcmp(reply, big, big_len) == 0,
+                "EDNS client receives the whole 1100-byte response");
+}
+
+/* Answer one query locally and return the UDP reply length, or -1. */
+static ssize_t local_exchange(filter_t *white, const uint8_t *query, size_t qlen, uint8_t *reply)
+{
+    int local_fd = -1;
+    int client_fd = -1;
+    struct sockaddr_in local_addr;
+    dnsserver_t dns = {0};
+    dnsMessage_t msg = {0};
+    struct timeval tv = {1, 0};
+    int upstream_fd = -1;
+    ssize_t n;
+
+    if (!make_udp_bound_socket(&local_fd, &local_addr) ||
+        !make_udp_bound_socket(&client_fd, &msg.client))
+    {
+        if (local_fd >= 0) close(local_fd);
+        return -1;
+    }
+    dns.local_sock = local_fd;
+    dns.whitelist = white;
+    dns.sni_ip[0] = 10; dns.sni_ip[1] = 9; dns.sni_ip[2] = 8; dns.sni_ip[3] = 7;
+    /* Nothing listens here, so a forwarded query fails fast. */
+    strcpy(dns.upstream.ip, "127.0.0.1");
+    dns.upstream.port = 9;
+    dns.timeout = 1;
+    msg.len = (uint16_t)qlen;
+    memcpy(msg.message + 2, query, qlen);
+
+    localdns_handle_request(&dns, &msg, &upstream_fd);
+    if (upstream_fd >= 0)
+        close(upstream_fd);
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    n = recvfrom(client_fd, reply, REPLY_MAX, 0, NULL, NULL);
+    close(client_fd);
+    close(local_fd);
+    return n;
+}
+
+static void test_dnsproxy_local_answers(void)
+{
+    const char *const entries[] = { "example.com" };
+    filter_t *white = filter_from_list(entries, 1);
+    uint8_t query[64];
+    uint8_t reply[REPLY_MAX];
+    size_t qlen;
+    ssize_t n;
+    size_t qend = sizeof(k_dns_query_example_com);
+
+    expect_true(white != NULL, "whitelist for local answers");
+    if (!white)
+        return;
+
+    qlen = build_query(query, A_Resource_RecordType, 0);
+    n = local_exchange(white, query, qlen, reply);
+    expect_rcode(reply, n, 0x1234, 0, "whitelisted A");
+    if (n >= (ssize_t)(qend + 16))
+    {
+        expect_true(be16(reply + 6) == 1, "whitelisted A has one answer");
+        expect_true((reply[3] & 0x80) != 0, "local answer sets RA");
+        /* TTL sits before RDLENGTH (2) and the IPv4 address (4). */
+        expect_true(memcmp(reply + n - 10, "\x00\x00\x01\x2c", 4) == 0, "local answer TTL is 300");
+        expect_true(memcmp(reply + n - 4, "\x0a\x09\x08\x07", 4) == 0, "whitelisted A is the SNI address");
+    }
+    else
+    {
+        fprintf(stderr, "FAIL: whitelisted A reply too short (%zd)\n", n);
+        failures++;
+    }
+
+    {
+        const uint16_t nodata_types[] = { AAAA_Resource_RecordType, HTTPS_Resource_RecordType,
+                                          SVCB_Resource_RecordType, MX_Resource_RecordType };
+        size_t i;
+        for (i = 0; i < sizeof(nodata_types) / sizeof(nodata_types[0]); i++)
+        {
+            qlen = build_query(query, nodata_types[i], 0);
+            n = local_exchange(white, query, qlen, reply);
+            expect_rcode(reply, n, 0x1234, 0, "whitelisted non-A is NOERROR");
+            expect_true(n >= DNS_HEADER_SIZE && be16(reply + 6) == 0, "whitelisted non-A is NODATA");
+        }
+    }
+
+    /* An EDNS query for a whitelisted name is answered locally too. */
+    qlen = build_query(query, AAAA_Resource_RecordType, 1232);
+    n = local_exchange(white, query, qlen, reply);
+    expect_true(n >= DNS_HEADER_SIZE && be16(reply + 6) == 0 && (reply[3] & 0x0F) == 0,
+                "whitelisted AAAA with EDNS is NODATA");
+
+    qlen = build_query(query, A_Resource_RecordType, 0);
+    query[2] = (uint8_t)(0x01 | (NOTIFY_OperationCode << 3));
+    n = local_exchange(white, query, qlen, reply);
+    expect_rcode(reply, n, 0x1234, NotImplemented_ResponseType, "non-QUERY opcode is NOTIMP");
+    expect_true(n >= DNS_HEADER_SIZE && ((reply[2] >> 3) & 0x0F) == NOTIFY_OperationCode,
+                "NOTIMP keeps the opcode");
+
+    qlen = build_query(query, A_Resource_RecordType, 0);
+    query[5] = 2;
+    n = local_exchange(white, query, qlen, reply);
+    expect_rcode(reply, n, 0x1234, FormatError_ResponseType, "two questions are FORMERR");
+
+    qlen = build_query(query, A_Resource_RecordType, 0);
+    query[5] = 0;
+    n = local_exchange(white, query, qlen, reply);
+    expect_rcode(reply, n, 0x1234, FormatError_ResponseType, "no question is FORMERR");
+
+    filter_free(white);
 }
 
 int main(void)
@@ -368,6 +579,8 @@ int main(void)
     }
 
     test_dnsproxy_split_prefix_and_payload_forwarding();
-    test_dnsproxy_close_mid_prefix_no_udp_reply();
+    test_dnsproxy_close_mid_prefix_servfail();
+    test_dnsproxy_large_response();
+    test_dnsproxy_local_answers();
     return failures == 0 ? 0 : 1;
 }

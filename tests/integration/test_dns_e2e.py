@@ -45,12 +45,22 @@ def _expect_exact(ldns, query, timeout):
     return elapsed
 
 
+def _expect_rcode(reply, query, rcode):
+    if reply is None or len(reply) < 12:
+        raise AssertionError("expected a DNS reply with rcode %d, got %r" % (rcode, reply))
+    if reply[:2] != query[:2]:
+        raise AssertionError("DNS id was not preserved: %r" % reply)
+    flags = (reply[2] << 8) | reply[3]
+    if (flags & 0x8000) == 0 or (flags & 0x000F) != rcode:
+        raise AssertionError("expected rcode %d, got flags %04x" % (rcode, flags))
+
+
 def _expect_bounded_failure(proc, ldns, query, timeout, prior_errors):
+    """An upstream failure is answered with SERVFAIL within the proxy timeout."""
     started = time.monotonic()
     reply = zroxy_lab.udp_exchange(ldns, query, timeout)
     elapsed = time.monotonic() - started
-    if reply is not None:
-        raise AssertionError("expected no DNS response, got %r" % reply)
+    _expect_rcode(reply, query, 2)
     if elapsed > timeout + 0.75:
         raise AssertionError("DNS failure was not bounded: %.2fs" % elapsed)
     if not proc.wait_log("NO DATA", timeout + 1.0, after=prior_errors):
@@ -75,7 +85,9 @@ def test_dns_forward_fragmented():
 
 
 def test_dns_bounded_failures():
-    malformed = b"\xff" * 7
+    short = b"\x00" * 7
+    # A header with one question whose name the decoder rejects.
+    malformed = b"\x00\xb0\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + b"\xff" * 7
     valid = zroxy_lab.build_dns_query("example.test", qid=0x00B1)
     with zroxy_lab.Lab() as lab:
         upstream = lab.dns_server(
@@ -87,6 +99,11 @@ def test_dns_bounded_failures():
         proc = _start(lab, upstream, ldns, dtimeout="1")
 
         before = upstream.query_count()
+        if zroxy_lab.udp_exchange(ldns, short, 0.5) is not None:
+            raise AssertionError("a datagram shorter than a DNS header was answered")
+        if upstream.query_count() != before or upstream.upstream_connections() != 0:
+            raise AssertionError("a datagram shorter than a DNS header was forwarded")
+
         errors = proc.count_log("NO DATA")
         _expect_bounded_failure(proc, ldns, malformed, 4.0, errors)
         if upstream.query_count() <= before:
@@ -163,6 +180,16 @@ def test_dns_whitelist_synthetic():
             raise AssertionError("mixed-case name did not get the synthetic answer: %r" % parsed)
         if upstream.query_count() != 0:
             raise AssertionError("mixed-case whitelisted name was forwarded upstream")
+
+        # IPv6 is not proxied: AAAA and HTTPS get NODATA, never an upstream address.
+        for qtype in (28, 65):
+            query = zroxy_lab.build_dns_query("allowed.test", qid=0x1113, qtype=qtype)
+            reply = zroxy_lab.udp_exchange(ldns, query, 3.0)
+            _expect_rcode(reply, query, 0)
+            if zroxy_lab.parse_dns_message(reply)["answers"]:
+                raise AssertionError("whitelisted type %d was not NODATA: %r" % (qtype, reply))
+        if upstream.query_count() != 0:
+            raise AssertionError("whitelisted AAAA/HTTPS was forwarded upstream")
 
         other = zroxy_lab.build_dns_query("other.test", qid=0x2222)
         _expect_exact(ldns, other, 3.0)

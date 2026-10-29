@@ -293,10 +293,16 @@ controls.
 ## DNS forwarding
 
 When `LDNS` is configured, zroxy listens for DNS over UDP locally. Whitelisted
-names can receive a synthetic A answer using `SNIP`; a matching AAAA query is
-answered with the current zero IPv6 value. Other supported queries are
-forwarded to the configured `DNS` server over TCP, directly or via the
-optional `DSOCKS` SOCKS5 connection.
+names receive a synthetic A answer using `SNIP` with a 300-second TTL. IPv6 is
+not proxied, so every other query type for a whitelisted name (AAAA, HTTPS,
+SVCB, ...) gets an empty NOERROR (NODATA) answer and the client falls back to
+IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
+directly or via the optional `DSOCKS` SOCKS5 connection. The SNI proxy itself
+resolves upstream names to IPv4 only.
+
+A failed upstream exchange or a full queue is answered with SERVFAIL. A
+response larger than the client's UDP size (512 bytes, or its EDNS0 size up to
+1232) is answered with TC set; zroxy has no local TCP DNS listener yet.
 
 Example:
 

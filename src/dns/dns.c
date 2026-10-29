@@ -425,3 +425,130 @@ bool dns_encode_msg_n(struct Message *msg, uint8_t *buffer, size_t capacity, siz
     *written = (size_t)(w.p - buffer);
   return true;
 }
+
+static uint16_t get_u16(const uint8_t *p)
+{
+  return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
+static void put_u16(uint8_t *p, uint16_t value)
+{
+  p[0] = (uint8_t)(value >> 8);
+  p[1] = (uint8_t)(value & 0xFF);
+}
+
+/*
+ * Advance *pos past one on-wire name. A compression pointer ends the name;
+ * with allow_ptr false it is rejected, so the bytes can be copied verbatim.
+ */
+static bool skip_name(const uint8_t *pkt, size_t len, size_t *pos, bool allow_ptr)
+{
+  size_t p = *pos;
+  for (;;)
+  {
+    uint8_t lab;
+    if (p >= len)
+      return false;
+    lab = pkt[p];
+    if (lab == 0)
+    {
+      *pos = p + 1;
+      return true;
+    }
+    if ((lab & 0xC0) == 0xC0)
+    {
+      if (!allow_ptr || p + 2 > len)
+        return false;
+      *pos = p + 2;
+      return true;
+    }
+    if ((lab & 0xC0) != 0 || p + 1u + lab > len)
+      return false;
+    p += 1u + lab;
+  }
+}
+
+/* End offset of the first question, or 0 if it is absent, compressed or cut off. */
+static size_t first_question_end(const uint8_t *pkt, size_t len)
+{
+  size_t pos = DNS_HEADER_SIZE;
+  if (len < DNS_HEADER_SIZE || get_u16(pkt + 4) == 0)
+    return 0;
+  if (!skip_name(pkt, len, &pos, false) || pos + 4 > len)
+    return 0;
+  return pos + 4;
+}
+
+/* Copy header and first question into out, keeping flags in keep_mask. */
+static size_t build_header_question(const uint8_t *pkt, size_t len, uint16_t keep_mask,
+                                    uint16_t set_flags, uint8_t *out, size_t cap)
+{
+  size_t qend;
+  size_t n;
+  uint16_t flags;
+
+  if (!pkt || !out || len < DNS_HEADER_SIZE)
+    return 0;
+  qend = first_question_end(pkt, len);
+  n = qend ? qend : DNS_HEADER_SIZE;
+  if (n > cap)
+    return 0;
+  memcpy(out, pkt, n);
+  flags = (uint16_t)((get_u16(pkt + 2) & keep_mask) | set_flags);
+  put_u16(out + 2, flags);
+  put_u16(out + 4, qend ? 1 : 0);
+  put_u16(out + 6, 0);
+  put_u16(out + 8, 0);
+  put_u16(out + 10, 0);
+  return n;
+}
+
+size_t dns_build_error(const uint8_t *query, size_t qlen, uint8_t rcode, uint8_t *out, size_t cap)
+{
+  return build_header_question(query, qlen, OPCODE_MASK | RD_MASK,
+                               (uint16_t)(QR_MASK | RA_MASK | (rcode & RCODE_MASK)), out, cap);
+}
+
+size_t dns_build_truncated(const uint8_t *resp, size_t rlen, uint8_t *out, size_t cap)
+{
+  return build_header_question(resp, rlen, (uint16_t)~TC_MASK, TC_MASK, out, cap);
+}
+
+size_t dns_udp_limit(const uint8_t *query, size_t qlen, size_t max)
+{
+  size_t pos = DNS_HEADER_SIZE;
+  uint32_t skip;
+  uint32_t ar;
+  uint32_t i;
+
+  if (!query || qlen < DNS_HEADER_SIZE || max < DNS_UDP_MIN_PAYLOAD)
+    return DNS_UDP_MIN_PAYLOAD;
+
+  for (i = get_u16(query + 4); i > 0; i--)
+  {
+    if (!skip_name(query, qlen, &pos, true) || pos + 4 > qlen)
+      return DNS_UDP_MIN_PAYLOAD;
+    pos += 4;
+  }
+
+  /* Answer and authority records, then the additional section holding OPT. */
+  skip = (uint32_t)get_u16(query + 6) + get_u16(query + 8);
+  ar = get_u16(query + 10);
+  for (i = 0; i < skip + ar; i++)
+  {
+    uint16_t type;
+    uint16_t size;
+    if (!skip_name(query, qlen, &pos, true) || pos + 10 > qlen)
+      return DNS_UDP_MIN_PAYLOAD;
+    type = get_u16(query + pos);
+    size = get_u16(query + pos + 2);
+    if (i >= skip && type == DNS_OPT_RECORD_TYPE)
+    {
+      if (size <= DNS_UDP_MIN_PAYLOAD)
+        return DNS_UDP_MIN_PAYLOAD;
+      return size > max ? max : size;
+    }
+    pos += 10u + get_u16(query + pos + 8);
+  }
+  return DNS_UDP_MIN_PAYLOAD;
+}

@@ -541,6 +541,7 @@ flowchart LR
 Before lookup, hostnames are normalized to lowercase ASCII and one trailing dot
 is removed. Lookup results are filtered before connection:
 
+- lookups ask for IPv4 only (`AF_INET`), because IPv6 is not proxied;
 - IPv4-mapped IPv6 results are normalized to IPv4 for policy checks;
 - loopback, unspecified, link-local, multicast, and listener self-connect
   results are removed;
@@ -570,23 +571,30 @@ DNS has a separate architecture from the non-blocking SNI loop.
 flowchart TD
     U[UDP DNS client] --> L[local UDP socket]
     L --> R[DNS receive loop]
-    R --> Q{FIFO has room?}
-    Q -- no --> Drop[drop/log queue-full request]
+    R --> V{query? header, no QR,\nfits 510 bytes}
+    V -- no --> Ignore[ignore]
+    V -- yes --> Q{FIFO has room?}
+    Q -- no --> SF[SERVFAIL]
     Q -- yes --> F[bounded FIFO\n128 messages]
     F --> W[DNS worker pool\n32 threads, blocking pop]
-    W --> C{DNS name matches whitelist?}
+    W --> H{opcode QUERY,\none question?}
+    H -- no --> E[NOTIMP / FORMERR]
+    H -- yes --> C{DNS name matches whitelist?}
     C -- yes, A --> SA[synthetic A = SNIP]
-    C -- yes, AAAA --> SAAAA[synthetic AAAA = ::]
-    C -- unsupported local type --> NI[Not Implemented response]
+    C -- yes, other type --> ND[NODATA]
     C -- no --> T[upstream TCP query\non the worker's kept connection]
     T --> D[direct TCP]
     T --> X[SOCKS5 TCP]
     D --> R2[read length-prefixed response]
     X --> R2
-    R2 --> Reply[send UDP response]
+    R2 -- failed --> SF
+    R2 -- fits client UDP size --> Reply[send UDP response]
+    R2 -- too large --> TC[header + question, TC set]
     SA --> Reply
-    SAAAA --> Reply
-    NI --> Reply
+    ND --> Reply
+    E --> Reply
+    SF --> Reply
+    TC --> Reply
 ```
 
 ### DNS receive and worker flow
@@ -596,22 +604,31 @@ flowchart TD
    starts the receive thread. Any failure undoes what was started and returns
    `NULL`.
 2. The receive thread polls the UDP socket and a wake pipe. Each datagram is
-   read into a bounded `dnsMessage_t` and pushed into the FIFO; a full FIFO
-   drops the datagram.
+   read into a bounded `dnsMessage_t` and pushed into the FIFO. Datagrams
+   shorter than a header, larger than 510 bytes, or with QR set are ignored.
+   A full FIFO answers SERVFAIL from the receive thread.
 3. Workers block on the FIFO's condition variable (`fifo_pop_wait`); there is
    no polling or sleep. Each worker handles one query at a time.
-4. The worker decodes the DNS message and either creates a local synthetic
-   response or forwards the original query upstream.
+4. A non-QUERY opcode gets NOTIMP and a QDCOUNT other than 1 gets FORMERR.
+   Otherwise the worker decodes the message. A whitelisted name is answered
+   locally: A gets `SNIP` with a 300-second TTL, every other type (AAAA,
+   HTTPS, SVCB, ...) gets NODATA, because IPv6 is not proxied and a real
+   address would bypass the proxy. Anything else, including a message the
+   decoder rejects, is forwarded upstream unchanged.
 5. Upstream DNS uses TCP framing: a two-byte network-order length followed by
    the DNS payload. Each write and read has the configured DNS timeout as a
-   monotonic deadline. Responses larger than the 512-byte internal message
-   limit are rejected.
+   monotonic deadline for the whole exchange. Up to 1232 bytes of the response
+   are kept and the rest is read and discarded, so the connection stays in
+   step. A response larger than the client's UDP size (512, or its EDNS0 size
+   clamped to 1232) is sent as header and question with TC set. There is no
+   local TCP listener for the client's retry yet.
 6. A worker keeps its upstream connection open for the next query. Before
    reuse it drops the connection if the server already closed it (readable
    with no request outstanding). If a reused connection still fails, the query
    is retried once on a fresh connection; a failure on a fresh connection is
    final, so a broken upstream is not hammered.
-7. The worker sends the response back over UDP and updates statistics.
+7. The worker sends the response back over UDP and updates statistics. A
+   failed upstream exchange is answered with SERVFAIL instead of silence.
 
 `dnsserver_stop` writes to the wake pipe and joins the receive thread, then
 closes the FIFO: workers drain what is already queued, close their upstream

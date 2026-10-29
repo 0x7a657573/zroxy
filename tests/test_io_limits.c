@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 
 #include <zroxy/dnsproxy.h>
+#include <zroxy/dns.h>
 #include <zroxy/log.h>
 #include <zroxy/net_io.h>
 #include <zroxy/sniproxy.h>
@@ -354,7 +355,9 @@ static void test_recvfrom_failure_and_eintr(void)
         failures++;
         goto done;
     }
+    /* Any 12-byte datagram without QR passes the receive filter. */
     memset(query, 0xAB, sizeof(query));
+    query[2] = 0x01;
     if (sendto(sender, query, sizeof(query), 0, (struct sockaddr *)&addr, sizeof(addr)) != (ssize_t)sizeof(query))
     {
         fprintf(stderr, "FAIL: send one datagram: %s\n", strerror(errno));
@@ -367,6 +370,31 @@ static void test_recvfrom_failure_and_eintr(void)
     expect_true(fifo_pop(&fifo, &got), "read the enqueued datagram");
     expect_int(got.len, (int)sizeof(query), "recvfrom length is the datagram size");
     expect_true(memcmp(got.message + 2, query, sizeof(query)) == 0, "recvfrom payload is unchanged");
+
+    {
+        /* A response (QR set), a short datagram and an oversized one are not queued. */
+        uint8_t big[DNS_MSG_SIZE + 64];
+        const struct { const uint8_t *buf; size_t len; const char *name; } rejected[] = {
+            { query, sizeof(query), "response datagram is not queued" },
+            { query, DNS_HEADER_SIZE - 1, "short datagram is not queued" },
+            { big, sizeof(big), "oversized datagram is not queued" },
+        };
+        size_t i;
+        memset(big, 0, sizeof(big));
+        query[2] = 0x81;
+        for (i = 0; i < sizeof(rejected) / sizeof(rejected[0]); i++)
+        {
+            if (sendto(sender, rejected[i].buf, rejected[i].len, 0, (struct sockaddr *)&addr, sizeof(addr)) !=
+                (ssize_t)rejected[i].len)
+            {
+                fprintf(stderr, "FAIL: send rejected datagram: %s\n", strerror(errno));
+                failures++;
+                continue;
+            }
+            expect_true(localdns_pull(&dns), rejected[i].name);
+            expect_int(fifo_count(&fifo), 0, rejected[i].name);
+        }
+    }
     close(sender);
     sender = -1;
     close(udp);

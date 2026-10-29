@@ -13,6 +13,11 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 - A fixed pool of 32 worker threads replaces one detached thread per query. Workers block on the queue's condition variable instead of polling it every 10 ms.
 - Each worker keeps its upstream TCP connection (direct or SOCKS5) open between queries. A connection closed by the server is detected before reuse; a failure on a reused connection is retried once on a fresh one.
 - Upstream reads and writes use monotonic per-call deadlines instead of `SO_RCVTIMEO`/`SO_SNDTIMEO`.
+- A failed upstream exchange or a full queue is answered with SERVFAIL instead of leaving the client to time out.
+- A non-QUERY opcode is answered with NOTIMP and a QDCOUNT other than 1 with FORMERR. Datagrams shorter than a header, larger than 510 bytes, or with QR set are ignored.
+- Upstream responses larger than 510 bytes are no longer rejected. A response that exceeds the client's UDP size (512, or its EDNS0 size clamped to 1232) is sent with TC set and only the question.
+- Whitelisted names: AAAA, HTTPS, SVCB and other non-A types now get NODATA. Before, AAAA got `::` (which Linux dials as loopback) and other types got NOTIMP. Synthetic A records use a 300-second TTL instead of one hour, and set RA.
+- SNI upstream lookups and `net_connect` ask for IPv4 only. IPv6 is not supported, and this avoids waiting on an AAAA lookup.
 
 ### SNI data plane
 
