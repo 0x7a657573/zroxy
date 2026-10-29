@@ -72,12 +72,14 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 		"\"QueueStaleDropped\" : %" PRIu64 ",\n"
 		"\"QueueFull\" : %" PRIu64 ",\n"
 		"\"AclDropped\" : %" PRIu64 ",\n"
+		"\"RateDropped\" : %" PRIu64 ",\n"
 		"\"TcpRefused\" : %" PRIu64 ",\n"
 		"\"TcpActive\" : %d",
 		c.hits, c.misses, c.shared, c.entries, c.evicted,
 		__atomic_load_n(&dns->stale_dropped, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->fifo_full, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->acl_dropped, __ATOMIC_RELAXED),
+		__atomic_load_n(&dns->rate_dropped, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->tcp_refused, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->tcp_active, __ATOMIC_RELAXED));
 }
@@ -213,6 +215,7 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 			log_info("DNS ACL default: allow 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and 100.64.0.0/10");
 		}
 	}
+	ptr->rate.qps = conf->rate_qps;
 
 	if (conf->cache_entries > 0)
 		ptr->cache = dnscache_create(conf->cache_entries);
@@ -362,6 +365,11 @@ bool localdns_pull(dnsserver_t *dns)
 		!dns_acl_allows(dns->acl, dns->acl_count, ntohl(msg.client.sin_addr.s_addr)))
 	{
 		(void)__atomic_fetch_add(&dns->acl_dropped, 1u, __ATOMIC_RELAXED);
+		return true;
+	}
+	if (!dns_rate_take(&dns->rate, ntohl(msg.client.sin_addr.s_addr), net_mono_ms()))
+	{
+		(void)__atomic_fetch_add(&dns->rate_dropped, 1u, __ATOMIC_RELAXED);
 		return true;
 	}
 

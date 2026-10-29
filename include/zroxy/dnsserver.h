@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <zroxy/filter.h>
 #include <zroxy/dnsacl.h>
+#include <zroxy/dnsrate.h>
 
 
 typedef struct
@@ -38,6 +39,7 @@ typedef struct
 	dns_cidr_t	  *acl;
 	size_t	  acl_count;
 	bool		  acl_set;
+	uint32_t	  rate_qps;
 }dnshost_t;
 
 struct dnsserver;

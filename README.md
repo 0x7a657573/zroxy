@@ -180,6 +180,7 @@ use the key names in the last column.
 | `-e`, `--dcache` | `0..65536` | DNS answer cache entries; `0` disables cache; counters are in the monitor | `DCACHE` |
 | `-r`, `--dttl` | `1..86400` | TTL of synthetic DNS answers and negative SOA records | `DTTL` |
 | `-A`, `--dacl` | `CIDR[,CIDR...]` | IPv4 networks allowed to query the local DNS listener | `DACL` |
+| `-R`, `--drate` | `0..100000` | Per-source DNS queries per second; `0` disables | `DRATE` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
 `LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
@@ -337,6 +338,12 @@ address is not in one of the listed IPv4 networks. With no `DACL`, a loopback
 listener has no additional restriction; a non-loopback listener allows only
 loopback, RFC 1918, and shared-address-space networks. Use `DACL = 0.0.0.0/0`
 to explicitly allow every IPv4 source.
+
+`DRATE` applies a per-source-IP token bucket to UDP queries only. Its burst is
+twice the configured QPS and its fixed 1024-slot table intentionally shares
+capacity when source hashes collide. TCP remains governed by the eight-connection
+and 32-query limits. Rate-limited UDP queries are silent and counted as
+`RateDropped` in the monitor.
 
 Repeated queue, TCP-capacity, and upstream-failure logs are limited to one line
 per second; a later line reports how many messages were suppressed.

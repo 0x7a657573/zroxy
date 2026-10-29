@@ -62,6 +62,12 @@ source. An unset ACL is unrestricted on loopback binds and otherwise defaults
 to loopback, RFC 1918, and shared-address-space ranges; an explicit `/0` is
 the deliberate open policy.
 
+`DRATE` is a receive-thread-only token bucket keyed by source IPv4 address.
+It has 1024 fixed slots, a two-burst capacity, and millitoken arithmetic with
+saturating refill for large monotonic timestamps; colliding addresses share a
+slot. TCP is not rate-limited because its connection and pipelined-query caps
+already bound work. Over-limit UDP datagrams are dropped before FIFO admission.
+
 The DNS service exposes cache, queue, and TCP-capacity counters through a
 generic statistics extra hook. The monitor takes the statistics object's lock,
 copies the base counters, and invokes that hook before closing the JSON object;
@@ -963,7 +969,8 @@ The monitor exposes one JSON document containing:
 
 The `DNS_Server` object also reports cache hits, misses, shared in-flight
 queries, current entries, evictions, stale queue drops, queue-full events, ACL
-drops, refused TCP connections, and active TCP connections.
+drops, rate-limited UDP queries, refused TCP connections, and active TCP
+connections.
 
 The statistics objects are registered for the SNI service and, when configured,
 the DNS service. Monitor requests take snapshots; they do not directly inspect

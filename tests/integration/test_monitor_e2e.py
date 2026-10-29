@@ -29,6 +29,7 @@ DNS_COUNTERS = COUNTERS + (
     "QueueStaleDropped",
     "QueueFull",
     "AclDropped",
+    "RateDropped",
     "TcpRefused",
     "TcpActive",
 )

@@ -301,6 +301,46 @@ def test_dns_acl():
         allowed.check_alive()
 
 
+def test_dns_rate_limit():
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = lab.zroxy(
+            [
+                "-l", "0",
+                "-d", "127.0.0.1:%s" % ldns,
+                "-u", "127.0.0.1:%s" % upstream.port,
+                "-R", "5",
+            ],
+            udp_ports=[ldns],
+        )
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        replies = []
+        try:
+            sock.bind(("127.0.0.1", 0))
+            sock.settimeout(0.2)
+            queries = [zroxy_lab.build_dns_query("rate%d.test" % i, qid=0x5000 + i)
+                       for i in range(50)]
+            for query in queries:
+                sock.sendto(query, ("127.0.0.1", ldns))
+            deadline = time.monotonic() + 0.7
+            while time.monotonic() < deadline:
+                try:
+                    reply, _addr = sock.recvfrom(4096)
+                except socket.timeout:
+                    break
+                replies.append(reply)
+        finally:
+            sock.close()
+        if len(replies) > 12:
+            raise AssertionError("rate limiter allowed %d rapid replies" % len(replies))
+        proc.check_alive()
+        time.sleep(1.05)
+        recovery = zroxy_lab.build_dns_query("after-rate.test", qid=0x5050)
+        _expect_exact(ldns, recovery, 3.0)
+        proc.check_alive()
+
+
 def test_dns_upstream_reuse():
     # Each DNS worker keeps its upstream connection, so once every worker has
     # connected, further queries must not open new connections.
@@ -447,6 +487,7 @@ def main():
         test_dns_whitelist_synthetic,
         test_dns_whitelist_reload,
         test_dns_acl,
+        test_dns_rate_limit,
         test_dns_upstream_reuse,
         test_dns_cache_and_coalescing,
         test_dns_cache_disabled,

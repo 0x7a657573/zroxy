@@ -115,8 +115,10 @@ typedef struct dnsserver
 	uint64_t fifo_full;
 	uint64_t tcp_refused;
 	uint64_t acl_dropped;
+	uint64_t rate_dropped;
 	dns_cidr_t *acl;
 	size_t acl_count;
+	dns_rate_t rate;
 	statistics_t  *Stat;
 }dnsserver_t;
 
