@@ -15,6 +15,7 @@
 #include <zroxy/dns.h>
 #include <zroxy/filter.h>
 #include <zroxy/log.h>
+#include <zroxy/net_io.h>
 
 typedef struct
 {
@@ -462,7 +463,8 @@ static void test_dnsproxy_large_response(void)
 }
 
 /* Answer one query locally and return the UDP reply length, or -1. */
-static ssize_t local_exchange(filter_t *white, const uint8_t *query, size_t qlen, uint8_t *reply)
+static ssize_t local_exchange_at(filter_t *white, const uint8_t *query, size_t qlen, uint8_t *reply,
+                                 int64_t received_ms)
 {
     int local_fd = -1;
     int client_fd = -1;
@@ -487,6 +489,7 @@ static ssize_t local_exchange(filter_t *white, const uint8_t *query, size_t qlen
     dns.upstream.port = 9;
     dns.timeout = 1;
     msg.len = (uint16_t)qlen;
+    msg.received_ms = received_ms;
     memcpy(msg.message + 2, query, qlen);
 
     localdns_handle_request(&dns, &msg, &upstream_fd);
@@ -497,6 +500,19 @@ static ssize_t local_exchange(filter_t *white, const uint8_t *query, size_t qlen
     close(client_fd);
     close(local_fd);
     return n;
+}
+
+static ssize_t local_exchange(filter_t *white, const uint8_t *query, size_t qlen, uint8_t *reply)
+{
+    return local_exchange_at(white, query, qlen, reply, 0);
+}
+
+static void test_dnsproxy_stale_query_dropped(void)
+{
+    uint8_t reply[REPLY_MAX];
+    ssize_t n = local_exchange_at(NULL, k_dns_query_example_com, sizeof(k_dns_query_example_com), reply,
+                                  net_mono_ms() - DNS_QUEUE_MAX_AGE_MS - 1000);
+    expect_true(n < 0, "a query older than the queue limit is dropped without a reply");
 }
 
 static void test_dnsproxy_mismatched_reply(void)
@@ -602,6 +618,7 @@ int main(void)
     test_dnsproxy_close_mid_prefix_servfail();
     test_dnsproxy_large_response();
     test_dnsproxy_local_answers();
+    test_dnsproxy_stale_query_dropped();
     test_dnsproxy_mismatched_reply();
     return failures == 0 ? 0 : 1;
 }

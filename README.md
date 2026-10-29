@@ -303,7 +303,8 @@ resolves upstream names to IPv4 only.
 Forwarded answers are cached in memory (up to 2048 entries) for their TTL,
 capped at one hour, or five minutes for NXDOMAIN and NODATA. Identical queries
 that arrive while one is being fetched wait for that fetch instead of going
-upstream again.
+upstream again. A query that waited more than three seconds in the queue is
+dropped.
 
 A failed upstream exchange or a full queue is answered with SERVFAIL. An
 upstream reply whose id or question does not match the query is discarded. A

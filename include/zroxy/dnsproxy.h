@@ -24,6 +24,7 @@ typedef struct
 	uint16_t len;
 	char message[DNS_MSG_SIZE];
 	struct sockaddr_in client;
+	int64_t received_ms;	/* monotonic receive time; 0 = unknown */
 }dnsMessage_t;
 
 
@@ -35,6 +36,12 @@ typedef struct
  * keeps its own upstream TCP connection open between queries.
  */
 #define DNS_WORKER_COUNT	32
+
+/*
+ * A query that waited in the queue longer than this is dropped before it is
+ * forwarded: the client has given up or already retried.
+ */
+#define DNS_QUEUE_MAX_AGE_MS	3000
 
 typedef struct dnsserver
 {

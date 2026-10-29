@@ -223,6 +223,7 @@ bool localdns_pull(dnsserver_t *dns)
 		return true;
 	}
 	msg.len = (uint16_t)nread;
+	msg.received_ms = net_mono_ms();
 
 	// the tcp query requires the length to precede the packet, so we put the length there
 	msg.message[0] = (char)((msg.len>>8) & 0xFF);
@@ -481,6 +482,13 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 		}
 	}
 	dns_free_msg(&dns_msg);
+
+	if (!handled_local && msg->received_ms > 0 && start_time - msg->received_ms > DNS_QUEUE_MAX_AGE_MS)
+	{
+		log_trace("%s dropped after %lldms in queue",domain_resolve,
+				(long long)(start_time - msg->received_ms));
+		handled_local = true;
+	}
 
 	if (!handled_local)
 	{

@@ -582,7 +582,9 @@ flowchart TD
     H -- yes --> C{DNS name matches whitelist?}
     C -- yes, A --> SA[synthetic A = SNIP]
     C -- yes, other type --> ND[NODATA]
-    C -- no --> K{cache}
+    C -- no --> AGE{queued > 3 s?}
+    AGE -- yes --> Ignore
+    AGE -- no --> K{cache}
     K -- fresh entry --> Reply
     K -- same query in flight --> WAIT[wait for that worker's reply]
     WAIT -- reply --> Reply
@@ -620,8 +622,10 @@ flowchart TD
    HTTPS, SVCB, ...) gets NODATA, because IPv6 is not proxied and a real
    address would bypass the proxy. Anything else, including a message the
    decoder rejects, is forwarded upstream unchanged.
-5. A forwarded query first consults the answer cache
-   (`src/dns/dnscache.c`); see below.
+5. A forwarded query that waited in the FIFO longer than
+   `DNS_QUEUE_MAX_AGE_MS` (3 s) is dropped: its client has given up or
+   retried. Otherwise the answer cache (`src/dns/dnscache.c`) is consulted;
+   see below.
 6. Upstream DNS uses TCP framing: a two-byte network-order length followed by
    the DNS payload. Each write and read has the configured DNS timeout as a
    monotonic deadline for the whole exchange. Up to 1232 bytes of the response
