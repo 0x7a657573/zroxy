@@ -14,6 +14,7 @@
 #include <zroxy/monitor.h>
 #include <sys/socket.h>
 #include <zroxy/filter.h>
+#include <zroxy/dnsacl.h>
 
 
 typedef struct
@@ -34,6 +35,9 @@ typedef struct
 	bool		  listen_set;
 	uint32_t	  cache_entries;
 	uint32_t	  local_ttl;
+	dns_cidr_t	  *acl;
+	size_t	  acl_count;
+	bool		  acl_set;
 }dnshost_t;
 
 struct dnsserver;

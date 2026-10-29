@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 
 #include <zroxy/dnsproxy.h>
+#include <zroxy/dnsacl.h>
 #include <zroxy/dns.h>
 #include <zroxy/log.h>
 #include <zroxy/net_io.h>
@@ -43,8 +44,8 @@ static void expect_int(int actual, int expected, const char *name)
 static void on_usr1(int sig)
 {
     (void)sig;
-    if (in_call)
-        hit_during_call = 1;
+    if (__atomic_load_n(&in_call, __ATOMIC_SEQ_CST))
+        __atomic_store_n(&hit_during_call, 1, __ATOMIC_SEQ_CST);
 }
 
 static const char *test_phase = "startup";
@@ -115,12 +116,12 @@ static void *signal_during_call(void *arg)
     int i;
     int spins = 0;
     (void)arg;
-    while (!in_call && spins < 2000)
+    while (!__atomic_load_n(&in_call, __ATOMIC_SEQ_CST) && spins < 2000)
     {
         usleep(1000);
         spins++;
     }
-    if (!in_call)
+    if (!__atomic_load_n(&in_call, __ATOMIC_SEQ_CST))
         return NULL;
     usleep(30000);
     for (i = 0; i < 40; i++)
@@ -181,12 +182,12 @@ static void *eintr_writer(void *arg)
     size_t off = 0;
     int spins = 0;
 
-    while (!hit_during_call && spins < 3000)
+    while (!__atomic_load_n(&hit_during_call, __ATOMIC_SEQ_CST) && spins < 3000)
     {
         usleep(1000);
         spins++;
     }
-    if (!hit_during_call)
+    if (!__atomic_load_n(&hit_during_call, __ATOMIC_SEQ_CST))
     {
         job->rc = -1;
         return NULL;
@@ -235,7 +236,7 @@ static void test_read_retries_eintr_real(void)
     job.buf = payload;
     job.len = sizeof(payload);
     job.rc = -1;
-    hit_during_call = 0;
+    __atomic_store_n(&hit_during_call, 0, __ATOMIC_SEQ_CST);
     if (pthread_create(&killer, NULL, signal_during_call, NULL) != 0)
     {
         fprintf(stderr, "FAIL: start read signal thread: %s\n", strerror(errno));
@@ -251,16 +252,17 @@ static void test_read_retries_eintr_real(void)
     else if (have_killer)
     {
         have_writer = true;
-        in_call = 1;
+        __atomic_store_n(&in_call, 1, __ATOMIC_SEQ_CST);
         ok = net_read_exact(sv[0], got, sizeof(got));
-        in_call = 0;
+        __atomic_store_n(&in_call, 0, __ATOMIC_SEQ_CST);
     }
     if (have_killer)
         pthread_join(killer, NULL);
     if (have_writer)
         pthread_join(writer, NULL);
     expect_true(ok, "net_read_exact completes after EINTR");
-    expect_true(hit_during_call != 0, "SIGUSR1 arrived during net_read_exact");
+    expect_true(__atomic_load_n(&hit_during_call, __ATOMIC_SEQ_CST) != 0,
+                "SIGUSR1 arrived during net_read_exact");
     expect_int(job.rc, 0, "EINTR writer completed");
     expect_true(memcmp(got, payload, sizeof(payload)) == 0, "EINTR read bytes match");
     close(sv[0]);
@@ -372,6 +374,23 @@ static void test_recvfrom_failure_and_eintr(void)
     expect_true(memcmp(got.message + 2, query, sizeof(query)) == 0, "recvfrom payload is unchanged");
 
     {
+        dns_cidr_t acl;
+        size_t acl_count = 0;
+        expect_true(dns_acl_parse("10.0.0.0/8", &acl, 1, &acl_count),
+                    "parse ACL for recvfrom test");
+        dns.acl = &acl;
+        dns.acl_count = acl_count;
+        query[2] = 0x01;
+        expect_true(sendto(sender, query, sizeof(query), 0, (struct sockaddr *)&addr, sizeof(addr)) ==
+                    (ssize_t)sizeof(query), "send ACL-denied datagram");
+        expect_true(localdns_pull(&dns), "ACL-denied recvfrom returns");
+        expect_int(fifo_count(&fifo), 0, "ACL-denied datagram is not queued");
+        expect_true(dns.acl_dropped == 1, "ACL drop counter increments");
+        dns.acl = NULL;
+        dns.acl_count = 0;
+    }
+
+    {
         /* A response (QR set), a short datagram and an oversized one are not queued. */
         uint8_t big[DNS_MSG_SIZE + 64];
         const struct { const uint8_t *buf; size_t len; const char *name; } rejected[] = {
@@ -414,7 +433,7 @@ static void test_recvfrom_failure_and_eintr(void)
         goto done;
     }
     dns.local_sock = udp;
-    hit_during_call = 0;
+    __atomic_store_n(&hit_during_call, 0, __ATOMIC_SEQ_CST);
     if (pthread_create(&killer, NULL, signal_during_call, NULL) != 0)
     {
         fprintf(stderr, "FAIL: start recvfrom signal thread: %s\n", strerror(errno));
@@ -422,17 +441,18 @@ static void test_recvfrom_failure_and_eintr(void)
         goto done;
     }
     have_killer = true;
-    in_call = 1;
+    __atomic_store_n(&in_call, 1, __ATOMIC_SEQ_CST);
     ok = localdns_pull(&dns);
-    in_call = 0;
+    __atomic_store_n(&in_call, 0, __ATOMIC_SEQ_CST);
     pthread_join(killer, NULL);
     have_killer = false;
     expect_true(ok, "recvfrom EINTR returns without failing the listener");
-    expect_true(hit_during_call != 0, "SIGUSR1 arrived during recvfrom");
+    expect_true(__atomic_load_n(&hit_during_call, __ATOMIC_SEQ_CST) != 0,
+                "SIGUSR1 arrived during recvfrom");
     expect_int(fifo_count(&fifo), 0, "interrupted recvfrom does not enqueue");
 
 done:
-    in_call = 0;
+    __atomic_store_n(&in_call, 0, __ATOMIC_SEQ_CST);
     if (have_killer)
         pthread_join(killer, NULL);
     if (sender >= 0)

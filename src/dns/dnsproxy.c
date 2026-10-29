@@ -71,11 +71,13 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 		"\"CacheEvictions\" : %" PRIu64 ",\n"
 		"\"QueueStaleDropped\" : %" PRIu64 ",\n"
 		"\"QueueFull\" : %" PRIu64 ",\n"
+		"\"AclDropped\" : %" PRIu64 ",\n"
 		"\"TcpRefused\" : %" PRIu64 ",\n"
 		"\"TcpActive\" : %d",
 		c.hits, c.misses, c.shared, c.entries, c.evicted,
 		__atomic_load_n(&dns->stale_dropped, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->fifo_full, __ATOMIC_RELAXED),
+		__atomic_load_n(&dns->acl_dropped, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->tcp_refused, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->tcp_active, __ATOMIC_RELAXED));
 }
@@ -176,6 +178,41 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	memcpy(ptr->listen_addr, conf->Local.ip, strlen(conf->Local.ip) + 1);
 	snprintf(ptr->listen_port, sizeof(ptr->listen_port), "%u", (unsigned)conf->Local.port);
 	ptr->socks = conf->Socks;
+	if (conf->acl_set)
+	{
+		ptr->acl = malloc(conf->acl_count * sizeof(*ptr->acl));
+		if (!ptr->acl)
+		{
+			localdns_free(ptr);
+			return NULL;
+		}
+		memcpy(ptr->acl, conf->acl, conf->acl_count * sizeof(*ptr->acl));
+		ptr->acl_count = conf->acl_count;
+	}
+	else
+	{
+		struct in_addr listen_ip;
+		if (inet_pton(AF_INET, ptr->listen_addr, &listen_ip) != 1 ||
+			(ntohl(listen_ip.s_addr) & 0xff000000u) != 0x7f000000u)
+		{
+			static const dns_cidr_t private_acl[] = {
+				{ 0x7f000000u, 0xff000000u },
+				{ 0x0a000000u, 0xff000000u },
+				{ 0xac100000u, 0xfff00000u },
+				{ 0xc0a80000u, 0xffff0000u },
+				{ 0x64400000u, 0xffc00000u },
+			};
+			ptr->acl = malloc(sizeof(private_acl));
+			if (!ptr->acl)
+			{
+				localdns_free(ptr);
+				return NULL;
+			}
+			memcpy(ptr->acl, private_acl, sizeof(private_acl));
+			ptr->acl_count = sizeof(private_acl) / sizeof(private_acl[0]);
+			log_info("DNS ACL default: allow 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and 100.64.0.0/10");
+		}
+	}
 
 	if (conf->cache_entries > 0)
 		ptr->cache = dnscache_create(conf->cache_entries);
@@ -252,6 +289,7 @@ void localdns_free(dnsserver_t *dns)
 		free(dns->fifo);
 		dns->fifo = NULL;
 	}
+	free(dns->acl);
 	dnscache_free(dns->cache);
 	free(dns);
 }
@@ -317,6 +355,13 @@ bool localdns_pull(dnsserver_t *dns)
 	if (nread < 0)
 	{
 		log_error("recvfrom failed: %s\n", strerror(errno));
+		return true;
+	}
+
+	if (dns->acl_count > 0 &&
+		!dns_acl_allows(dns->acl, dns->acl_count, ntohl(msg.client.sin_addr.s_addr)))
+	{
+		(void)__atomic_fetch_add(&dns->acl_dropped, 1u, __ATOMIC_RELAXED);
 		return true;
 	}
 
@@ -770,6 +815,8 @@ bool localdns_init_tcp(dnsserver_t *dns)
 void localdns_accept(dnsserver_t *dns)
 {
 	dnsMessage_t job;
+	struct sockaddr_in peer;
+	socklen_t peer_len = sizeof(peer);
 	int on = 1;
 	int fd;
 
@@ -778,6 +825,14 @@ void localdns_accept(dnsserver_t *dns)
 	} while (fd < 0 && errno == EINTR);
 	if (fd < 0)
 		return;
+	if (getpeername(fd, (struct sockaddr *)&peer, &peer_len) != 0 ||
+		(dns->acl_count > 0 &&
+		 !dns_acl_allows(dns->acl, dns->acl_count, ntohl(peer.sin_addr.s_addr))))
+	{
+		(void)__atomic_fetch_add(&dns->acl_dropped, 1u, __ATOMIC_RELAXED);
+		close(fd);
+		return;
+	}
 	if (__atomic_add_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL) > DNS_TCP_MAX_CONNS)
 	{
 		(void)__atomic_fetch_add(&dns->tcp_refused, 1u, __ATOMIC_RELAXED);

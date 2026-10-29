@@ -55,6 +55,13 @@ the SOA RDLENGTH after writing its variable-length names. If the bounded UDP
 response cannot fit the SOA, the service retries as valid NODATA without an
 authority record rather than returning SERVFAIL.
 
+The optional DNS ACL is evaluated in the receive thread immediately after
+`recvfrom` and on accepted TCP peers before queue admission. It uses host-order
+IPv4 network/mask pairs and does not send a refusal response to a denied UDP
+source. An unset ACL is unrestricted on loopback binds and otherwise defaults
+to loopback, RFC 1918, and shared-address-space ranges; an explicit `/0` is
+the deliberate open policy.
+
 The DNS service exposes cache, queue, and TCP-capacity counters through a
 generic statistics extra hook. The monitor takes the statistics object's lock,
 copies the base counters, and invokes that hook before closing the JSON object;
@@ -955,8 +962,8 @@ The monitor exposes one JSON document containing:
 - total received/transmitted byte counts.
 
 The `DNS_Server` object also reports cache hits, misses, shared in-flight
-queries, current entries, evictions, stale queue drops, queue-full events,
-refused TCP connections, and active TCP connections.
+queries, current entries, evictions, stale queue drops, queue-full events, ACL
+drops, refused TCP connections, and active TCP connections.
 
 The statistics objects are registered for the SNI service and, when configured,
 the DNS service. Monitor requests take snapshots; they do not directly inspect
