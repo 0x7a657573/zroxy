@@ -33,6 +33,7 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
   its existing connection/query bounds and is not rate-limited.
 - DNS queue, ACL, rate, and TCP-refusal monitor counters use 32-bit atomics and
   may wrap after reaching their maximum value.
+- The local DNS TCP listener no longer enables `SO_REUSEPORT`.
 - Repeated DNS queue, TCP-capacity, and `NO DATA` error logs are rate-limited
   to one line per second, with suppressed-message counts on the next line.
 - DNS option parsing now uses one configuration object with stable defaults;
