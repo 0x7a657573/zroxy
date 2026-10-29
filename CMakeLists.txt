@@ -62,7 +62,7 @@ zroxy_add_module(zroxy_monitor
     DEPS zroxy_stats zroxy_net)
 
 zroxy_add_module(zroxy_dns
-    SOURCES src/dns/dns.c src/dns/dnsproxy.c src/dns/dnsserver.c
+    SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsproxy.c src/dns/dnsserver.c
     DEPS zroxy_net zroxy_filter zroxy_stats zroxy_monitor zroxy_fifo)
 
 # The SNI engine's own headers (event loop, resolver) stay private to
@@ -125,6 +125,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(net_host_extract tests/test_net_host_extract.c zroxy_net)
     zroxy_add_unit_test(filter_whitelist tests/test_filter_whitelist.c zroxy_filter)
     zroxy_add_unit_test(dns_codec        tests/test_dns_codec.c        zroxy_dns)
+    zroxy_add_unit_test(dns_cache        tests/test_dns_cache.c        zroxy_dns)
     zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args)
     zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net)
     zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)

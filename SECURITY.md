@@ -9,6 +9,7 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 - Listener sockets, DNS datagrams, SOCKS replies, TLS ClientHello bytes, HTTP monitor bytes, the config file, and the whitelist file are untrusted input.
 - The monitor binds `127.0.0.1` unless the operator sets an address. Without `MONITORTOKEN`, anyone who can open that socket can read the counters. With a token, the counters require `Authorization: Bearer <token>`.
 - A whitelist miss still forwards the DNS query upstream. The whitelist is not a default-deny firewall for every protocol.
+- Forwarded DNS answers are cached. An upstream reply is relayed or cached only when its id and question match the query; upstream is reached over TCP, which makes off-path spoofing harder but is not authentication. There is no DNSSEC validation. Cache lifetimes are capped at 3600 s (300 s for negative answers), and whitelisted names are answered before the cache.
 - Forwarding copies the original client bytes after the hostname is taken from SNI or `Host`. The proxy does not re-encode that stream.
 - Config and SOCKS usernames are process memory. Passwords are not written to the log on the SOCKS handshake path. Config failures log the key, not the value.
 

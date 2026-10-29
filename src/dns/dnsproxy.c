@@ -76,6 +76,14 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	snprintf(ptr->listen_port, sizeof(ptr->listen_port), "%u", (unsigned)conf->Local.port);
 	ptr->socks = conf->Socks;
 
+	ptr->cache = dnscache_create(DNSCACHE_ENTRIES);
+	if (!ptr->cache)
+	{
+		log_error("[!] DNS cache not set");
+		localdns_free(ptr);
+		return NULL;
+	}
+
 	/*init upstream dns server*/
 	ptr->upstream = conf->Remote;
 
@@ -140,6 +148,7 @@ void localdns_free(dnsserver_t *dns)
 		free(dns->fifo);
 		dns->fifo = NULL;
 	}
+	dnscache_free(dns->cache);
 	free(dns);
 }
 
@@ -477,41 +486,67 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 	{
 		/* Big enough for any UDP reply; the rest of a larger answer is discarded. */
 		uint8_t resp[DNS_UDP_MAX_PAYLOAD];
-		rlen = upstream_forward(dns, msg, upstream_fd, resp, sizeof(resp));
-		if (rlen > 0 && !dns_reply_matches(query, msg->len, resp, rlen < sizeof(resp) ? rlen : sizeof(resp)))
-		{
-			/* Never relay an answer to a different question. */
-			log_error("DNS: upstream reply does not match the query");
-			close_fd(upstream_fd);
-			rlen = 0;
-		}
-		double time_taken = ((double)(net_mono_ms() - start_time))/(1000); // convert to sec
+		size_t full = 0;
+		const char *source = "";
+		dnscache_flight *flight = NULL;
+		dnscache_result cached = dnscache_begin(dns->cache, query, msg->len, start_time,
+				resp, sizeof(resp), &full, &flight);
+		double time_taken;
 
-		if(rlen>0)
+		if (cached == DNSCACHE_HIT)
+		{
+			source = " cache";
+		}
+		else if (cached == DNSCACHE_FOLLOW)
+		{
+			/* The leader's fetch is bounded by connect + exchange, retried once. */
+			int64_t deadline = start_time + 2 * (int64_t)net_timeout_ms((int)dns->timeout);
+			full = dnscache_follow(dns->cache, flight, query, msg->len, deadline, resp, sizeof(resp));
+			source = " shared";
+		}
+		else
+		{
+			rlen = upstream_forward(dns, msg, upstream_fd, resp, sizeof(resp));
+			if (rlen > 0 && !dns_reply_matches(query, msg->len, resp, rlen < sizeof(resp) ? rlen : sizeof(resp)))
+			{
+				/* Never relay or cache an answer to a different question. */
+				log_error("DNS: upstream reply does not match the query");
+				close_fd(upstream_fd);
+				rlen = 0;
+			}
+			full = rlen;
+			if (cached == DNSCACHE_LEAD)
+				dnscache_finish(dns->cache, flight, resp, full < sizeof(resp) ? full : sizeof(resp),
+						full, net_mono_ms());
+		}
+		time_taken = ((double)(net_mono_ms() - start_time))/(1000); // convert to sec
+
+		if(full>0)
 		{
 			size_t limit = dns_udp_limit(query, msg->len, DNS_UDP_MAX_PAYLOAD);
-			if (rlen <= limit)
+			if (full <= limit)
 			{
-				reply_client(dns, msg, resp, rlen);
-				log_info("%s in %0.3fs txrx(%i/%i)",domain_resolve,time_taken,msg->len,rlen + 2);
+				reply_client(dns, msg, resp, full);
+				log_info("%s in %0.3fs txrx(%i/%u)%s",domain_resolve,time_taken,msg->len,
+						(unsigned)full + 2u,source);
 			}
 			else
 			{
 				/* TC tells the client the answer needs TCP. */
 				uint8_t tc[DNS_MSG_SIZE];
-				size_t n = dns_build_truncated(resp, rlen < sizeof(resp) ? rlen : sizeof(resp), tc, sizeof(tc));
+				size_t n = dns_build_truncated(resp, full < sizeof(resp) ? full : sizeof(resp), tc, sizeof(tc));
 				if (n > 0)
 					reply_client(dns, msg, tc, n);
 				else
 					reply_error(dns, msg, ServerFailure_ResponseType);
-				log_info("%s in %0.3fs truncated %u > %u",domain_resolve,time_taken,
-						(unsigned)rlen,(unsigned)limit);
+				log_info("%s in %0.3fs truncated %u > %u%s",domain_resolve,time_taken,
+						(unsigned)full,(unsigned)limit,source);
 			}
 		}
 		else
 		{
 			reply_error(dns, msg, ServerFailure_ResponseType);
-			log_error("NO DATA %s in %0.3fs",domain_resolve,time_taken);
+			log_error("NO DATA %s in %0.3fs%s",domain_resolve,time_taken,source);
 		}
 	}
 
