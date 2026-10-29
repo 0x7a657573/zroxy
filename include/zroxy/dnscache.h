@@ -47,7 +47,8 @@ dnscache_result dnscache_begin(dnscache_t *cache, const uint8_t *query, size_t q
 
 /*
  * Leader: publish the reply (resp holds the first stored of full_len bytes;
- * full_len 0 means the fetch failed) and store it when cacheable.
+ * full_len 0 means the fetch failed) and store it when cacheable. Followers
+ * see at most DNS_UDP_MAX_PAYLOAD bytes of it.
  */
 void dnscache_finish(dnscache_t *cache, dnscache_flight *flight, const uint8_t *resp,
 		size_t stored, size_t full_len, int64_t now_ms);

@@ -595,7 +595,7 @@ flowchart TD
     D --> R2[read length-prefixed response]
     X --> R2
     R2 -- failed or wrong id/question --> SF
-    R2 -- fits client UDP size --> Reply[send UDP response]
+    R2 -- fits client UDP size, or TCP --> Reply[send response]
     R2 -- too large --> TC[header + question, TC set]
     SA --> Reply
     ND --> Reply
@@ -631,8 +631,8 @@ flowchart TD
    monotonic deadline for the whole exchange. Up to 1232 bytes of the response
    are kept and the rest is read and discarded, so the connection stays in
    step. A response larger than the client's UDP size (512, or its EDNS0 size
-   clamped to 1232) is sent as header and question with TC set. There is no
-   local TCP listener for the client's retry yet.
+   clamped to 1232) is sent as header and question with TC set; the client
+   retries over the local TCP listener (below).
 7. A worker keeps its upstream connection open for the next query. Before
    reuse it drops the connection if the server already closed it (readable
    with no request outstanding). If a reused connection still fails, the query
@@ -642,6 +642,24 @@ flowchart TD
    failed upstream exchange is answered with SERVFAIL instead of silence. A
    reply whose id or question differs from the query is treated as a failure
    and its connection is closed, so it is never relayed or cached.
+
+### Local DNS over TCP
+
+- `dnsserver_start` binds a TCP listener on the UDP socket's address and
+  port. If that fails the service logs it and stays UDP-only.
+- The receive thread polls it with the UDP socket and wake pipe. An accepted
+  connection is queued as a `DNS_MSG_TCP_CONN` job; beyond 8 open
+  connections (`DNS_TCP_MAX_CONNS`), or with a full FIFO, it is closed.
+- A worker that takes the job serves the connection itself: it reads
+  length-prefixed queries one after another (pipelined queries are answered
+  in order), runs each through the same path as UDP, and frames each reply.
+  It stops after 32 queries, 3 s idle, a malformed or QR-set message, or a
+  stop request (the wake pipe stays readable after `dnsserver_stop`), then
+  closes the socket. At most 8 of the 32 workers are therefore busy with TCP.
+- TCP replies are never truncated. The worker uses a 64 KiB heap buffer for
+  them; UDP workers keep a 1232-byte stack buffer.
+- A reply shared by the cache holds at most 1232 bytes. A TCP query whose
+  shared reply is longer fetches it again itself.
 
 ### DNS cache and coalescing
 

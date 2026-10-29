@@ -605,6 +605,189 @@ static void test_dnsproxy_local_answers(void)
     filter_free(white);
 }
 
+typedef struct
+{
+    dnsserver_t *dns;
+    int fd;
+} tcp_serve_arg_t;
+
+static void *serve_tcp_thread(void *arg)
+{
+    tcp_serve_arg_t *a = (tcp_serve_arg_t *)arg;
+    int upstream_fd = -1;
+    localdns_serve_tcp(a->dns, a->fd, &upstream_fd);
+    if (upstream_fd >= 0)
+        close(upstream_fd);
+    return NULL;
+}
+
+/* Read one length-prefixed message; returns its length or -1. */
+static ssize_t read_framed(int fd, uint8_t *buf, size_t cap)
+{
+    uint8_t prefix[2];
+    size_t len;
+    struct timeval tv = {2, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (!read_exact_fd(fd, prefix, 2))
+        return -1;
+    len = be16(prefix);
+    if (len > cap || !read_exact_fd(fd, buf, len))
+        return -1;
+    return (ssize_t)len;
+}
+
+static size_t frame(uint8_t *out, const uint8_t *msg, size_t len)
+{
+    out[0] = (uint8_t)(len >> 8);
+    out[1] = (uint8_t)len;
+    memcpy(out + 2, msg, len);
+    return len + 2;
+}
+
+static void tcp_test_dns(dnsserver_t *dns, filter_t *white, int wake[2])
+{
+    memset(dns, 0, sizeof(*dns));
+    dns->local_sock = -1;
+    dns->tcp_sock = -1;
+    dns->whitelist = white;
+    dns->sni_ip[0] = 10; dns->sni_ip[1] = 9; dns->sni_ip[2] = 8; dns->sni_ip[3] = 7;
+    strcpy(dns->upstream.ip, "127.0.0.1");
+    dns->upstream.port = 9;
+    dns->timeout = 1;
+    dns->wake[0] = wake[0];
+    dns->wake[1] = wake[1];
+}
+
+static void test_dnsproxy_tcp_local_pipelined(void)
+{
+    const char *const entries[] = { "example.com" };
+    filter_t *white = filter_from_list(entries, 1);
+    int sv[2] = {-1, -1};
+    int wake[2] = {-1, -1};
+    dnsserver_t dns;
+    tcp_serve_arg_t arg;
+    pthread_t tid;
+    uint8_t q[64];
+    uint8_t out[256];
+    uint8_t reply[REPLY_MAX];
+    size_t qlen;
+    size_t n = 0;
+    ssize_t r;
+
+    if (!white || socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0 || pipe(wake) != 0)
+    {
+        fprintf(stderr, "FAIL: TCP local test setup\n");
+        failures++;
+        filter_free(white);
+        return;
+    }
+    tcp_test_dns(&dns, white, wake);
+    arg.dns = &dns;
+    arg.fd = sv[1];
+    expect_true(pthread_create(&tid, NULL, serve_tcp_thread, &arg) == 0, "start TCP server");
+
+    /* Two queries in one write: RFC 7766 pipelining. */
+    qlen = build_query(q, A_Resource_RecordType, 0);
+    n = frame(out, q, qlen);
+    q[1] = 0x35;
+    q[sizeof(k_dns_query_example_com) - 3] = AAAA_Resource_RecordType;
+    n += frame(out + n, q, qlen);
+    expect_true(write_all_fd(sv[0], out, n), "send two framed queries");
+
+    r = read_framed(sv[0], reply, sizeof(reply));
+    expect_rcode(reply, r, 0x1234, 0, "TCP whitelisted A");
+    expect_true(r >= DNS_HEADER_SIZE && be16(reply + 6) == 1 &&
+                memcmp(reply + r - 4, "\x0a\x09\x08\x07", 4) == 0, "TCP A answer is the SNI address");
+    r = read_framed(sv[0], reply, sizeof(reply));
+    expect_rcode(reply, r, 0x1235, 0, "TCP whitelisted AAAA");
+    expect_true(r >= DNS_HEADER_SIZE && be16(reply + 6) == 0, "TCP AAAA is NODATA");
+
+    /* A response sent as a query ends the connection. */
+    qlen = build_query(q, A_Resource_RecordType, 0);
+    q[2] |= 0x80;
+    n = frame(out, q, qlen);
+    expect_true(write_all_fd(sv[0], out, n), "send a response as a query");
+    r = read_framed(sv[0], reply, sizeof(reply));
+    expect_true(r < 0, "connection closed after a QR message");
+    pthread_join(tid, NULL);
+
+    /* A stop request ends an idle connection at once. */
+    close(sv[0]);
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0)
+    {
+        int64_t start = net_mono_ms();
+        arg.fd = sv[1];
+        expect_true(write(wake[1], "x", 1) == 1, "signal stop");
+        expect_true(pthread_create(&tid, NULL, serve_tcp_thread, &arg) == 0, "start TCP server for stop");
+        pthread_join(tid, NULL);
+        expect_true(net_mono_ms() - start < 1000, "stop ends an idle TCP connection quickly");
+        close(sv[0]);
+    }
+    close(wake[0]);
+    close(wake[1]);
+    filter_free(white);
+}
+
+static void test_dnsproxy_tcp_large_reply(void)
+{
+    int listen_fd = -1;
+    int sv[2] = {-1, -1};
+    int wake[2] = {-1, -1};
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof(addr);
+    upstream_server_t server = {0};
+    pthread_t up_tid;
+    pthread_t tid;
+    dnsserver_t dns;
+    tcp_serve_arg_t arg;
+    uint8_t q[64];
+    uint8_t out[128];
+    uint8_t big[2048];
+    uint8_t reply[REPLY_MAX];
+    size_t big_len = build_large_response(big, sizeof(big));
+    size_t qlen = build_query(q, A_Resource_RecordType, 0);
+    ssize_t r;
+
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (listen_fd < 0 || bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(listen_fd, 1) != 0 || getsockname(listen_fd, (struct sockaddr *)&addr, &alen) != 0 ||
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0 || pipe(wake) != 0)
+    {
+        fprintf(stderr, "FAIL: TCP large reply setup\n");
+        failures++;
+        if (listen_fd >= 0) close(listen_fd);
+        return;
+    }
+    server.listen_fd = listen_fd;
+    server.query_len = qlen;
+    server.response = big;
+    server.response_len = big_len;
+    pthread_create(&up_tid, NULL, upstream_server_thread, &server);
+
+    tcp_test_dns(&dns, NULL, wake);
+    dns.upstream.port = ntohs(addr.sin_port);
+    arg.dns = &dns;
+    arg.fd = sv[1];
+    pthread_create(&tid, NULL, serve_tcp_thread, &arg);
+
+    expect_true(write_all_fd(sv[0], out, frame(out, q, qlen)), "send framed query for a large reply");
+    r = read_framed(sv[0], reply, sizeof(reply));
+    expect_true(r == (ssize_t)big_len && memcmp(reply, big, big_len) == 0,
+                "TCP client receives the whole 1500-byte reply");
+    if (r >= DNS_HEADER_SIZE)
+        expect_true((reply[2] & 0x02) == 0, "TCP reply is not truncated");
+
+    close(sv[0]);
+    pthread_join(tid, NULL);
+    pthread_join(up_tid, NULL);
+    close(listen_fd);
+    close(wake[0]);
+    close(wake[1]);
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -620,5 +803,7 @@ int main(void)
     test_dnsproxy_local_answers();
     test_dnsproxy_stale_query_dropped();
     test_dnsproxy_mismatched_reply();
+    test_dnsproxy_tcp_local_pipelined();
+    test_dnsproxy_tcp_large_reply();
     return failures == 0 ? 0 : 1;
 }

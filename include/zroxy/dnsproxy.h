@@ -19,12 +19,25 @@
 #include <pthread.h>
 
 #define DNS_MSG_SIZE	512
+
+/* Largest message DNS over TCP can carry (two-byte length prefix). */
+#define DNS_TCP_MSG_MAX	65535
+
+typedef enum
+{
+	DNS_MSG_UDP = 0,	/* query from client; reply with sendto */
+	DNS_MSG_TCP_CONN,	/* accepted TCP connection in tcp_fd; no query yet */
+	DNS_MSG_TCP		/* query read from tcp_fd; reply framed on it */
+} dnsMessageKind;
+
 typedef struct
 {
 	uint16_t len;
 	char message[DNS_MSG_SIZE];
 	struct sockaddr_in client;
 	int64_t received_ms;	/* monotonic receive time; 0 = unknown */
+	dnsMessageKind kind;
+	int tcp_fd;
 }dnsMessage_t;
 
 
@@ -42,6 +55,15 @@ typedef struct
  * forwarded: the client has given up or already retried.
  */
 #define DNS_QUEUE_MAX_AGE_MS	3000
+
+/*
+ * Local DNS over TCP, used by clients after a truncated (TC) UDP reply.
+ * A worker serves one connection at a time until it idles or reaches the
+ * query limit, so at most DNS_TCP_MAX_CONNS workers are taken from UDP.
+ */
+#define DNS_TCP_MAX_CONNS	8
+#define DNS_TCP_IDLE_MS		3000
+#define DNS_TCP_MAX_QUERIES	32
 
 typedef struct dnsserver
 {
@@ -75,6 +97,9 @@ typedef struct dnsserver
 	
 	/*socket file handler*/
 	int local_sock;
+	/* TCP listener on the same address; -1 when it could not be opened */
+	int tcp_sock;
+	int tcp_active;
 	statistics_t  *Stat;
 }dnsserver_t;
 
@@ -83,6 +108,10 @@ dnsserver_t *localdns_init_config(dnshost_t *conf);
 void localdns_free(dnsserver_t *dns);
 
 bool localdns_init_sockets(dnsserver_t *dns);
+/* Open the TCP listener on the UDP address. False leaves the service UDP-only. */
+bool localdns_init_tcp(dnsserver_t *dns);
+/* Accept one TCP client and queue it for a worker. */
+void localdns_accept(dnsserver_t *dns);
 bool localdns_start_workers(dnsserver_t *dns);
 /* Close the queue, let workers drain it, and join them. */
 void localdns_stop_workers(dnsserver_t *dns);
@@ -93,5 +122,8 @@ bool localdns_pull(dnsserver_t *dns);
  * *upstream_fd (-1 = not connected), which stays open for the next call.
  */
 void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *upstream_fd);
+
+/* Answer queries on an accepted TCP connection until it idles, then close it. */
+void localdns_serve_tcp(dnsserver_t *dns, int fd, int *upstream_fd);
 
 #endif /* DNSPROXY_H_ */

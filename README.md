@@ -59,7 +59,7 @@ cannot be routed by hostname using this mechanism.
 | SOCKS5 | Optional username/password authentication (RFC 1929) |
 | Listeners | Multiple listeners with independent local and remote ports |
 | Whitelist | Host patterns with `*` and `?` matching, plus automatic reload |
-| DNS | Local UDP listener; upstream DNS over TCP, directly or through SOCKS5 |
+| DNS | Local UDP and TCP listener; upstream DNS over TCP, directly or through SOCKS5 |
 | Monitor | Local HTTP JSON statistics endpoint with optional Bearer token |
 | SNI data plane | Non-blocking event loop per listener; epoll on Linux and poll elsewhere |
 
@@ -172,7 +172,7 @@ use the key names in the last column.
 | `-a`, `--monitortimeout` | seconds | Incomplete monitor-header timeout | `MONITORTIMEOUT` |
 | `-o`, `--snitimeout` | seconds | SNI socket timeout | `SNITIMEOUT` |
 | `-w`, `--white` | path | Whitelist file | `WHITE` |
-| `-d`, `--ldns` | bind:port | Local UDP DNS listener | `LDNS` |
+| `-d`, `--ldns` | bind:port | Local DNS listener (UDP and TCP) | `LDNS` |
 | `-u`, `--dns` | host[:port] | Upstream DNS server | `DNS` |
 | `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP | `DSOCKS` |
 | `-t`, `--dtimeout` | seconds | DNS upstream timeout | `DTIMEOUT` |
@@ -292,7 +292,7 @@ controls.
 
 ## DNS forwarding
 
-When `LDNS` is configured, zroxy listens for DNS over UDP locally. Whitelisted
+When `LDNS` is configured, zroxy listens for DNS over UDP and TCP locally. Whitelisted
 names receive a synthetic A answer using `SNIP` with a 300-second TTL. IPv6 is
 not proxied, so every other query type for a whitelisted name (AAAA, HTTPS,
 SVCB, ...) gets an empty NOERROR (NODATA) answer and the client falls back to
@@ -309,7 +309,10 @@ dropped.
 A failed upstream exchange or a full queue is answered with SERVFAIL. An
 upstream reply whose id or question does not match the query is discarded. A
 response larger than the client's UDP size (512 bytes, or its EDNS0 size up to
-1232) is answered with TC set; zroxy has no local TCP DNS listener yet.
+1232) is answered with TC set, and the client retries over TCP on the same
+address and port, where the whole reply is sent. Up to 8 TCP connections are
+served at once, each for at most 32 queries and closed after 3 seconds idle.
+If the TCP port cannot be bound, zroxy logs it and keeps serving UDP.
 
 Example:
 
