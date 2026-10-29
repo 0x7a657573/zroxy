@@ -342,15 +342,15 @@ static bool encode_resource_records(struct ResourceRecord *rr, dns_writer *w)
         !writer_u16(w, rr->class) ||
         !writer_u32(w, rr->ttl))
       return false;
-	if (rr->type == SOA_Resource_RecordType)
-	{
-		rd_length_pos = w->p;
-		if (!writer_u16(w, 0))
-			return false;
-		rd_data_pos = w->p;
-	}
-	else if (!writer_u16(w, rr->rd_length))
-		return false;
+    if (rr->type == SOA_Resource_RecordType)
+    {
+      rd_length_pos = w->p;
+      if (!writer_u16(w, 0))
+        return false;
+      rd_data_pos = w->p;
+    }
+    else if (!writer_u16(w, rr->rd_length))
+      return false;
 
     switch (rr->type)
     {
