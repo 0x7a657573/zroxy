@@ -587,7 +587,7 @@ flowchart TD
     T --> X[SOCKS5 TCP]
     D --> R2[read length-prefixed response]
     X --> R2
-    R2 -- failed --> SF
+    R2 -- failed or wrong id/question --> SF
     R2 -- fits client UDP size --> Reply[send UDP response]
     R2 -- too large --> TC[header + question, TC set]
     SA --> Reply
@@ -628,7 +628,9 @@ flowchart TD
    is retried once on a fresh connection; a failure on a fresh connection is
    final, so a broken upstream is not hammered.
 7. The worker sends the response back over UDP and updates statistics. A
-   failed upstream exchange is answered with SERVFAIL instead of silence.
+   failed upstream exchange is answered with SERVFAIL instead of silence. A
+   reply whose id or question differs from the query is treated as a failure
+   and its connection is closed, so it is never relayed.
 
 `dnsserver_stop` writes to the wake pipe and joins the receive thread, then
 closes the FIFO: workers drain what is already queued, close their upstream

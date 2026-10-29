@@ -478,6 +478,13 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 		/* Big enough for any UDP reply; the rest of a larger answer is discarded. */
 		uint8_t resp[DNS_UDP_MAX_PAYLOAD];
 		rlen = upstream_forward(dns, msg, upstream_fd, resp, sizeof(resp));
+		if (rlen > 0 && !dns_reply_matches(query, msg->len, resp, rlen < sizeof(resp) ? rlen : sizeof(resp)))
+		{
+			/* Never relay an answer to a different question. */
+			log_error("DNS: upstream reply does not match the query");
+			close_fd(upstream_fd);
+			rlen = 0;
+		}
 		double time_taken = ((double)(net_mono_ms() - start_time))/(1000); // convert to sec
 
 		if(rlen>0)
