@@ -94,6 +94,8 @@ struct dnsserver *dnsserver_start(dnshost_t *conf)
 		return NULL;
 	}
 	dns->rx_started = true;
+	if (dns->Stat)
+		stats_set_extra(dns->Stat, dns_stats_json, dns);
 
 	log_info("dns server start on %s:%d",conf->Local.ip,conf->Local.port);
 	return dns;
@@ -115,6 +117,8 @@ void dnsserver_stop(struct dnsserver *dns)
 		dns->rx_started = false;
 	}
 	localdns_stop_workers(dns);
+	if (dns->Stat)
+		stats_set_extra(dns->Stat, NULL, NULL);
 	localdns_free(dns);
 	log_info("dns server stopped");
 }

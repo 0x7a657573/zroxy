@@ -13,6 +13,8 @@
 #include <netinet/tcp.h>
 #include <resolv.h>
 #include <stdio.h>
+#include <inttypes.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -37,6 +39,46 @@
  * clients quickly.
  */
 #define DNS_LOCAL_TTL	300
+
+static bool dns_stats_append(char **ptr, char *end, const char *fmt, ...)
+{
+	va_list ap;
+	int n;
+	size_t left;
+	if (!ptr || !*ptr || *ptr >= end)
+		return false;
+	left = (size_t)(end - *ptr);
+	va_start(ap, fmt);
+	n = vsnprintf(*ptr, left, fmt, ap);
+	va_end(ap);
+	if (n < 0 || (size_t)n >= left)
+		return false;
+	*ptr += n;
+	return true;
+}
+
+bool dns_stats_json(void *ctx, char **ptr, char *end)
+{
+	dnsserver_t *dns = (dnsserver_t *)ctx;
+	dnscache_counters c = {0};
+	if (!dns)
+		return false;
+	dnscache_get_counters(dns->cache, &c);
+	return dns_stats_append(ptr, end, ",\n\"CacheHits\" : %" PRIu64 ",\n"
+		"\"CacheMisses\" : %" PRIu64 ",\n"
+		"\"CacheShared\" : %" PRIu64 ",\n"
+		"\"CacheEntries\" : %zu,\n"
+		"\"CacheEvictions\" : %" PRIu64 ",\n"
+		"\"QueueStaleDropped\" : %" PRIu64 ",\n"
+		"\"QueueFull\" : %" PRIu64 ",\n"
+		"\"TcpRefused\" : %" PRIu64 ",\n"
+		"\"TcpActive\" : %d",
+		c.hits, c.misses, c.shared, c.entries, c.evicted,
+		__atomic_load_n(&dns->stale_dropped, __ATOMIC_RELAXED),
+		__atomic_load_n(&dns->fifo_full, __ATOMIC_RELAXED),
+		__atomic_load_n(&dns->tcp_refused, __ATOMIC_RELAXED),
+		__atomic_load_n(&dns->tcp_active, __ATOMIC_RELAXED));
+}
 
 /* The receive loop owns its FIFO/TCP throttle state; NO DATA is worker-shared. */
 static bool throttle_take(log_throttle_t *t, int64_t now_ms, int64_t interval_ms,
@@ -299,6 +341,7 @@ bool localdns_pull(dnsserver_t *dns)
 	}
 	else
 	{
+		(void)__atomic_fetch_add(&dns->fifo_full, 1u, __ATOMIC_RELAXED);
 		uint8_t reply[DNS_MSG_SIZE];
 		size_t n = dns_build_error((const uint8_t *)&msg.message[2], msg.len,
 				ServerFailure_ResponseType, reply, sizeof(reply));
@@ -565,6 +608,7 @@ static void handle_query(dnsserver_t *dns, const dnsMessage_t *msg, int *upstrea
 
 	if (!handled_local && msg->received_ms > 0 && start_time - msg->received_ms > DNS_QUEUE_MAX_AGE_MS)
 	{
+		(void)__atomic_fetch_add(&dns->stale_dropped, 1u, __ATOMIC_RELAXED);
 		log_trace("%s dropped after %lldms in queue",domain_resolve,
 				(long long)(start_time - msg->received_ms));
 		handled_local = true;
@@ -697,6 +741,7 @@ void localdns_accept(dnsserver_t *dns)
 		return;
 	if (__atomic_add_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL) > DNS_TCP_MAX_CONNS)
 	{
+		(void)__atomic_fetch_add(&dns->tcp_refused, 1u, __ATOMIC_RELAXED);
 		__atomic_sub_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL);
 		close(fd);
 		/* Only the receive thread reaches this path, so no external lock is needed. */
@@ -710,6 +755,7 @@ void localdns_accept(dnsserver_t *dns)
 	job.tcp_fd = fd;
 	if (!fifo_push(dns->fifo, &job))
 	{
+		(void)__atomic_fetch_add(&dns->fifo_full, 1u, __ATOMIC_RELAXED);
 		__atomic_sub_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL);
 		close(fd);
 		/* Only the receive thread reaches this path, so no external lock is needed. */

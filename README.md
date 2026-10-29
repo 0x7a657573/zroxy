@@ -177,7 +177,7 @@ use the key names in the last column.
 | `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP | `DSOCKS` |
 | `-t`, `--dtimeout` | seconds | DNS upstream timeout | `DTIMEOUT` |
 | `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
-| `-e`, `--dcache` | `0..65536` | DNS answer cache entries; `0` disables cache | `DCACHE` |
+| `-e`, `--dcache` | `0..65536` | DNS answer cache entries; `0` disables cache; counters are in the monitor | `DCACHE` |
 | `-r`, `--dttl` | `1..86400` | TTL of synthetic DNS answers | `DTTL` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
@@ -324,6 +324,11 @@ response larger than the client's UDP size (512 bytes, or its EDNS0 size up to
 address and port, where the whole reply is sent. Up to 8 TCP connections are
 served at once, each for at most 32 queries and closed after 3 seconds idle.
 If the TCP port cannot be bound, zroxy logs it and keeps serving UDP.
+
+The `DNS_Server` monitor object adds `CacheHits`, `CacheMisses`, `CacheShared`,
+`CacheEntries`, `CacheEvictions`, `QueueStaleDropped`, `QueueFull`,
+`TcpRefused`, and `TcpActive`. These counters are detached before the DNS
+service is freed during shutdown.
 
 Repeated queue, TCP-capacity, and upstream-failure logs are limited to one line
 per second; a later line reports how many messages were suppressed.

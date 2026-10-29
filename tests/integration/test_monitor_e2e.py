@@ -20,6 +20,17 @@ COUNTERS = (
     "TotalRx",
     "TotalTx",
 )
+DNS_COUNTERS = COUNTERS + (
+    "CacheHits",
+    "CacheMisses",
+    "CacheShared",
+    "CacheEntries",
+    "CacheEvictions",
+    "QueueStaleDropped",
+    "QueueFull",
+    "TcpRefused",
+    "TcpActive",
+)
 
 
 def _expected_version():
@@ -87,10 +98,16 @@ def test_monitor_after_traffic():
         reply = zroxy_lab.udp_exchange(ldns, query, 3.0)
         if reply != _dns_reply(query):
             raise AssertionError("DNS exchange failed before monitor check: %r" % reply)
+        query2 = zroxy_lab.build_dns_query("example.test", qid=0x4456)
+        reply2 = zroxy_lab.udp_exchange(ldns, query2, 3.0)
+        if reply2 != _dns_reply(query2):
+            raise AssertionError("second DNS exchange failed before monitor check: %r" % reply2)
 
         expected_rx = len(zroxy_lab.HTTP_OK)
         expected_tx = len(hello)
-        dns_tx = len(query) + 2
+        # The second query is a cache hit; the existing statistics field counts
+        # upstream bytes, so only the first response contributes to TotalRx.
+        dns_tx = len(query) + len(query2) + 4
         dns_rx = len(reply) + 2
 
         fetched = _wait_doc(
@@ -115,7 +132,8 @@ def test_monitor_after_traffic():
             obj = doc.get(name)
             if not isinstance(obj, dict):
                 raise AssertionError("missing statistic object %s" % name)
-            for field in COUNTERS:
+            fields = DNS_COUNTERS if name == "DNS_Server" else COUNTERS
+            for field in fields:
                 _number(obj.get(field), "%s.%s" % (name, field))
 
         sni = doc["SNI_Server"]
@@ -132,6 +150,8 @@ def test_monitor_after_traffic():
             raise AssertionError(
                 "DNS TotalRx delta %s != %s" % (dns["TotalRx"] - base["DNS_Server"]["TotalRx"], dns_rx)
             )
+        if dns["CacheHits"] < 1 or dns["CacheEntries"] < 1:
+            raise AssertionError("DNS cache counters did not report the repeated query: %r" % dns)
         proc.check_alive()
 
 

@@ -10,6 +10,9 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdbool.h>
+
+typedef bool (*stats_extra_fn)(void *ctx, char **ptr, char *end);
 
 typedef struct
 {
@@ -29,6 +32,8 @@ typedef struct
 	/*thered lock*/
 	pthread_mutex_t Lock;
 	void *next;
+	stats_extra_fn extra;
+	void *extra_ctx;
 }statistics_t;
 
 
@@ -38,5 +43,8 @@ void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx);
 void stats_open_connection(statistics_t *self);
 
 void stats_get(statistics_t *self,stat_t *st);
+
+/* Appends ",\n\"Key\" : value" pairs; called with the stats lock held. */
+void stats_set_extra(statistics_t *self, stats_extra_fn fn, void *ctx);
 
 #endif /* STATISTICS_H_ */

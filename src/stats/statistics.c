@@ -63,3 +63,13 @@ void stats_get(statistics_t *self,stat_t *st)
 	pthread_mutex_unlock(&self->Lock);
 }
 
+void stats_set_extra(statistics_t *self, stats_extra_fn fn, void *ctx)
+{
+	if (!self)
+		return;
+	pthread_mutex_lock(&self->Lock);
+	self->extra = fn;
+	self->extra_ctx = ctx;
+	pthread_mutex_unlock(&self->Lock);
+}
+
