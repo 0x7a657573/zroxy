@@ -639,6 +639,7 @@ static bool parse_dns_server(zroxy_t *ptr,char *str)
 
 	if (!dns)
 		return false;
+	dns->Local.port = 53;
 
 	endname = strchr(str,':');
 	if(endname)
