@@ -809,9 +809,6 @@ bool localdns_init_tcp(dnsserver_t *dns)
 	if (dns->tcp_sock < 0)
 		return false;
 	(void)setsockopt(dns->tcp_sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-#ifdef SO_REUSEPORT
-	(void)setsockopt(dns->tcp_sock, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
-#endif
 	if (bind(dns->tcp_sock, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
 		listen(dns->tcp_sock, DNS_TCP_MAX_CONNS * 2) != 0)
 	{
