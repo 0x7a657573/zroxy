@@ -17,6 +17,7 @@
 #include <zroxy/dnsacl.h>
 #include <zroxy/dnsrate.h>
 
+#define DNS_LOCAL_TTL_DEFAULT	300
 
 typedef struct
 {

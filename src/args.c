@@ -5,6 +5,7 @@
  *      Author: zeus
  */
 #include <zroxy/args.h>
+#include <zroxy/dnscache.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,8 +132,8 @@ static dnshost_t *dns_config(zroxy_t *ptr)
 			return NULL;
 		ptr->dnsserver->Local.port = 53;
 		ptr->dnsserver->timeout = 5;
-		ptr->dnsserver->cache_entries = 2048;
-		ptr->dnsserver->local_ttl = 300;
+		ptr->dnsserver->cache_entries = DNSCACHE_ENTRIES;
+		ptr->dnsserver->local_ttl = DNS_LOCAL_TTL_DEFAULT;
 		memcpy(ptr->dnsserver->Local.ip, "127.0.0.1", sizeof("127.0.0.1"));
 	}
 	return ptr->dnsserver;

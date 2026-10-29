@@ -34,12 +34,6 @@
 #include <zroxy/net_io.h>
 #include <poll.h>
 
-/*
- * Local answers are short-lived so a whitelist reload or a new SNIP reaches
- * clients quickly.
- */
-#define DNS_LOCAL_TTL	300
-
 static bool dns_stats_append(char **ptr, char *end, const char *fmt, ...)
 {
 	va_list ap;
