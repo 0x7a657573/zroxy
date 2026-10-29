@@ -23,7 +23,7 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 
 ## Resource limits
 
-- SNI keeps at most 1024 connections at once, on one event-loop thread per listener. It does not create a pthread per client, and it does not use `select`. The 1025th accepted socket is closed immediately. Relay buffers are fixed at 8KB per direction. The monitor stops at 32 workers and closes the extra accepted socket. DNS query workers stop at 128. The DNS cap is inside `dnsproxy.c` and was not driven by a live flood in this pass.
+- SNI keeps at most 1024 connections at once, on one event-loop thread per listener. It does not create a pthread per client, and it does not use `select`. The 1025th accepted socket is closed immediately. Relay buffers are fixed at 8KB per direction. The monitor stops at 32 workers and closes the extra accepted socket. DNS query workers stop at 128. Local DNS over TCP takes at most 8 connections (each holding one worker and a 64 KiB buffer), 32 queries each, and closes a connection idle for 3 s. The DNS cap is inside `dnsproxy.c` and was not driven by a live flood in this pass.
 - A configured whitelist that cannot be opened aborts process startup. A failed whitelist reload keeps the previous list. Invalid ports, addresses, and empty config values are rejected instead of truncated.
 
 ## What was run

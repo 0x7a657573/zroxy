@@ -20,6 +20,7 @@ These notes describe the `1.3.1` release. Nothing here says the result is produc
 - Forwarded answers are cached: up to 2048 entries, LRU eviction, TTL-based lifetime capped at 3600 s (300 s for NXDOMAIN and NODATA), TTLs aged on each hit. The key covers the question, RD, CD, EDNS presence and DO.
 - Identical queries in flight together share one upstream fetch.
 - A query that waited more than 3 s in the queue is dropped instead of forwarded.
+- The local DNS service also listens on TCP at the same address, so clients can retry a truncated reply. Up to 8 connections are served at once, each for up to 32 pipelined queries with a 3 s idle timeout; TCP replies are never truncated.
 - An upstream reply with a different id or question is discarded and its connection closed.
 - SNI upstream lookups and `net_connect` ask for IPv4 only. IPv6 is not supported, and this avoids waiting on an AAAA lookup.
 

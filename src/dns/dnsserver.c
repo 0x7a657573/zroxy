@@ -19,18 +19,22 @@
 static void *dnsserver_receive_loop(void *arg)
 {
 	dnsserver_t *dns = (dnsserver_t *)arg;
-	struct pollfd fds[2];
+	struct pollfd fds[3];
 
 	fds[0].fd = dns->local_sock;
 	fds[0].events = POLLIN;
 	fds[1].fd = dns->wake[0];
 	fds[1].events = POLLIN;
+	/* poll ignores a negative descriptor, so a missing listener is skipped. */
+	fds[2].fd = dns->tcp_sock;
+	fds[2].events = POLLIN;
 
 	for (;;)
 	{
 		fds[0].revents = 0;
 		fds[1].revents = 0;
-		if (poll(fds, 2, -1) < 0)
+		fds[2].revents = 0;
+		if (poll(fds, 3, -1) < 0)
 		{
 			if (errno == EINTR)
 				continue;
@@ -41,6 +45,8 @@ static void *dnsserver_receive_loop(void *arg)
 			break;
 		if (fds[0].revents && !localdns_pull(dns))
 			break;
+		if (fds[2].revents & POLLIN)
+			localdns_accept(dns);
 	}
 	return NULL;
 }
@@ -60,6 +66,9 @@ struct dnsserver *dnsserver_start(dnshost_t *conf)
 		localdns_free(dns);
 		return NULL;
 	}
+
+	if (!localdns_init_tcp(dns))
+		log_error("dns TCP listener unavailable; truncated replies cannot be retried over TCP");
 
 	if (pipe(dns->wake) != 0)
 	{

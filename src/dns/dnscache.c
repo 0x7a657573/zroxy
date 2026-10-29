@@ -323,8 +323,11 @@ void dnscache_finish(dnscache_t *c, dnscache_flight *f, const uint8_t *resp,
 {
 	if (!c || !f)
 		return;
-	if (stored > sizeof(f->resp) || stored > full_len)
+	if (stored > full_len)
 		full_len = 0;
+	/* Followers get at most a UDP-sized prefix of a larger reply. */
+	if (stored > sizeof(f->resp))
+		stored = sizeof(f->resp);
 	pthread_mutex_lock(&c->mu);
 	if (full_len > 0)
 	{

@@ -2,6 +2,8 @@
 """End-to-end DNS forwarding, failure bounds, and whitelist synthesis."""
 
 import os
+import socket
+import struct
 import sys
 import threading
 import time
@@ -321,6 +323,54 @@ def test_dns_cache_and_coalescing():
         proc.check_alive()
 
 
+def _large_answer(query):
+    """The query plus enough TXT records to pass 1232 bytes."""
+    msg = bytearray(zroxy_lab.build_dns_response(query, UPSTREAM_IP))
+    txt = b"\xc0\x0c" + struct.pack("!HHIH", 16, 1, 60, 200) + bytes([199]) + b"t" * 199
+    count = 7
+    msg[6:8] = struct.pack("!H", 1 + count)
+    msg.extend(txt * count)
+    return bytes(msg)
+
+
+def _tcp_dns(port, query, timeout):
+    sock = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+    try:
+        sock.sendall(struct.pack("!H", len(query)) + query)
+        prefix = zroxy_lab._read_exact(sock, 2, timeout)
+        length = struct.unpack("!H", prefix)[0]
+        return zroxy_lab._read_exact(sock, length, timeout)
+    finally:
+        sock.close()
+
+
+def test_dns_tcp_fallback():
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_large_answer,
+                                   fragment=4096, fragment_gap=0.0)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns)
+
+        query = zroxy_lab.build_dns_query("big.test", qid=0x7001)
+        expected = _large_answer(query)
+        reply = zroxy_lab.udp_exchange(ldns, query, 3.0)
+        _expect_rcode(reply, query, 0)
+        if not reply[2] & 0x02:
+            raise AssertionError("large UDP reply was not truncated: %d bytes" % len(reply))
+
+        tcp_query = zroxy_lab.build_dns_query("big.test", qid=0x7002)
+        reply = _tcp_dns(ldns, tcp_query, 3.0)
+        if reply != _large_answer(tcp_query):
+            raise AssertionError("TCP reply differs: %d bytes, want %d" % (len(reply), len(expected)))
+        if reply[2] & 0x02:
+            raise AssertionError("TCP reply is truncated")
+
+        small = zroxy_lab.build_dns_query("small.test", qid=0x7003)
+        reply = _tcp_dns(ldns, small, 3.0)
+        _expect_rcode(reply, small, 0)
+        proc.check_alive()
+
+
 def main():
     tests = [
         test_dns_forward_fragmented,
@@ -329,6 +379,7 @@ def main():
         test_dns_whitelist_reload,
         test_dns_upstream_reuse,
         test_dns_cache_and_coalescing,
+        test_dns_tcp_fallback,
     ]
     failed = 0
     for test in tests:

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /*
  * dnsproxy.c
  *
@@ -9,6 +10,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <resolv.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +54,7 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 		return NULL;
 	memset(ptr,0,sizeof(dnsserver_t));
 	ptr->local_sock = -1;
+	ptr->tcp_sock = -1;
 	ptr->wake[0] = -1;
 	ptr->wake[1] = -1;
 
@@ -140,6 +143,7 @@ void localdns_free(dnsserver_t *dns)
 		return;
 	/* socks aliases configuration memory and is not owned here. */
 	close_fd(&dns->local_sock);
+	close_fd(&dns->tcp_sock);
 	close_fd(&dns->wake[0]);
 	close_fd(&dns->wake[1]);
 	if (dns->fifo)
@@ -423,8 +427,20 @@ static uint16_t upstream_forward(dnsserver_t *dns, const dnsMessage_t *msg, int 
 
 static void reply_client(dnsserver_t *dns, const dnsMessage_t *msg, const uint8_t *buf, size_t len)
 {
-	if (len > 0)
-		sendto(dns->local_sock, buf, len, 0, (const struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
+	if (len == 0)
+		return;
+	if (msg->kind == DNS_MSG_TCP)
+	{
+		/* TCP_NODELAY is set, so the prefix and body leave without waiting. */
+		int timeout_ms = net_timeout_ms((int)dns->timeout);
+		uint8_t prefix[2] = { (uint8_t)(len >> 8), (uint8_t)(len & 0xFF) };
+		if (len > DNS_TCP_MSG_MAX ||
+			!net_write_all_ms(msg->tcp_fd, prefix, sizeof(prefix), timeout_ms) ||
+			!net_write_all_ms(msg->tcp_fd, buf, len, timeout_ms))
+			log_error("dns TCP reply failed");
+		return;
+	}
+	sendto(dns->local_sock, buf, len, 0, (const struct sockaddr *)&msg->client, sizeof(struct sockaddr_in));
 }
 
 static void reply_error(dnsserver_t *dns, const dnsMessage_t *msg, uint8_t rcode)
@@ -434,7 +450,12 @@ static void reply_error(dnsserver_t *dns, const dnsMessage_t *msg, uint8_t rcode
 	reply_client(dns, msg, buf, n);
 }
 
-void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *upstream_fd)
+/*
+ * resp receives the upstream reply: DNS_UDP_MAX_PAYLOAD bytes are enough for
+ * UDP (the rest of a larger answer is discarded); TCP passes DNS_TCP_MSG_MAX.
+ */
+static void handle_query(dnsserver_t *dns, const dnsMessage_t *msg, int *upstream_fd,
+		uint8_t *resp, size_t cap)
 {
 	const uint8_t *query = (const uint8_t *)&msg->message[2];
 	char domain_resolve[1024] = {0};
@@ -492,13 +513,13 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 
 	if (!handled_local)
 	{
-		/* Big enough for any UDP reply; the rest of a larger answer is discarded. */
-		uint8_t resp[DNS_UDP_MAX_PAYLOAD];
+		bool tcp = msg->kind == DNS_MSG_TCP;
 		size_t full = 0;
 		const char *source = "";
 		dnscache_flight *flight = NULL;
 		dnscache_result cached = dnscache_begin(dns->cache, query, msg->len, start_time,
-				resp, sizeof(resp), &full, &flight);
+				resp, cap, &full, &flight);
+		bool fetch = cached == DNSCACHE_LEAD || cached == DNSCACHE_BYPASS;
 		double time_taken;
 
 		if (cached == DNSCACHE_HIT)
@@ -509,13 +530,19 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 		{
 			/* The leader's fetch is bounded by connect + exchange, retried once. */
 			int64_t deadline = start_time + 2 * (int64_t)net_timeout_ms((int)dns->timeout);
-			full = dnscache_follow(dns->cache, flight, query, msg->len, deadline, resp, sizeof(resp));
+			full = dnscache_follow(dns->cache, flight, query, msg->len, deadline, resp, cap);
 			source = " shared";
+			/* A shared reply holds at most a UDP-sized prefix; TCP needs all of it. */
+			if (tcp && full > DNS_UDP_MAX_PAYLOAD)
+			{
+				full = 0;
+				fetch = true;
+			}
 		}
-		else
+		if (fetch)
 		{
-			rlen = upstream_forward(dns, msg, upstream_fd, resp, sizeof(resp));
-			if (rlen > 0 && !dns_reply_matches(query, msg->len, resp, rlen < sizeof(resp) ? rlen : sizeof(resp)))
+			rlen = upstream_forward(dns, msg, upstream_fd, resp, cap);
+			if (rlen > 0 && !dns_reply_matches(query, msg->len, resp, rlen < cap ? rlen : cap))
 			{
 				/* Never relay or cache an answer to a different question. */
 				log_error("DNS: upstream reply does not match the query");
@@ -524,14 +551,15 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 			}
 			full = rlen;
 			if (cached == DNSCACHE_LEAD)
-				dnscache_finish(dns->cache, flight, resp, full < sizeof(resp) ? full : sizeof(resp),
+				dnscache_finish(dns->cache, flight, resp, full < cap ? full : cap,
 						full, net_mono_ms());
 		}
 		time_taken = ((double)(net_mono_ms() - start_time))/(1000); // convert to sec
 
 		if(full>0)
 		{
-			size_t limit = dns_udp_limit(query, msg->len, DNS_UDP_MAX_PAYLOAD);
+			/* TCP carries the whole reply; UDP is cut to the client's size. */
+			size_t limit = tcp ? cap : dns_udp_limit(query, msg->len, DNS_UDP_MAX_PAYLOAD);
 			if (full <= limit)
 			{
 				reply_client(dns, msg, resp, full);
@@ -542,7 +570,7 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 			{
 				/* TC tells the client the answer needs TCP. */
 				uint8_t tc[DNS_MSG_SIZE];
-				size_t n = dns_build_truncated(resp, full < sizeof(resp) ? full : sizeof(resp), tc, sizeof(tc));
+				size_t n = dns_build_truncated(resp, full < cap ? full : cap, tc, sizeof(tc));
 				if (n > 0)
 					reply_client(dns, msg, tc, n);
 				else
@@ -565,6 +593,132 @@ void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *ups
 	}
 }
 
+void localdns_handle_request(dnsserver_t *dns, const dnsMessage_t *msg, int *upstream_fd)
+{
+	uint8_t resp[DNS_UDP_MAX_PAYLOAD];
+	handle_query(dns, msg, upstream_fd, resp, sizeof(resp));
+}
+
+bool localdns_init_tcp(dnsserver_t *dns)
+{
+	struct sockaddr_in addr;
+	socklen_t len = sizeof(addr);
+	int on = 1;
+
+	/* Same address and port as the UDP socket, which is already bound. */
+	if (dns->local_sock < 0 || getsockname(dns->local_sock, (struct sockaddr *)&addr, &len) != 0)
+		return false;
+	dns->tcp_sock = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+	if (dns->tcp_sock < 0)
+		return false;
+	(void)setsockopt(dns->tcp_sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+	if (bind(dns->tcp_sock, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+		listen(dns->tcp_sock, DNS_TCP_MAX_CONNS * 2) != 0)
+	{
+		log_error("Can't bind TCP address %s:%s", dns->listen_addr, dns->listen_port);
+		close_fd(&dns->tcp_sock);
+		return false;
+	}
+	return true;
+}
+
+void localdns_accept(dnsserver_t *dns)
+{
+	dnsMessage_t job;
+	int on = 1;
+	int fd;
+
+	do {
+		fd = accept4(dns->tcp_sock, NULL, NULL, SOCK_CLOEXEC);
+	} while (fd < 0 && errno == EINTR);
+	if (fd < 0)
+		return;
+	if (__atomic_add_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL) > DNS_TCP_MAX_CONNS)
+	{
+		__atomic_sub_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL);
+		close(fd);
+		log_error("dns TCP connection limit reached");
+		return;
+	}
+	(void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
+
+	memset(&job, 0, sizeof(job));
+	job.kind = DNS_MSG_TCP_CONN;
+	job.tcp_fd = fd;
+	if (!fifo_push(dns->fifo, &job))
+	{
+		__atomic_sub_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL);
+		close(fd);
+		log_error("dns fifo is full: TCP connection dropped");
+	}
+}
+
+/* Wait until fd is readable; false on idle timeout, error, or service stop. */
+static bool tcp_wait_query(dnsserver_t *dns, int fd, int64_t deadline)
+{
+	for (;;)
+	{
+		struct pollfd p[2];
+		int64_t left = deadline - net_mono_ms();
+		int rc;
+
+		if (left <= 0)
+			return false;
+		p[0].fd = fd;
+		p[0].events = POLLIN;
+		p[0].revents = 0;
+		/* dnsserver_stop leaves the wake pipe readable. */
+		p[1].fd = dns->wake[0];
+		p[1].events = POLLIN;
+		p[1].revents = 0;
+		rc = poll(p, 2, left > INT32_MAX ? INT32_MAX : (int)left);
+		if (rc < 0 && errno == EINTR)
+			continue;
+		if (rc <= 0 || p[1].revents != 0)
+			return false;
+		return (p[0].revents & POLLIN) != 0;
+	}
+}
+
+void localdns_serve_tcp(dnsserver_t *dns, int fd, int *upstream_fd)
+{
+	uint8_t *resp = malloc(DNS_TCP_MSG_MAX);
+	int timeout_ms = net_timeout_ms((int)dns->timeout);
+	int served;
+
+	for (served = 0; resp && served < DNS_TCP_MAX_QUERIES; served++)
+	{
+		dnsMessage_t msg;
+		uint8_t prefix[2];
+		uint16_t len;
+
+		if (!tcp_wait_query(dns, fd, net_mono_ms() + DNS_TCP_IDLE_MS) ||
+			!net_read_exact_ms(fd, prefix, sizeof(prefix), timeout_ms))
+			break;
+		len = (uint16_t)((prefix[0] << 8) | prefix[1]);
+		/* The queue's message buffer bounds a query, as on UDP. */
+		if (len < DNS_HEADER_SIZE || len > DNS_MSG_SIZE - 2)
+			break;
+		memset(&msg, 0, sizeof(msg));
+		msg.kind = DNS_MSG_TCP;
+		msg.tcp_fd = fd;
+		msg.len = len;
+		msg.message[0] = (char)prefix[0];
+		msg.message[1] = (char)prefix[1];
+		if (!net_read_exact_ms(fd, &msg.message[2], len, timeout_ms))
+			break;
+		/* A response (QR set) is not a query. */
+		if (((uint8_t)msg.message[4] & 0x80) != 0)
+			break;
+		msg.received_ms = net_mono_ms();
+		if (dns->Stat)
+			stats_open_connection(dns->Stat);
+		handle_query(dns, &msg, upstream_fd, resp, DNS_TCP_MSG_MAX);
+	}
+	free(resp);
+	close(fd);
+}
+
 /* Fixed pool member: one query at a time over its own upstream connection. */
 static void *localdns_worker(void *arg)
 {
@@ -573,7 +727,15 @@ static void *localdns_worker(void *arg)
 	int upstream_fd = -1;
 
 	while (fifo_pop_wait(dns->fifo, &msg))
-		localdns_handle_request(dns, &msg, &upstream_fd);
+	{
+		if (msg.kind == DNS_MSG_TCP_CONN)
+		{
+			localdns_serve_tcp(dns, msg.tcp_fd, &upstream_fd);
+			__atomic_sub_fetch(&dns->tcp_active, 1, __ATOMIC_ACQ_REL);
+		}
+		else
+			localdns_handle_request(dns, &msg, &upstream_fd);
+	}
 
 	close_fd(&upstream_fd);
 	return NULL;
