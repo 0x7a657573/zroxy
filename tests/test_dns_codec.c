@@ -503,6 +503,117 @@ static void test_wire_udp_limit(void)
     expect_true(dns_udp_limit(q, sizeof(q) - 3, 1232) == 512, "cut OPT record gives 512");
 }
 
+/* example.com A response: one answer (TTL 120) and one authority record (TTL 90). */
+static size_t build_reply(uint8_t *out, uint8_t rcode)
+{
+    const uint8_t rrs[] = {
+        0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x78, 0x00, 0x04, 1, 2, 3, 4,
+        0xc0, 0x0c, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x5a, 0x00, 0x02, 0xc0, 0x0c
+    };
+    size_t n = sizeof(k_query_example_com);
+    memcpy(out, k_query_example_com, n);
+    out[2] = 0x81;
+    out[3] = (uint8_t)(0x80 | rcode);
+    out[7] = 1;
+    out[9] = 1;
+    memcpy(out + n, rrs, sizeof(rrs));
+    return n + sizeof(rrs);
+}
+
+static void test_wire_cache_helpers(void)
+{
+    uint8_t q[sizeof(k_query_example_com) + 11];
+    uint8_t key_a[300];
+    uint8_t key_b[300];
+    uint8_t resp[128];
+    size_t ka;
+    size_t kb;
+    size_t rlen;
+    uint32_t ttl = 0;
+    const uint8_t opt_do[] = { 0x00, 0x00, 0x29, 0x04, 0xd0, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00 };
+
+    /* Key ignores case and id, and separates EDNS, DO and CD. */
+    memcpy(q, k_query_example_com, sizeof(k_query_example_com));
+    ka = dns_cache_key(q, sizeof(k_query_example_com), key_a, sizeof(key_a));
+    q[0] = 0x55;
+    q[13] = 'E';
+    q[21] = 'C';
+    kb = dns_cache_key(q, sizeof(k_query_example_com), key_b, sizeof(key_b));
+    expect_true(ka > 0 && ka == kb && memcmp(key_a, key_b, ka) == 0, "cache key ignores id and case");
+    q[3] = 0x10;
+    kb = dns_cache_key(q, sizeof(k_query_example_com), key_b, sizeof(key_b));
+    expect_true(kb == ka && memcmp(key_a, key_b, ka) != 0, "cache key separates CD");
+    q[3] = 0x00;
+    memcpy(q + sizeof(k_query_example_com), opt_do, sizeof(opt_do));
+    q[11] = 1;
+    kb = dns_cache_key(q, sizeof(q), key_b, sizeof(key_b));
+    expect_true(kb == ka && key_b[kb - 1] == (key_a[ka - 1] | 0x0c), "cache key records EDNS and DO");
+    expect_true(dns_cache_key(q, sizeof(q), key_b, 4) == 0, "cache key respects capacity");
+    q[5] = 2;
+    expect_true(dns_cache_key(q, sizeof(q), key_b, sizeof(key_b)) == 0, "two questions are not cacheable");
+
+    /* Reply matching */
+    rlen = build_reply(resp, 0);
+    expect_true(dns_reply_matches(k_query_example_com, sizeof(k_query_example_com), resp, rlen),
+                "reply matches its query");
+    resp[14] = 'X';
+    expect_true(dns_reply_matches(k_query_example_com, sizeof(k_query_example_com), resp, rlen),
+                "reply match ignores case");
+    resp[14] = 'q';
+    expect_true(!dns_reply_matches(k_query_example_com, sizeof(k_query_example_com), resp, rlen),
+                "reply for another name does not match");
+    rlen = build_reply(resp, 0);
+    resp[1] = 0x35;
+    expect_true(!dns_reply_matches(k_query_example_com, sizeof(k_query_example_com), resp, rlen),
+                "reply with another id does not match");
+    resp[1] = 0x34;
+    resp[2] = 0x01;
+    expect_true(!dns_reply_matches(k_query_example_com, sizeof(k_query_example_com), resp, rlen),
+                "a query is not a reply");
+    memcpy(resp, k_query_example_com, 12);
+    resp[2] = 0x81;
+    resp[3] = 0x85;
+    resp[5] = 0;
+    expect_true(dns_reply_matches(k_query_example_com, sizeof(k_query_example_com), resp, 12),
+                "error reply without question matches");
+    resp[3] = 0x80;
+    expect_true(!dns_reply_matches(k_query_example_com, sizeof(k_query_example_com), resp, 12),
+                "NOERROR reply without question does not match");
+
+    /* TTL */
+    rlen = build_reply(resp, 0);
+    expect_true(dns_reply_ttl(resp, rlen, &ttl) && ttl == 90, "reply TTL is the smallest record TTL");
+    rlen = build_reply(resp, 3);
+    expect_true(dns_reply_ttl(resp, rlen, &ttl), "NXDOMAIN reply has a TTL");
+    rlen = build_reply(resp, 2);
+    expect_true(!dns_reply_ttl(resp, rlen, &ttl), "SERVFAIL is not cacheable");
+    rlen = build_reply(resp, 0);
+    resp[2] |= 0x02;
+    expect_true(!dns_reply_ttl(resp, rlen, &ttl), "truncated reply is not cacheable");
+    rlen = build_reply(resp, 0);
+    resp[7] = 0;
+    resp[9] = 0;
+    expect_true(!dns_reply_ttl(resp, sizeof(k_query_example_com), &ttl), "reply without records has no TTL");
+    rlen = build_reply(resp, 0);
+    expect_true(!dns_reply_ttl(resp, rlen - 1, &ttl), "cut reply has no TTL");
+
+    /* Aging and adoption */
+    rlen = build_reply(resp, 0);
+    dns_reply_age(resp, rlen, 100);
+    expect_true(dns_reply_ttl(resp, rlen, &ttl) && ttl == 0, "aging stops at zero");
+    rlen = build_reply(resp, 0);
+    dns_reply_age(resp, rlen, 30);
+    expect_true(dns_reply_ttl(resp, rlen, &ttl) && ttl == 60, "aging lowers every TTL");
+    expect_u8(resp[sizeof(k_query_example_com) + 9], 0x5a, "answer TTL 120 aged to 90");
+
+    memcpy(q, k_query_example_com, sizeof(k_query_example_com));
+    q[0] = 0xab;
+    q[13] = 'E';
+    expect_true(dns_reply_adopt(resp, rlen, q, sizeof(k_query_example_com)), "adopt reply");
+    expect_u8(resp[0], 0xab, "adopted id");
+    expect_u8(resp[13], 'E', "adopted question spelling");
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -518,6 +629,7 @@ int main(void)
     test_encode_rejects_short_buffer();
     test_wire_error_and_truncation();
     test_wire_udp_limit();
+    test_wire_cache_helpers();
 
     return failures == 0 ? 0 : 1;
 }

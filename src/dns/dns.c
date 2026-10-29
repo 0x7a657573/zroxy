@@ -514,41 +514,220 @@ size_t dns_build_truncated(const uint8_t *resp, size_t rlen, uint8_t *out, size_
   return build_header_question(resp, rlen, (uint16_t)~TC_MASK, TC_MASK, out, cap);
 }
 
-size_t dns_udp_limit(const uint8_t *query, size_t qlen, size_t max)
+/*
+ * Visit the fixed part (TYPE, CLASS, TTL, RDLENGTH) of every resource record
+ * after the questions. section is 0 for answers, 1 authority, 2 additional.
+ * Stops early when fn returns false. Returns false if the packet does not parse.
+ */
+typedef bool (*rr_visit)(uint8_t *fixed, int section, void *ctx);
+
+static bool for_each_rr(const uint8_t *pkt, size_t len, rr_visit fn, void *ctx)
 {
   size_t pos = DNS_HEADER_SIZE;
-  uint32_t skip;
-  uint32_t ar;
+  uint32_t counts[3];
   uint32_t i;
+  int section;
 
-  if (!query || qlen < DNS_HEADER_SIZE || max < DNS_UDP_MIN_PAYLOAD)
-    return DNS_UDP_MIN_PAYLOAD;
-
-  for (i = get_u16(query + 4); i > 0; i--)
+  if (!pkt || len < DNS_HEADER_SIZE)
+    return false;
+  for (i = get_u16(pkt + 4); i > 0; i--)
   {
-    if (!skip_name(query, qlen, &pos, true) || pos + 4 > qlen)
-      return DNS_UDP_MIN_PAYLOAD;
+    if (!skip_name(pkt, len, &pos, true) || pos + 4 > len)
+      return false;
     pos += 4;
   }
-
-  /* Answer and authority records, then the additional section holding OPT. */
-  skip = (uint32_t)get_u16(query + 6) + get_u16(query + 8);
-  ar = get_u16(query + 10);
-  for (i = 0; i < skip + ar; i++)
+  counts[0] = get_u16(pkt + 6);
+  counts[1] = get_u16(pkt + 8);
+  counts[2] = get_u16(pkt + 10);
+  for (section = 0; section < 3; section++)
   {
-    uint16_t type;
-    uint16_t size;
-    if (!skip_name(query, qlen, &pos, true) || pos + 10 > qlen)
-      return DNS_UDP_MIN_PAYLOAD;
-    type = get_u16(query + pos);
-    size = get_u16(query + pos + 2);
-    if (i >= skip && type == DNS_OPT_RECORD_TYPE)
+    for (i = 0; i < counts[section]; i++)
     {
-      if (size <= DNS_UDP_MIN_PAYLOAD)
-        return DNS_UDP_MIN_PAYLOAD;
-      return size > max ? max : size;
+      size_t rdlen;
+      if (!skip_name(pkt, len, &pos, true) || pos + 10 > len)
+        return false;
+      rdlen = get_u16(pkt + pos + 8);
+      if (pos + 10 + rdlen > len)
+        return false;
+      if (!fn((uint8_t *)(uintptr_t)(pkt + pos), section, ctx))
+        return true;
+      pos += 10 + rdlen;
     }
-    pos += 10u + get_u16(query + pos + 8);
   }
-  return DNS_UDP_MIN_PAYLOAD;
+  return true;
+}
+
+static uint32_t get_u32(const uint8_t *p)
+{
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+}
+
+typedef struct
+{
+  bool found;
+  uint16_t size;
+  uint32_t ttl;
+} opt_ctx;
+
+static bool find_opt(uint8_t *fixed, int section, void *ctx)
+{
+  opt_ctx *o = (opt_ctx *)ctx;
+  if (section != 2 || get_u16(fixed) != DNS_OPT_RECORD_TYPE)
+    return true;
+  o->found = true;
+  o->size = get_u16(fixed + 2);
+  o->ttl = get_u32(fixed + 4);
+  return false;
+}
+
+bool dns_query_opt(const uint8_t *query, size_t qlen, uint16_t *udp_size, uint32_t *ext_flags)
+{
+  opt_ctx o = { false, 0, 0 };
+  if (!for_each_rr(query, qlen, find_opt, &o) || !o.found)
+    return false;
+  if (udp_size)
+    *udp_size = o.size;
+  if (ext_flags)
+    *ext_flags = o.ttl;
+  return true;
+}
+
+size_t dns_udp_limit(const uint8_t *query, size_t qlen, size_t max)
+{
+  uint16_t size;
+  if (max < DNS_UDP_MIN_PAYLOAD || !dns_query_opt(query, qlen, &size, NULL) ||
+      size <= DNS_UDP_MIN_PAYLOAD)
+    return DNS_UDP_MIN_PAYLOAD;
+  return size > max ? max : size;
+}
+
+static uint8_t ascii_lower(uint8_t c)
+{
+  return (c >= 'A' && c <= 'Z') ? (uint8_t)(c + ('a' - 'A')) : c;
+}
+
+size_t dns_cache_key(const uint8_t *query, size_t qlen, uint8_t *key, size_t cap)
+{
+  size_t qend;
+  size_t n;
+  size_t i;
+  uint32_t ext = 0;
+  uint8_t bits = 0;
+
+  if (!query || !key || qlen < DNS_HEADER_SIZE || get_u16(query + 4) != 1)
+    return 0;
+  qend = first_question_end(query, qlen);
+  /* Lowercased wire name, TYPE and CLASS, then one byte of flags. */
+  n = qend - DNS_HEADER_SIZE;
+  if (qend == 0 || n + 1 > cap)
+    return 0;
+  for (i = 0; i < n; i++)
+    key[i] = ascii_lower(query[DNS_HEADER_SIZE + i]);
+  /* The answer differs with RD, CD, EDNS presence and the DO bit. */
+  if (query[2] & 0x01)
+    bits |= 0x01;
+  if (query[3] & 0x10)
+    bits |= 0x02;
+  if (dns_query_opt(query, qlen, NULL, &ext))
+  {
+    bits |= 0x04;
+    if (ext & 0x8000u)
+      bits |= 0x08;
+  }
+  key[n] = bits;
+  return n + 1;
+}
+
+bool dns_reply_matches(const uint8_t *query, size_t qlen, const uint8_t *resp, size_t rlen)
+{
+  size_t qend;
+  size_t rend;
+  size_t i;
+
+  if (!query || !resp || qlen < DNS_HEADER_SIZE || rlen < DNS_HEADER_SIZE)
+    return false;
+  if (get_u16(query) != get_u16(resp) || (resp[2] & 0x80) == 0)
+    return false;
+  /* An error reply may omit the question. */
+  if (get_u16(resp + 4) == 0)
+    return (resp[3] & RCODE_MASK) != 0;
+  qend = first_question_end(query, qlen);
+  rend = first_question_end(resp, rlen);
+  if (qend == 0 || rend != qend)
+    return false;
+  for (i = DNS_HEADER_SIZE; i < qend; i++)
+  {
+    if (ascii_lower(query[i]) != ascii_lower(resp[i]))
+      return false;
+  }
+  return true;
+}
+
+typedef struct
+{
+  bool any;
+  uint32_t min;
+} ttl_ctx;
+
+static bool min_ttl(uint8_t *fixed, int section, void *ctx)
+{
+  ttl_ctx *t = (ttl_ctx *)ctx;
+  uint32_t ttl;
+  if (section == 2)
+    return false;
+  ttl = get_u32(fixed + 4);
+  if (!t->any || ttl < t->min)
+    t->min = ttl;
+  t->any = true;
+  return true;
+}
+
+bool dns_reply_ttl(const uint8_t *resp, size_t rlen, uint32_t *ttl)
+{
+  ttl_ctx t = { false, 0 };
+  uint8_t rcode;
+
+  if (!resp || rlen < DNS_HEADER_SIZE || (resp[2] & (TC_MASK >> 8)) != 0)
+    return false;
+  rcode = resp[3] & RCODE_MASK;
+  if (rcode != NoError_ResponseCode && rcode != NameError_ResponseCode)
+    return false;
+  /* Answer and authority TTLs; a negative answer carries its SOA in authority. */
+  if (!for_each_rr(resp, rlen, min_ttl, &t) || !t.any)
+    return false;
+  if (ttl)
+    *ttl = t.min;
+  return true;
+}
+
+static bool age_ttl(uint8_t *fixed, int section, void *ctx)
+{
+  uint32_t elapsed = *(const uint32_t *)ctx;
+  uint32_t ttl;
+  if (section == 2 && get_u16(fixed) == DNS_OPT_RECORD_TYPE)
+    return true;
+  ttl = get_u32(fixed + 4);
+  ttl = ttl > elapsed ? ttl - elapsed : 0;
+  fixed[4] = (uint8_t)(ttl >> 24);
+  fixed[5] = (uint8_t)(ttl >> 16);
+  fixed[6] = (uint8_t)(ttl >> 8);
+  fixed[7] = (uint8_t)ttl;
+  return true;
+}
+
+void dns_reply_age(uint8_t *resp, size_t rlen, uint32_t elapsed_s)
+{
+  if (elapsed_s > 0)
+    (void)for_each_rr(resp, rlen, age_ttl, &elapsed_s);
+}
+
+bool dns_reply_adopt(uint8_t *resp, size_t rlen, const uint8_t *query, size_t qlen)
+{
+  size_t qend = first_question_end(query, qlen);
+  if (!resp || rlen < DNS_HEADER_SIZE || qend == 0 || first_question_end(resp, rlen) != qend)
+    return false;
+  /* Id and the question as the client spelled it (0x20 case randomisation). */
+  memcpy(resp, query, 2);
+  memcpy(resp + DNS_HEADER_SIZE, query + DNS_HEADER_SIZE, qend - DNS_HEADER_SIZE);
+  return true;
 }

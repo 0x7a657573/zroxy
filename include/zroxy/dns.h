@@ -184,5 +184,18 @@ size_t dns_build_error(const uint8_t *query, size_t qlen, uint8_t rcode, uint8_t
 size_t dns_build_truncated(const uint8_t *resp, size_t rlen, uint8_t *out, size_t cap);
 /* UDP size the sender of query accepts: 512, or its EDNS0 size clamped to [512, max]. */
 size_t dns_udp_limit(const uint8_t *query, size_t qlen, size_t max);
+/* Find the OPT record: its UDP size and its TTL field (extended rcode, version, DO). */
+bool dns_query_opt(const uint8_t *query, size_t qlen, uint16_t *udp_size, uint32_t *ext_flags);
+
+/* Cache key: lowercased question plus RD, CD, EDNS and DO bits. 0 if not cacheable. */
+size_t dns_cache_key(const uint8_t *query, size_t qlen, uint8_t *key, size_t cap);
+/* resp answers query: same id, QR set, same question ignoring case. */
+bool dns_reply_matches(const uint8_t *query, size_t qlen, const uint8_t *resp, size_t rlen);
+/* Smallest answer/authority TTL of a NOERROR or NXDOMAIN reply without TC. */
+bool dns_reply_ttl(const uint8_t *resp, size_t rlen, uint32_t *ttl);
+/* Lower every TTL except OPT's by elapsed_s, stopping at 0. */
+void dns_reply_age(uint8_t *resp, size_t rlen, uint32_t elapsed_s);
+/* Give a stored reply the id and question spelling of query. */
+bool dns_reply_adopt(uint8_t *resp, size_t rlen, const uint8_t *query, size_t qlen);
 
 #endif /* dns.h */
