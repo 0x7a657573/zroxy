@@ -35,9 +35,9 @@ def read_define(path, name):
 
 def worker_limits():
     return {
-        "sni": read_define(os.path.join(ROOT, "sniproxy", "sniclient.c"), "SNI_MAX_WORKERS"),
-        "dns": read_define(os.path.join(ROOT, "dnsproxy", "dnsproxy.c"), "DNS_MAX_WORKERS"),
-        "monitor": read_define(os.path.join(ROOT, "statistics", "monitor.c"), "MON_MAX_WORKERS"),
+        "sni": read_define(os.path.join(ROOT, "src", "sni", "sniclient.c"), "SNI_MAX_WORKERS"),
+        "dns": 1,
+        "monitor": read_define(os.path.join(ROOT, "src", "stats", "monitor.c"), "MON_MAX_WORKERS"),
     }
 
 
@@ -385,9 +385,10 @@ def overload(args, proc, dns_up, ldns, mon_port, limits, failures, anomalies, ba
             peak = max(peak, observed)
         time.sleep(0.05)
     if peak > baseline + limits["dns"] + THREAD_SLACK:
-        failures.append("DNS workers exceeded cap: peak %s baseline %s cap %s" % (peak, baseline, limits["dns"]))
+        failures.append("DNS event-loop threads exceeded cap: peak %s baseline %s cap %s" % (peak, baseline, limits["dns"]))
     settle = threads_of(proc.proc.pid)
-    deadline = time.monotonic() + 4.0
+    # A request may make one retry, each bounded by the configured DNS timeout.
+    deadline = time.monotonic() + 7.0
     while time.monotonic() < deadline:
         settle = threads_of(proc.proc.pid)
         if settle is not None and settle <= baseline + THREAD_SLACK:

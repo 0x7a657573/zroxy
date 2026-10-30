@@ -181,6 +181,7 @@ use the key names in the last column.
 | `-r`, `--dttl` | `1..86400` | TTL of synthetic DNS answers and negative SOA records | `DTTL` |
 | `-A`, `--dacl` | `CIDR[,CIDR...]` | IPv4 networks allowed to query the local DNS listener | `DACL` |
 | `-R`, `--drate` | `0..100000` | Per-source DNS queries per second; `0` disables | `DRATE` |
+| `-C`, `--dnsconnections` | `1..96` | Maximum concurrent nonblocking TCP connections to the DNS upstream | `DNSCONNECTIONS` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
 `LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
@@ -461,9 +462,18 @@ Stress and benchmark tests are registered with CTest but disabled in a plain
 `ctest` run. To include them:
 
 ```sh
-ctest --test-dir build -L stress --include-disabled --output-on-failure
-ctest --test-dir build -L benchmark --include-disabled --output-on-failure
+ZROXY_BIN="$PWD/build/zroxy" python3 tests/stress/zroxy_stress.py \
+  --duration 3 --connections 8 --workers 2 --payload-size 1024 \
+  --output build/stress-result.json
+ZROXY_BIN="$PWD/build/zroxy" python3 tests/benchmark/dns_benchmark.py \
+  --workers 32 --upstream-connections 32 --duration 10 \
+  --output build/dns-benchmark-result.json
 ```
+
+`tests/benchmark/dns_benchmark.py` writes DNS success QPS, p50/p95/p99
+latency, thread/fd peaks, and process CPU time to JSON. Compare two runs with
+the same upstream delay, worker count, and machine before treating a result as
+a performance change.
 
 Socket-based end-to-end results depend on the execution environment. A focused
 unit-test pass is not evidence of production capacity, Internet compatibility,
@@ -482,8 +492,8 @@ Current important bounds include:
 - fixed 8 KiB buffers for the initial data and each relay direction;
 - a process-wide resolver pool with 4 threads and 128 resolver slots;
 - up to 32 monitor workers;
-- a fixed pool of 32 DNS workers, each keeping one upstream TCP connection
-  open between queries.
+- one DNS event-loop thread, with up to 96 reusable non-blocking upstream TCP
+  connections (configurable with `--dnsconnections`).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for ownership, locking, resolver,
 connection-state, and data-path details.

@@ -11,19 +11,19 @@ The main implementation areas are:
 - `src/` — process startup (`main.c`) and configuration (`args.c`);
 - `src/sni/` — hostname-aware TCP forwarding and the SNI event loop (its
   event-loop and resolver headers are private to this directory);
-- `src/dns/` — local UDP DNS receive, queueing, and upstream TCP forwarding;
+- `src/dns/` — local UDP/TCP DNS service and upstream TCP forwarding;
 - `src/stats/` — counters and the HTTP JSON monitor;
 - `src/net/` — sockets, bounded I/O, hostname extraction, and SOCKS5 helpers;
 - `src/filter/` — whitelist loading, matching, and reload;
-- `src/fifo/` — the bounded DNS message queue;
 - `src/log/` — logging and log synchronization.
 
 Each `src/<module>/` directory builds one static library (`zroxy_<module>`);
 the executable and the unit tests link only the libraries they need.
 
-When this document says “the event loop”, it means the SNI listener loop in
-`src/sni/sni_event_loop.c`. When it says “the main thread”, it means the
-thread running `src/main.c`.
+The SNI listener and the DNS service each own an event loop. The SNI loop is
+implemented in `src/sni/sni_event_loop.c`; the DNS loop is implemented in
+`src/dns/dns_event_loop.c`. “The main thread” means the thread running
+`src/main.c`.
 
 ## Design summary
 
@@ -31,17 +31,17 @@ zroxy is one process containing three optional services:
 
 1. one SNI listener event loop for each configured `PORT` entry;
 2. one monitor accept loop when `MONITOR` is configured; and
-3. one DNS receive loop and a fixed pool of DNS workers when `LDNS` is
-   configured.
+3. one DNS event loop when `LDNS` is configured.
 
 The SNI data plane does not create one pthread per client. Each listener owns
 one long-lived event-loop thread and represents accepted clients as connection
 objects managed by that thread. Hostname resolution is moved out of the event
 loop into one bounded, process-wide resolver pool.
 
-The DNS service uses a fixed pool of 32 worker threads that wait on the DNS
-queue; each worker keeps one upstream TCP connection open between queries. The
-monitor still uses detached pthreads for accepted work, bounded to 32.
+The DNS service has one joinable event-loop thread. It drives UDP intake, local
+DNS-over-TCP clients, resolver completions, and a bounded group of reusable
+upstream TCP connections without creating one thread per request. The monitor
+still uses detached pthreads for accepted work, bounded to 32.
 
 `DCACHE` selects the bounded answer-cache capacity; zero leaves the cache
 pointer null and disables caching. `DTTL` is copied to the DNS service and is
@@ -55,18 +55,19 @@ the SOA RDLENGTH after writing its variable-length names. If the bounded UDP
 response cannot fit the SOA, the service retries as valid NODATA without an
 authority record rather than returning SERVFAIL.
 
-The optional DNS ACL is evaluated in the receive thread immediately after
-`recvfrom` and on accepted TCP peers before queue admission. It uses host-order
+The optional DNS ACL is evaluated in the DNS event loop immediately after
+`recvfrom` and on accepted TCP peers before request admission. It uses host-order
 IPv4 network/mask pairs and does not send a refusal response to a denied UDP
 source. An unset ACL is unrestricted on loopback binds and otherwise defaults
 to loopback, RFC 1918, and shared-address-space ranges; an explicit `/0` is
 the deliberate open policy.
 
-`DRATE` is a receive-thread-only token bucket keyed by source IPv4 address.
+`DRATE` is an event-loop-owned token bucket keyed by source IPv4 address.
 It has 1024 fixed slots, a two-burst capacity, and millitoken arithmetic with
 saturating refill for large monotonic timestamps; colliding addresses share a
 slot. TCP is not rate-limited because its connection and pipelined-query caps
-already bound work. Over-limit UDP datagrams are dropped before FIFO admission.
+already bound work. Over-limit UDP datagrams are dropped before request
+allocation.
 
 The DNS service exposes cache, queue, and TCP-capacity counters through a
 generic statistics extra hook. The monitor takes the statistics object's lock,
@@ -75,9 +76,9 @@ the hook takes the cache mutex only after the statistics lock. DNS shutdown
 clears the hook before freeing the cache, so a monitor report cannot retain a
 DNS pointer after service teardown.
 
-Repeated DNS queue, TCP-capacity, and `NO DATA` errors use one-second
-throttles. Receive-loop throttles are receive-thread-owned; the worker-shared
-`NO DATA` throttle uses atomic state transitions and counters.
+Repeated DNS capacity and `NO DATA` errors use one-second throttles. The event
+loop owns its capacity state; the shared `NO DATA` throttle uses atomic state
+transitions and counters.
 
 The main thread waits for signals: `SIGHUP` reloads the whitelist, and
 `SIGINT`/`SIGTERM` stop the SNI listeners and the DNS service and exit with
@@ -101,8 +102,7 @@ flowchart LR
         Filter[filter\nwhitelist and reload]
         SNI[SNI listener event loop\none per PORT entry]
         Resolve[resolver pool\n4 threads / 128 slots]
-        DNS[DNS receive loop\nUDP + FIFO]
-        DNSWorkers[DNS worker pool\n32 threads]
+        DNS[DNS event loop\nUDP + TCP + upstreams]
         Monitor[monitor accept loop]
         MonWorkers[monitor workers\nmaximum 32]
         Stats[statistics objects\nper service]
@@ -123,9 +123,8 @@ flowchart LR
     SNI <--> Resolve
     SNI --> Upstream
     SNI --> SOCKS
-    DNS --> DNSWorkers
-    DNSWorkers --> DNSUpstream
-    DNSWorkers --> SOCKS
+    DNS --> DNSUpstream
+    DNS --> SOCKS
     Monitor --> MonWorkers
     SNI --> Stats
     DNSWorkers --> Stats
@@ -145,10 +144,8 @@ If Mermaid is not rendered by the viewer, the same topology is:
                          |       v              |
                          |  resolver pool       |
                          |                      |
- DNS UDP ---------------> DNS receive/FIFO -----+----> DNS over TCP
-                         |       |              |      direct or SOCKS5
-                         |       v              |
-                         |  DNS worker pool (32)|
+ DNS UDP ---------------> DNS event loop -------+----> DNS over TCP
+                         |                      |      direct or SOCKS5
                          |                      |
  Monitor HTTP ----------> monitor accept/workers |
                          |                      |
@@ -197,7 +194,7 @@ sequenceDiagram
     end
 
     opt LDNS configured
-        M->>D: bind, start worker pool and receive thread
+        M->>D: bind, start DNS event loop
         D-->>M: service handle or failure
     end
 
@@ -215,7 +212,7 @@ sequenceDiagram
     end
 
     M->>S: stop each listener (close connections, join loop)
-    M->>D: stop receive thread, drain queue, join workers
+    M->>D: wake and join DNS event loop
     M-->>M: return 0
 ```
 
@@ -246,9 +243,8 @@ them.
   a whitelist it is logged and ignored.
 - `SIGINT` or `SIGTERM` starts shutdown. Each SNI listener is stopped: its
   event loop is woken, closes every client and upstream connection, and is
-  joined. The DNS receive thread is woken through its wake pipe and joined;
-  the queue is then closed, workers answer what is already queued, close
-  their upstream connections and are joined. `main` returns `0`.
+  joined. The DNS event loop is woken through its wake pipe, completes cleanup
+  of its requests and descriptors, and is joined. `main` returns `0`.
 - The monitor and the whitelist watcher are not stopped explicitly. They only
   read shared state and end with the process.
 
@@ -274,10 +270,10 @@ started, then returns `1`.
 | `src/net/net.c` | IPv4 listen/connect, HTTP/TLS host extraction | Protocol-independent socket helpers |
 | `src/net/net_io.c` | Exact and deadline-bounded I/O | Shared timeout behavior |
 | `src/net/socks.c` | Blocking SOCKS5 client helper | Used by DNS and legacy/test paths |
-| `src/dns/dnsserver.c` | DNS service start/stop and receive thread | Owns the UDP socket and wake pipe |
-| `src/dns/dnsproxy.c` | UDP receive, queue, worker pool | Direct/SOCKS5 upstream forwarding over kept connections |
+| `src/dns/dnsserver.c` | DNS service socket start/stop | Owns listener sockets and shutdown sequencing |
+| `src/dns/dns_event_loop.c` | Non-blocking DNS state machines | Owns DNS listener, client, upstream, resolver and wake fds |
+| `src/dns/dnsproxy.c` | DNS local answers and legacy test helpers | Shared request validation and reply construction |
 | `src/dns/dns.c` | DNS decode/encode | Bounded packet representation |
-| `src/fifo/fifo.c` | Fixed-size FIFO with blocking pop | Backpressure/drop boundary for DNS |
 | `src/stats/statistics.c` | Per-service counters | One mutex per statistics object |
 | `src/stats/monitor.c` | HTTP monitor accept/workers/JSON | Maximum 32 monitor workers |
 | `src/log/log.c`, `src/log/loglock.c` | Logging | Shared logging path |
@@ -307,19 +303,19 @@ flowchart TB
     end
 
     subgraph DNSService[optional DNS]
-        DA[DNS receive thread]
-        DW[DNS worker pool\n32 joinable threads]
+        DE[DNS event-loop thread]
+        Upstreams[reusable upstream TCP connections\n1..96]
     end
 
     Main --> Loop
     Main --> MA
-    Main --> DA
+    Main --> DE
     Loop <--> R1
     Loop <--> R2
     Loop <--> R3
     Loop <--> R4
     MA --> MW
-    DA --> DW
+    DE --> Upstreams
 ```
 
 ### Ownership rules
@@ -341,17 +337,19 @@ flowchart TB
   objects. Its `localdns_free` function does not free those aliases.
 - Monitor workers close their client descriptor exactly once and release their
   worker slot before exiting.
-- Each DNS worker owns at most one upstream connection, opened on demand and
-  closed when the worker exits. The DNS service object owns the UDP socket, the
-  wake pipe, the queue and the worker threads; `dnsserver_stop` releases them.
+- The DNS event loop owns its UDP/TCP listeners, wake pipe, resolver completion
+  pipe, local TCP clients, requests, and reusable upstream connections.
+  `dnsserver_stop` wakes and joins it before releasing those resources.
 
 ### File-descriptor ownership
 
 ```text
 main
   ├─ creates/binds monitor fd ──> monitor accept thread
-  ├─ creates/binds DNS fd ──────> DNS receive thread (+ wake pipe)
-  │                                   └─ one upstream fd per DNS worker
+  ├─ creates/binds DNS fds ─────> owning DNS event-loop thread
+  │                                   ├─ wake pipe and resolver completion pipe
+  │                                   ├─ local TCP client fds
+  │                                   └─ reusable upstream fds
   └─ creates/binds SNI fd ──────> owning SNI event-loop thread
                                       ├─ wake pipe
                                       ├─ resolver completion pipe
@@ -608,26 +606,22 @@ DNS has a separate architecture from the non-blocking SNI loop.
 ```mermaid
 flowchart TD
     U[UDP DNS client] --> L[local UDP socket]
-    L --> R[DNS receive loop]
+    L --> R[DNS event loop]
     R --> V{query? header, no QR,\nfits 510 bytes}
     V -- no --> Ignore[ignore]
-    V -- yes --> Q{FIFO has room?}
+    V -- yes --> Q{request capacity available?}
     Q -- no --> SF[SERVFAIL]
-    Q -- yes --> F[bounded FIFO\n128 messages]
-    F --> W[DNS worker pool\n32 threads, blocking pop]
-    W --> H{opcode QUERY,\none question?}
+    Q -- yes --> H{opcode QUERY,\none question?}
     H -- no --> E[NOTIMP / FORMERR]
     H -- yes --> C{DNS name matches whitelist?}
     C -- yes, A --> SA[synthetic A = SNIP]
     C -- yes, other type --> ND[NODATA]
-    C -- no --> AGE{queued > 3 s?}
-    AGE -- yes --> Ignore
-    AGE -- no --> K{cache}
+    C -- no --> K{cache}
     K -- fresh entry --> Reply
-    K -- same query in flight --> WAIT[wait for that worker's reply]
+    K -- same query in flight --> WAIT[event-loop follower]
     WAIT -- reply --> Reply
     WAIT -- failed / timeout --> SF
-    K -- miss --> T[upstream TCP query\non the worker's kept connection]
+    K -- miss --> T[upstream TCP query\non a reusable connection]
     T --> D[direct TCP]
     T --> X[SOCKS5 TCP]
     D --> R2[read length-prefixed response]
@@ -642,28 +636,28 @@ flowchart TD
     TC --> Reply
 ```
 
-### DNS receive and worker flow
+### DNS event-loop flow
 
-1. `dnsserver_start` creates the DNS state and the FIFO, binds the configured
-   IPv4 UDP socket, starts `DNS_WORKER_COUNT` (32) joinable workers, then
-   starts the receive thread. Any failure undoes what was started and returns
-   `NULL`.
-2. The receive thread polls the UDP socket and a wake pipe. Each datagram is
-   read into a bounded `dnsMessage_t` and pushed into the FIFO. Datagrams
-   shorter than a header, larger than 510 bytes, or with QR set are ignored.
-   A full FIFO answers SERVFAIL from the receive thread.
-3. Workers block on the FIFO's condition variable (`fifo_pop_wait`); there is
-   no polling or sleep. Each worker handles one query at a time.
-4. A non-QUERY opcode gets NOTIMP and a QDCOUNT other than 1 gets FORMERR.
-   Otherwise the worker decodes the message. A whitelisted name is answered
+1. `dnsserver_start` binds the configured IPv4 UDP socket and the optional
+   same-port TCP listener, then starts one joinable DNS event-loop thread.
+   The loop owns client sockets, the wake pipe, resolver completions, and a
+   bounded set of upstream TCP connections.
+2. The loop drains up to 64 UDP datagrams per readiness notification and then
+   returns to the remaining ready sockets. Datagrams shorter than a header,
+   larger than 510 bytes, or with QR set are ignored. At most 2048 accepted
+   requests, 128 local TCP clients, 96 upstream connections, and 16 MiB of
+   response buffers are held at once; a request rejected by a bound receives
+   SERVFAIL when it is a valid DNS query.
+3. A non-QUERY opcode gets NOTIMP and a QDCOUNT other than 1 gets FORMERR.
+   Otherwise the event loop decodes the message. A whitelisted name is answered
    locally: A gets `SNIP` with a 300-second TTL, every other type (AAAA,
    HTTPS, SVCB, ...) gets NODATA, because IPv6 is not proxied and a real
    address would bypass the proxy. Anything else, including a message the
    decoder rejects, is forwarded upstream unchanged.
-5. A forwarded query that waited in the FIFO longer than
-   `DNS_QUEUE_MAX_AGE_MS` (3 s) is dropped: its client has given up or
-   retried. Otherwise the answer cache (`src/dns/dnscache.c`) is consulted;
-   see below.
+5. A forwarded query is given one absolute deadline of twice `DTIMEOUT`.
+   The loop never blocks on an upstream connect, TCP read/write, SOCKS5
+   exchange, or cache follower. Otherwise the answer cache
+   (`src/dns/dnscache.c`) is consulted; see below.
 6. Upstream DNS uses TCP framing: a two-byte network-order length followed by
    the DNS payload. Each write and read has the configured DNS timeout as a
    monotonic deadline for the whole exchange. Up to 1232 bytes of the response
@@ -671,12 +665,10 @@ flowchart TD
    step. A response larger than the client's UDP size (512, or its EDNS0 size
    clamped to 1232) is sent as header and question with TC set; the client
    retries over the local TCP listener (below).
-7. A worker keeps its upstream connection open for the next query. Before
-   reuse it drops the connection if the server already closed it (readable
-   with no request outstanding). If a reused connection still fails, the query
-   is retried once on a fresh connection; a failure on a fresh connection is
-   final, so a broken upstream is not hammered.
-8. The worker sends the response back over UDP and updates statistics. A
+7. Each upstream connection carries one request at a time and is reused while
+   idle. A failed request is retried once on a fresh connection; a failure on
+   a fresh connection is final, so a broken upstream is not hammered.
+8. The loop sends the response back over UDP and updates statistics. A
    failed upstream exchange is answered with SERVFAIL instead of silence. A
    reply whose id or question differs from the query is treated as a failure
    and its connection is closed, so it is never relayed or cached.
@@ -685,17 +677,16 @@ flowchart TD
 
 - `dnsserver_start` binds a TCP listener on the UDP socket's address and
   port. If that fails the service logs it and stays UDP-only.
-- The receive thread polls it with the UDP socket and wake pipe. An accepted
-  connection is queued as a `DNS_MSG_TCP_CONN` job; beyond 8 open
-  connections (`DNS_TCP_MAX_CONNS`), or with a full FIFO, it is closed.
-- A worker that takes the job serves the connection itself: it reads
+- The event loop accepts up to 128 connections and serves each one in its own
+  nonblocking state machine.
+- It reads
   length-prefixed queries one after another (pipelined queries are answered
   in order), runs each through the same path as UDP, and frames each reply.
   It stops after 32 queries, 3 s idle, a malformed or QR-set message, or a
   stop request (the wake pipe stays readable after `dnsserver_stop`), then
-  closes the socket. At most 8 of the 32 workers are therefore busy with TCP.
-- TCP replies are never truncated. The worker uses a 64 KiB heap buffer for
-  them; UDP workers keep a 1232-byte stack buffer.
+  closes the socket.
+- TCP replies are never truncated. Response buffers are bounded by the shared
+  16 MiB budget; UDP replies use the client's advertised size and TC.
 - A reply shared by the cache holds at most 1232 bytes. A TCP query whose
   shared reply is longer fetches it again itself.
 
@@ -711,20 +702,16 @@ flowchart TD
   time spent in the cache. A TTL of 0 is not stored.
 - At most 2048 entries; the least recently used is evicted first. Expired
   entries are removed when looked up or evicted.
-- While one worker fetches a key (the leader), workers with the same key wait
-  for its reply instead of going upstream, for up to twice the DNS timeout.
+- While one request fetches a key (the leader), later requests with the same
+  key are attached as event-loop followers and complete when the leader does.
   A failed fetch answers its followers with SERVFAIL. Up to 64 keys can be in
   flight; beyond that a query is forwarded on its own.
 - One mutex guards entries and flights. Upstream I/O never runs with it held.
 - Whitelisted names are answered before the cache is consulted, so a
   whitelist reload takes effect at once. There is no stale serving yet.
 
-`dnsserver_stop` writes to the wake pipe and joins the receive thread, then
-closes the FIFO: workers drain what is already queued, close their upstream
-connections and exit, and are joined.
-
-`recvfrom` failures, including `EINTR`, do not enqueue a job. The FIFO has a
-hard capacity of 128 messages.
+`dnsserver_stop` writes to the wake pipe, joins the event-loop thread, cancels
+pending resolver work, and closes every client and upstream connection.
 
 ## Monitor and statistics
 
@@ -862,9 +849,8 @@ configured DNS options are sufficient to start the service.
 | Resolver pool queues/slots | pool mutex | resolver workers and submit/release paths |
 | Resolver completion ring | sink mutex | resolver workers and owning event loop |
 | Filter snapshot pointer | filter rwlock (read: lookup, write: swap) | SNI/DNS readers, reload watcher, `SIGHUP` |
-| Statistics counters | one mutex per statistics object | SNI/DNS workers and monitor workers |
+| Statistics counters | one mutex per statistics object | SNI/DNS event loops and monitor workers |
 | Monitor statistics-list head | monitor `stats_lock` | startup/add and monitor response generation |
-| DNS FIFO indices, buffer, closed flag | FIFO mutex + not-empty condition | DNS receive thread and DNS workers |
 | Monitor worker count | monitor worker mutex | monitor accept/workers |
 | SNI live-connection count | SNI worker mutex | SNI accept/destruction paths |
 | Listener startup/stop state | listener mutex/condition | `main` and the event-loop thread |
@@ -885,8 +871,8 @@ flowchart LR
     Input[untrusted input] --> Limits[parser and buffer limits]
     Limits --> Conn[1024 SNI connection slots]
     Limits --> Resolver[128 resolver slots]
-    Limits --> DNSQ[128 DNS FIFO messages]
-    Limits --> DNSW[32 DNS workers]
+    Limits --> DNSR[2048 DNS requests]
+    Limits --> DNSU[96 DNS upstream connections]
     Limits --> MonW[32 monitor workers]
     Conn --> Buffers[8 KiB SNI hello +\n8 KiB per relay direction]
     Buffers --> Deadline[monotonic I/O deadlines]
@@ -905,18 +891,20 @@ Current important bounds are:
 | Resolver workers | 4 | `SNI_RESOLVER_THREADS` |
 | Resolver slots | 128 | `SNI_RESOLVER_SLOTS` |
 | Per-listener client lookup quota | 104 | `SNI_RESOLVER_LISTENER_QUOTA` |
-| DNS FIFO messages | 128 | `DNS_QUEUE_LEN` |
 | DNS packet representation | 512 bytes | `DNS_MSG_SIZE` |
-| DNS workers / kept upstream connections | 32 | `DNS_WORKER_COUNT` |
+| DNS accepted requests | 2048 | `DNS_EVENT_REQUESTS` |
+| DNS upstream connections | 96 default, configurable 1..96 | `DNS_EVENT_UPSTREAMS`, `DNSCONNECTIONS` |
+| DNS local TCP clients | 128 | `DNS_EVENT_CLIENTS` |
+| DNS response buffers | 16 MiB | `DNS_EVENT_RESPONSE_BYTES` |
 | Monitor workers | 32 | `MON_MAX_WORKERS` |
 | Monitor request header | 4096 bytes | `MON_MAX_HEADER` |
 | Config line | 1024 bytes | `ZROXY_MAX_CONFIG_LINE` |
 | Config value | 512 bytes | `ZROXY_MAX_CONFIG_VALUE` |
 | Hostname | 253/255 bytes depending on layer | resolver/config limits |
 
-Capacity rejection is deliberate at these boundaries. A full DNS FIFO, full
-worker pool, full resolver quota, or full SNI connection cap should not turn
-into unbounded memory growth.
+Capacity rejection is deliberate at these boundaries. Full DNS request,
+upstream, or response-buffer capacity, a full resolver quota, or a full SNI
+connection cap should not turn into unbounded memory growth.
 
 ## Error and cleanup paths
 
@@ -1030,8 +1018,7 @@ These are the rules future changes should preserve or update explicitly:
    incomplete list.
 9. Configured service startup failures must be visible to `main`.
 10. Monitor worker limits must be enforced before creating detached worker
-    threads. DNS uses a fixed worker pool and must not create threads per
-    query.
+    threads. DNS must not create a thread per query.
 11. Descriptors must be removed from the event backend before close and set to
     `-1` afterward.
 12. Documentation must distinguish implemented behavior, tested behavior, and
@@ -1041,17 +1028,17 @@ These are the rules future changes should preserve or update explicitly:
 
 - Shutdown does not stop the monitor or the whitelist watcher; they end with
   the process.
-- Each DNS worker sends one query at a time on its connection (no TCP
-  pipelining). Throughput toward a slow upstream is bounded by
-  `DNS_WORKER_COUNT` divided by the upstream round-trip time.
-- Workers are woken in condition-variable order, so under light load queries
-  spread across workers and up to `DNS_WORKER_COUNT` upstream connections may
-  be opened before they are reused.
+- Each DNS upstream connection carries one query at a time (no TCP
+  pipelining). Throughput toward a slow upstream is bounded by the configured
+  upstream-connection count divided by the upstream round-trip time.
+- The DNS loop currently uses `poll`, rebuilding a bounded watch set of at
+  most 228 descriptors. A Linux `epoll` backend remains follow-up work for
+  substantially larger connection caps.
 - Monitor request handling still uses `select` internally and one detached
   worker per accepted monitor client within its 32-worker cap.
 - A resolver worker can remain allocated until process exit if bounded shutdown
   waits expire while it is inside `getaddrinfo()`.
-- A musl build, live DNS-worker flooding, and some file-watcher concurrency
+- A musl build, live DNS event-loop flooding, and some file-watcher concurrency
   scenarios require separate validation; they are not inferred from unit tests.
 
 Any change to these areas should update this document, the relevant source

@@ -2,6 +2,34 @@
 
 These notes describe the `1.4.0` release. Nothing here says the result is production-ready.
 
+## Unreleased
+
+### DNS
+
+- Replace the FIFO receive path and its fixed 32-thread worker pool with one
+  joinable non-blocking DNS event loop. It owns UDP intake, local DNS-over-TCP
+  clients, upstream DNS-over-TCP sockets, SOCKS5 negotiation, cache followers,
+  resolver completions, and shutdown.
+- Remove the retired FIFO module, blocking DNS forwarding helpers, worker-pool
+  APIs, and their tests. There is now one active DNS data path.
+- Add `DNSCONNECTIONS` / `--dnsconnections` (`-C`) to bound reusable upstream
+  connections from 1 to 96, defaulting to 96.
+- Share the bounded resolver pool with SNI, so enabling DNS no longer creates a
+  second hostname-resolution worker pool.
+- Retry failed upstream and SOCKS hostname resolutions every second, retain a
+  previously usable address during a failed refresh, and refresh successful
+  hostname addresses every minute. Idle upstream sockets are replaced after an
+  address changes.
+- Accept and forward RFC-valid UDP DNS messages through the 512-byte wire
+  limit, including 511- and 512-byte EDNS queries.
+- Fix TCP-client cleanup when queuing a reply runs out of memory, and count an
+  upstream deadline as a timeout without also counting it as an error.
+- Add `QueueDropped`, `UpstreamTimeouts`, `UpstreamErrors`, and
+  `ActiveUpstreams` to the monitor's `DNS_Server` object.
+- Add DNS-over-SOCKS5, bounded-upstream, stress, and benchmark coverage. The
+  benchmark records successful QPS, latency percentiles, process CPU time, and
+  thread/fd peaks as a JSON baseline.
+
 ## 1.4.0 - 2026-10-29
 
 ### Security
@@ -124,4 +152,4 @@ These notes describe the `1.4.0` release. Nothing here says the result is produc
 
 ### Not verified
 
-- Inotify reload under a concurrent lookup, a monitor client that stays open until the 30 second header timeout, a live flood of the DNS worker cap, and a musl build.
+- Inotify reload under a concurrent lookup, a monitor client that stays open until the 30 second header timeout, a live DNS event-loop flood, and a musl build.

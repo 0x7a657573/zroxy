@@ -72,6 +72,9 @@ void dnscache_finish(dnscache_t *cache, dnscache_flight *flight, const uint8_t *
 size_t dnscache_follow(dnscache_t *cache, dnscache_flight *flight, const uint8_t *query, size_t qlen,
 		int64_t deadline_ms, uint8_t *out, size_t cap);
 
+/* Release a follower that is going to be completed by an event loop instead. */
+void dnscache_abandon_follower(dnscache_t *cache, dnscache_flight *flight);
+
 size_t dnscache_count(dnscache_t *cache);
 void dnscache_get_counters(dnscache_t *cache, dnscache_counters *out);
 
