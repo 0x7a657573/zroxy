@@ -23,16 +23,21 @@ def _answer_with(ip):
     return respond
 
 
-def _start(lab, upstream, ldns, dtimeout="1"):
-    return lab.zroxy(
-        [
-            "-l", "0",
-            "-d", "127.0.0.1:%s" % ldns,
-            "-u", "127.0.0.1:%s" % upstream.port,
-            "-t", dtimeout,
-        ],
-        udp_ports=[ldns],
-    )
+def _start(lab, upstream, ldns, dtimeout="1", socks=None, connections=None,
+           upstream_addr=None, socks_addr=None, cache_size=None):
+    args = [
+        "-l", "0",
+        "-d", "127.0.0.1:%s" % ldns,
+        "-u", upstream_addr or "127.0.0.1:%s" % upstream.port,
+        "-t", dtimeout,
+    ]
+    if socks is not None or socks_addr is not None:
+        args.extend(["-x", socks_addr or "127.0.0.1:%s" % socks.port])
+    if connections is not None:
+        args.extend(["-C", str(connections)])
+    if cache_size is not None:
+        args.extend(["-e", str(cache_size)])
+    return lab.zroxy(args, udp_ports=[ldns])
 
 
 def _expect_exact(ldns, query, timeout):
@@ -85,6 +90,22 @@ def test_dns_forward_fragmented():
             raise AssertionError("fake DNS upstream received no query")
         if query not in upstream.queries:
             raise AssertionError("upstream query mismatch: %r" % upstream.queries)
+
+
+def test_dns_forward_through_socks():
+    query = zroxy_lab.build_dns_query("socks-dns.test", qid=0x1A2C)
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        socks = lab.socks_server(upstream_host="127.0.0.1", upstream_port=upstream.port,
+                                 fragment=1, fragment_gap=0.005)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, socks=socks, connections=4)
+        _expect_exact(ldns, query, 3.0)
+        if not socks.connects:
+            raise AssertionError("DNS did not issue a SOCKS CONNECT")
+        if socks.connects[0] != ("127.0.0.1", upstream.port):
+            raise AssertionError("unexpected SOCKS destination: %r" % (socks.connects,))
+        proc.check_alive()
 
 
 def test_dns_bounded_failures():
@@ -141,6 +162,77 @@ def test_dns_bounded_failures():
         upstream.set_mode("reply")
         recovery = zroxy_lab.build_dns_query("example.test", qid=0x00C2)
         _expect_exact(ldns, recovery, 3.0)
+        proc.check_alive()
+
+
+def _expect_resolution_retry(proc, host):
+    needle = "dns resolver failed for %s; retrying" % host
+    if not proc.wait_log(needle, 4.0):
+        raise AssertionError("resolver failure was not reported for %s\n%s" %
+                             (host, proc.log_text()))
+    failures = proc.count_log(needle)
+    if not proc.wait_log(needle, 2.5, after=failures):
+        raise AssertionError("resolver did not retry %s\n%s" % (host, proc.log_text()))
+    proc.check_alive()
+
+
+def test_dns_hostname_resolution_retries():
+    """A failed hostname resolution must not make the event loop permanent-fail."""
+    upstream_host = "zroxy-upstream-missing.invalid"
+    socks_host = "zroxy-socks-missing.invalid"
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, dtimeout="1",
+                      upstream_addr="%s:53" % upstream_host)
+        _expect_resolution_retry(proc, upstream_host)
+        errors = proc.count_log("NO DATA")
+        _expect_bounded_failure(proc, ldns,
+                                zroxy_lab.build_dns_query("missing-upstream.test", qid=0x33A1),
+                                3.5, errors)
+
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, dtimeout="1",
+                      socks_addr="%s:1080" % socks_host)
+        _expect_resolution_retry(proc, socks_host)
+        errors = proc.count_log("NO DATA")
+        _expect_bounded_failure(proc, ldns,
+                                zroxy_lab.build_dns_query("missing-socks.test", qid=0x33A2),
+                                3.5, errors)
+
+
+def _padded_dns_query(size, qid):
+    query = bytearray(zroxy_lab.build_dns_query("max-payload.test", qid=qid))
+    if size < len(query) + 15:
+        raise AssertionError("test DNS payload is too small")
+    padding = size - len(query) - 15
+    query[10:12] = struct.pack("!H", 1)
+    query.extend(b"\x00" + struct.pack("!HHIH", 41, 1232, 0, padding + 4))
+    query.extend(struct.pack("!HH", 12, padding) + b"\x00" * padding)
+    if len(query) != size:
+        raise AssertionError("bad padded DNS query length %d" % len(query))
+    return bytes(query)
+
+
+def test_dns_full_size_udp_queries_forward():
+    """RFC-valid 511- and 512-byte UDP messages are accepted and forwarded."""
+    def compact_reply(query):
+        qid = struct.unpack("!H", query[:2])[0]
+        return zroxy_lab.build_dns_response(
+            zroxy_lab.build_dns_query("max-payload.test", qid=qid), UPSTREAM_IP)
+
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=compact_reply)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, cache_size=0)
+        for size, qid in ((511, 0x33B1), (512, 0x33B2)):
+            query = _padded_dns_query(size, qid)
+            reply = zroxy_lab.udp_exchange(ldns, query, 3.0)
+            _expect_rcode(reply, query, 0)
+            if query not in upstream.queries:
+                raise AssertionError("%d-byte UDP query was not forwarded" % size)
         proc.check_alive()
 
 
@@ -342,24 +434,27 @@ def test_dns_rate_limit():
 
 
 def test_dns_upstream_reuse():
-    # Each DNS worker keeps its upstream connection, so once every worker has
-    # connected, further queries must not open new connections.
-    workers = 32
-    queries = workers + 16
+    connections = 4
+    queries = 24
     with zroxy_lab.Lab() as lab:
         upstream = lab.dns_server(mode="keepalive", response_fn=_answer_with(UPSTREAM_IP))
         ldns = zroxy_lab.free_udp_port()
-        proc = _start(lab, upstream, ldns)
-        for i in range(queries):
-            _expect_exact(ldns, zroxy_lab.build_dns_query("reuse%d.test" % i, qid=0x4000 + i), 3.0)
+        proc = _start(lab, upstream, ldns, connections=connections)
+        _, errors = zroxy_lab.run_pool(
+            12, range(queries),
+            lambda i: _expect_exact(ldns, zroxy_lab.build_dns_query(
+                "reuse%d.test" % i, qid=0x4000 + i), 3.0),
+        )
+        if errors:
+            raise AssertionError("bounded upstream pool lost parallel requests: %r" % (errors,))
         if upstream.query_count() != queries:
             raise AssertionError("upstream saw %d of %d queries" % (upstream.query_count(), queries))
-        if upstream.upstream_connections() > workers:
+        if upstream.upstream_connections() > connections:
             raise AssertionError("upstream connections not reused: %d connections for %d queries"
                                  % (upstream.upstream_connections(), queries))
 
-        # The server now closes every idle kept connection. Each worker must
-        # notice its stale connection and reconnect instead of failing.
+        # The server now closes every idle kept connection. The event loop must
+        # notice stale connections and reconnect instead of failing.
         upstream.set_mode("reply")
         time.sleep(0.5)
         errors = proc.count_log("NO DATA")
@@ -484,6 +579,8 @@ def main():
     tests = [
         test_dns_forward_fragmented,
         test_dns_bounded_failures,
+        test_dns_hostname_resolution_retries,
+        test_dns_full_size_udp_queries_forward,
         test_dns_whitelist_synthetic,
         test_dns_whitelist_reload,
         test_dns_acl,

@@ -10,8 +10,8 @@
 
 #define version	 "1.4.0"
 /*
-* dns : add bounded worker pool, caching, TCP service, ACL, rate limiting,
-*       synthetic answers, stale queue handling, and upstream validation
+* dns : add bounded event loop, caching, TCP service, ACL, rate limiting,
+*       synthetic answers, upstream validation, and bounded upstream sockets
 * sni : bound relay work and harden listener shutdown
 * process : add graceful signal-driven shutdown and whitelist reload
 * build : reorganize public headers and enable shadow/conversion diagnostics

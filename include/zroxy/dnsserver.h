@@ -18,6 +18,7 @@
 #include <zroxy/dnsrate.h>
 
 #define DNS_LOCAL_TTL_DEFAULT	300
+#define DNS_UPSTREAM_CONNECTIONS_DEFAULT 96
 
 typedef struct
 {
@@ -41,6 +42,7 @@ typedef struct
 	size_t	  acl_count;
 	bool		  acl_set;
 	uint32_t	  rate_qps;
+	uint16_t	  upstream_connections;
 }dnshost_t;
 
 struct dnsserver;

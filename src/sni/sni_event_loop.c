@@ -281,16 +281,7 @@ static void note_relay_yield(void) { }
 
 static bool set_nb_cloexec(int fd)
 {
-	int flags = fcntl(fd, F_GETFL, 0);
-	int fdflags;
-	if (flags < 0)
-		return false;
-	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
-		return false;
-	fdflags = fcntl(fd, F_GETFD, 0);
-	if (fdflags < 0)
-		return false;
-	return fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) == 0;
+	return net_set_nonblock_cloexec(fd);
 }
 
 static ssize_t io_read(int fd, void *buf, size_t len)

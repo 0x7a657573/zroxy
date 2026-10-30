@@ -622,6 +622,32 @@ static void test_dns_validation(void)
     }
 }
 
+static void test_dns_connection_limit(void)
+{
+    zroxy_t cfg = {0};
+    char a0[] = "zroxy";
+    char a1[] = "-C";
+    char a2[] = "48";
+    const char *argv[] = {a0, a1, a2};
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 3, argv), "DNS connection limit parses");
+    if (cfg.dnsserver)
+        expect_u16(cfg.dnsserver->upstream_connections, 48, "DNS connection limit value");
+    free_settings(&cfg);
+
+    {
+        zroxy_t invalid = {0};
+        char b0[] = "zroxy";
+        char b1[] = "--dnsconnections";
+        char b2[] = "97";
+        const char *bad_argv[] = {b0, b1, b2};
+        reset_getopt();
+        expect_true(!args_init(&invalid, 3, bad_argv), "DNS connection limit above maximum rejects");
+        free_settings(&invalid);
+    }
+}
+
 static void test_dns_cache_and_ttl_ranges(void)
 {
     {
@@ -751,6 +777,7 @@ int main(void)
     test_repeated_ldns_resets_default_port();
     test_config_dns_timeout_before_listener();
     test_dns_validation();
+    test_dns_connection_limit();
     test_dns_cache_and_ttl_ranges();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();

@@ -32,6 +32,10 @@ DNS_COUNTERS = COUNTERS + (
     "RateDropped",
     "TcpRefused",
     "TcpActive",
+    "QueueDropped",
+    "UpstreamTimeouts",
+    "UpstreamErrors",
+    "ActiveUpstreams",
 )
 
 
@@ -157,15 +161,44 @@ def test_monitor_after_traffic():
         proc.check_alive()
 
 
+def test_dns_timeout_is_not_also_an_error():
+    query = zroxy_lab.build_dns_query("timeout.test", qid=0x4466)
+    with zroxy_lab.Lab() as lab:
+        dns_up = lab.dns_server(mode="timeout", stall=5.0)
+        ldns = zroxy_lab.free_udp_port()
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(
+            ["-l", "0", "-m", str(mon_port), "-d", "127.0.0.1:%s" % ldns,
+             "-u", "127.0.0.1:%s" % dns_up.port, "-t", "1"],
+            tcp_ports=[mon_port], udp_ports=[ldns],
+        )
+        base = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"]["DNS_Server"]
+        reply = zroxy_lab.udp_exchange(ldns, query, 4.0)
+        if reply is None or (reply[3] & 0x0F) != 2:
+            raise AssertionError("upstream timeout did not return SERVFAIL: %r" % reply)
+        doc = _wait_doc(
+            mon_port,
+            lambda current: current["DNS_Server"]["UpstreamTimeouts"] >=
+            base["UpstreamTimeouts"] + 1,
+            3.0,
+        )["json"]["DNS_Server"]
+        if doc["UpstreamErrors"] != base["UpstreamErrors"]:
+            raise AssertionError("timeout also incremented UpstreamErrors: %r" % doc)
+        proc.check_alive()
+
+
 def main():
-    try:
-        test_monitor_after_traffic()
-    except Exception:
-        traceback.print_exc()
-        print("FAIL test_monitor_after_traffic")
-        return 1
-    print("PASS test_monitor_after_traffic")
-    return 0
+    failed = 0
+    for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error):
+        try:
+            test()
+        except Exception:
+            failed += 1
+            traceback.print_exc()
+            print("FAIL", test.__name__)
+        else:
+            print("PASS", test.__name__)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

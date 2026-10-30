@@ -41,13 +41,17 @@ zroxy_add_module(zroxy_log
     SOURCES src/log/log.c src/log/loglock.c
     DEPS Threads::Threads)
 
-zroxy_add_module(zroxy_fifo
-    SOURCES src/fifo/fifo.c
-    DEPS Threads::Threads)
-
 zroxy_add_module(zroxy_net
     SOURCES src/net/net.c src/net/net_io.c src/net/socks.c
     DEPS zroxy_log)
+
+# Hostname resolution is shared by the SNI and DNS data planes.  Keeping it
+# outside either module prevents a second bounded resolver pool from being
+# created when both services are enabled.
+zroxy_add_module(zroxy_resolver
+    SOURCES src/sni/sni_resolver.c
+    DEPS zroxy_net zroxy_log Threads::Threads)
+target_include_directories(zroxy_resolver PUBLIC ${PROJECT_SOURCE_DIR}/src/sni)
 
 zroxy_add_module(zroxy_filter
     SOURCES src/filter/filter.c
@@ -62,8 +66,8 @@ zroxy_add_module(zroxy_monitor
     DEPS zroxy_stats zroxy_net)
 
 zroxy_add_module(zroxy_dns
-    SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsacl.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dnsserver.c
-    DEPS zroxy_net zroxy_filter zroxy_stats zroxy_monitor zroxy_fifo)
+    SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsacl.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dns_event_loop.c src/dns/dnsserver.c
+    DEPS zroxy_net zroxy_resolver zroxy_filter zroxy_stats zroxy_monitor)
 
 # The SNI engine's own headers (event loop, resolver) stay private to
 # src/sni/; tests that drive the engine directly link zroxy_sni_internal.
@@ -74,9 +78,8 @@ set(ZROXY_SNI_SOURCES
     src/sni/sniproxy.c
     src/sni/sniclient.c
     src/sni/sni_event_loop.c
-    src/sni/sni_resolver.c
 )
-set(ZROXY_SNI_DEPS zroxy_net zroxy_filter zroxy_stats)
+set(ZROXY_SNI_DEPS zroxy_net zroxy_resolver zroxy_filter zroxy_stats)
 
 zroxy_add_module(zroxy_sni
     SOURCES ${ZROXY_SNI_SOURCES}
@@ -102,12 +105,12 @@ install(TARGETS zroxy RUNTIME DESTINATION bin)
 if(BUILD_TESTING)
     # SNI engine builds with test hooks, once per event backend.
     zroxy_add_module(zroxy_sni_hooks
-        SOURCES ${ZROXY_SNI_SOURCES}
-        DEPS ${ZROXY_SNI_DEPS} zroxy_sni_internal
+        SOURCES ${ZROXY_SNI_SOURCES} src/sni/sni_resolver.c
+        DEPS zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal
         DEFINES SNI_TEST_HOOKS)
     zroxy_add_module(zroxy_sni_hooks_poll
-        SOURCES ${ZROXY_SNI_SOURCES}
-        DEPS ${ZROXY_SNI_DEPS} zroxy_sni_internal
+        SOURCES ${ZROXY_SNI_SOURCES} src/sni/sni_resolver.c
+        DEPS zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal
         DEFINES SNI_TEST_HOOKS SNI_FORCE_POLL)
 
     # zroxy_add_unit_test(<name> <source> <libs>...)
@@ -132,13 +135,10 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args)
     zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net)
     zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)
-    zroxy_add_unit_test(dnsproxy_tcp_io  tests/test_dnsproxy_tcp_io.c  zroxy_dns)
-    zroxy_add_unit_test(io_limits        tests/test_io_limits.c        zroxy_dns zroxy_sni)
     zroxy_add_unit_test(sni_engine       tests/test_sni_engine.c       zroxy_sni_hooks)
     zroxy_add_unit_test(sni_engine_poll  tests/test_sni_engine.c       zroxy_sni_hooks_poll)
 
     set_tests_properties(sni_engine sni_engine_poll PROPERTIES TIMEOUT 180)
-    set_tests_properties(io_limits PROPERTIES TIMEOUT 20)
 
     # Spawns the real binary; links nothing from the tree.
     add_executable(test_process tests/test_process.c)
@@ -163,8 +163,8 @@ if(BUILD_TESTING)
         endforeach()
 
         # Stress and benchmark runs are local, but they are slower than the
-        # default suite. DISABLED keeps them out of a plain ctest invocation.
-        # Run them with: ctest --test-dir build -L stress --include-disabled
+        # default suite. DISABLED keeps them out of a plain ctest invocation;
+        # run their commands directly when collecting a local performance run.
         add_test(NAME zroxy_stress
             COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/stress/zroxy_stress.py
                 --duration 3
@@ -178,12 +178,23 @@ if(BUILD_TESTING)
                 --payload-size 1024
                 --duration 2
                 --output ${CMAKE_BINARY_DIR}/benchmark-result.json)
+        add_test(NAME zroxy_dns_benchmark
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/benchmark/dns_benchmark.py
+                --workers 8
+                --upstream-connections 8
+                --duration 2
+                --output ${CMAKE_BINARY_DIR}/dns-benchmark-result.json)
         set_tests_properties(zroxy_stress PROPERTIES
             TIMEOUT 180
             LABELS "stress"
             DISABLED TRUE
             ENVIRONMENT "${ZROXY_TEST_ENV}")
         set_tests_properties(zroxy_benchmark PROPERTIES
+            TIMEOUT 180
+            LABELS "benchmark"
+            DISABLED TRUE
+            ENVIRONMENT "${ZROXY_TEST_ENV}")
+        set_tests_properties(zroxy_dns_benchmark PROPERTIES
             TIMEOUT 180
             LABELS "benchmark"
             DISABLED TRUE

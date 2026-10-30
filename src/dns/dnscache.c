@@ -402,6 +402,15 @@ size_t dnscache_follow(dnscache_t *c, dnscache_flight *f, const uint8_t *query, 
 	return full;
 }
 
+void dnscache_abandon_follower(dnscache_t *c, dnscache_flight *f)
+{
+	if (!c || !f)
+		return;
+	pthread_mutex_lock(&c->mu);
+	flight_release_locked(f);
+	pthread_mutex_unlock(&c->mu);
+}
+
 size_t dnscache_count(dnscache_t *c)
 {
 	size_t n;

@@ -64,7 +64,7 @@ def _check_clean_exit(sig):
         # An open, idle client connection must not hold up shutdown.
         idle = socket.create_connection(("127.0.0.1", sni_port), timeout=2.0)
         try:
-            # Make sure the DNS workers are busy-capable before stopping.
+            # Make sure the DNS event loop has accepted work before stopping.
             zroxy_lab.udp_exchange(ldns, zroxy_lab.build_dns_query("first.test"), 2.0)
             started = time.monotonic()
             os.kill(proc.proc.pid, sig)

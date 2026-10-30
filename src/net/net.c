@@ -24,6 +24,24 @@
 static void *net_memmem(const void *haystack_start, size_t haystack_len,
         		const void *needle_start, size_t needle_len);
 
+bool net_set_nonblock_cloexec(int fd)
+{
+    int flags;
+    int fdflags;
+
+    if (fd < 0)
+        return false;
+    flags = fcntl(fd, F_GETFL, 0);
+    fdflags = fcntl(fd, F_GETFD, 0);
+    if (flags < 0 || fdflags < 0)
+        return false;
+    if ((flags & O_NONBLOCK) == 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0)
+        return false;
+    if ((fdflags & FD_CLOEXEC) == 0 && fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) != 0)
+        return false;
+    return true;
+}
+
 bool net_enable_keepalive(int sock) 
 {
     int yes = 1;
