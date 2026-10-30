@@ -22,6 +22,9 @@ These notes describe the `1.4.0` release. Nothing here says the result is produc
   address changes.
 - Accept and forward RFC-valid UDP DNS messages through the 512-byte wire
   limit, including 511- and 512-byte EDNS queries.
+- Dial a resolved upstream or SOCKS hostname on its configured port; the
+  resolver returns addresses without one, so every query through a hostname
+  failed with SERVFAIL.
 - Fix TCP-client cleanup when queuing a reply runs out of memory, and count an
   upstream deadline as a timeout without also counting it as an error.
 - Add `QueueDropped`, `UpstreamTimeouts`, `UpstreamErrors`, and

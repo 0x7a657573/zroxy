@@ -1093,10 +1093,15 @@ static void resolver_drain(dns_event_t *event)
 			*pending_slot = -1;
 			*pending_req = 0;
 		}
-		if (slot->gai_error == 0 && slot->address_count > 0) {
+		if (slot->gai_error == 0 && slot->address_count > 0 &&
+				slot->addresses[0].address.ss_family == AF_INET) {
+			/* The resolver returns addresses without a port; apply the configured one. */
+			struct sockaddr_storage resolved = slot->addresses[0].address;
+			((struct sockaddr_in *)&resolved)->sin_port = htons(slot->connection_index == 1 ?
+				event->dns->upstream.port : event->dns->socks->port);
 			changed = !*ready || *len != slot->addresses[0].length ||
-				memcmp(addr, &slot->addresses[0].address, *len) != 0;
-			*addr = slot->addresses[0].address;
+				memcmp(addr, &resolved, *len) != 0;
+			*addr = resolved;
 			*len = slot->addresses[0].length;
 			*ready = 1;
 			if (changed)
