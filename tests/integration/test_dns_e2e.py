@@ -203,6 +203,26 @@ def test_dns_hostname_resolution_retries():
                                 3.5, errors)
 
 
+def test_dns_hostname_upstream_forwards():
+    """A resolved upstream or SOCKS hostname is dialed on its configured port."""
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, upstream_addr="localhost:%s" % upstream.port)
+        _expect_exact(ldns, zroxy_lab.build_dns_query("hostname-upstream.test", qid=0x33C1), 3.0)
+        proc.check_alive()
+
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        socks = lab.socks_server(upstream_host="127.0.0.1", upstream_port=upstream.port)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, socks_addr="localhost:%s" % socks.port)
+        _expect_exact(ldns, zroxy_lab.build_dns_query("hostname-socks.test", qid=0x33C2), 3.0)
+        if not socks.connects:
+            raise AssertionError("DNS did not issue a SOCKS CONNECT")
+        proc.check_alive()
+
+
 def _padded_dns_query(size, qid):
     query = bytearray(zroxy_lab.build_dns_query("max-payload.test", qid=qid))
     if size < len(query) + 15:
@@ -579,7 +599,9 @@ def main():
     tests = [
         test_dns_forward_fragmented,
         test_dns_bounded_failures,
+        test_dns_forward_through_socks,
         test_dns_hostname_resolution_retries,
+        test_dns_hostname_upstream_forwards,
         test_dns_full_size_udp_queries_forward,
         test_dns_whitelist_synthetic,
         test_dns_whitelist_reload,
