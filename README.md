@@ -170,7 +170,8 @@ use the key names in the last column.
 | `-m`, `--monitor` | `[ip:]port` | HTTP monitor listener | `MONITOR` |
 | `-k`, `--monitortoken` | token | Bearer token for the monitor | `MONITORTOKEN` |
 | `-a`, `--monitortimeout` | seconds | Incomplete monitor-header timeout | `MONITORTIMEOUT` |
-| `-o`, `--snitimeout` | seconds | SNI socket timeout | `SNITIMEOUT` |
+| `-o`, `--snitimeout` | seconds | SNI handshake, connect, and write-stall timeout | `SNITIMEOUT` |
+| `-I`, `--sniidletimeout` | `1..86400` | Close a relay with no traffic after this many seconds (default 300) | `SNIIDLETIMEOUT` |
 | `-w`, `--white` | path | Whitelist file | `WHITE` |
 | `-d`, `--ldns` | bind:port | Local DNS listener (UDP and TCP) | `LDNS` |
 | `-u`, `--dns` | host[:port] | Upstream DNS server | `DNS` |

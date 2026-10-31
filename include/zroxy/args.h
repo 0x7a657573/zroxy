@@ -25,6 +25,7 @@ typedef struct
 	char 		*WhitePath;
 	dnshost_t	*dnsserver;
 	int			snitimeout;
+	int			sniidletimeout;
 }zroxy_t;
 
 bool args_init(zroxy_t *pgp,int argc, const char **argv);

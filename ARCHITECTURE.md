@@ -523,7 +523,8 @@ the earliest of:
 - current SOCKS phase deadline;
 - pending client-to-upstream write deadline;
 - pending upstream-to-client write deadline; or
-- idle relay deadline after both buffers drain.
+- idle relay deadline after both buffers drain (`SNIIDLETIMEOUT`, default
+  300 s; every other relay and setup deadline uses `SNITIMEOUT`).
 
 The loop calculates one wait timeout from those deadlines, waits in epoll/poll,
 dispatches ready fds, then expires overdue connections and reaps dead objects.

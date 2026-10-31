@@ -1262,6 +1262,47 @@ static void test_zero_timeout_relays(void)
 	close(lfd);
 }
 
+/* A relay with no traffic is bounded by sniidletimeout, not snitimeout. */
+static void test_idle_timeout_separate(void)
+{
+	uint16_t port = 0;
+	int lfd = listen_loopback(&port);
+	int pair[2];
+	sniclient_t *client;
+	pthread_t tid = 0;
+	int up = -1;
+	uint8_t req[64];
+	uint8_t reply[4];
+	int64_t start;
+	int64_t took;
+	expect_true(lfd >= 0 && socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "idle-separate setup");
+	if (lfd < 0)
+		return;
+	client = make_client(pair[1], port, 1, NULL, NULL, NULL);
+	if (client)
+		client->SniConfig.sniidletimeout = 3;
+	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0,
+			"idle-separate handler");
+	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "idle-separate request");
+	up = accept_ms(lfd, 2000);
+	expect_true(up >= 0, "idle-separate upstream accepted");
+	if (up >= 0) {
+		expect_true(read_full_ms(up, req, sizeof(REQ) - 1, 2000) == 0, "idle-separate upstream read");
+		usleep(1600000);
+		expect_true(write_full(up, "PONG", 4) == 0, "idle-separate reply");
+	}
+	expect_true(read_full_ms(pair[0], reply, sizeof(reply), 2000) == 0 &&
+			memcmp(reply, "PONG", 4) == 0, "relay outlives snitimeout while idle");
+	start = mono_ms();
+	pthread_join(tid, NULL);
+	took = mono_ms() - start;
+	expect_true(took >= 2000 && took < 4500, "sniidletimeout closes the idle relay");
+	close(pair[0]);
+	if (up >= 0)
+		close(up);
+	close(lfd);
+}
+
 /* The loop may exit on its own; closing the listener afterwards must not write to its fds. */
 static void test_listener_self_exit(void)
 {
@@ -2909,6 +2950,7 @@ int main(void)
 	test_handshake_timeout();
 	test_idle_timeout();
 	test_zero_timeout_relays();
+	test_idle_timeout_separate();
 	test_relay_budget();
 	test_client_eof_during_hello();
 	test_upstream_eof();

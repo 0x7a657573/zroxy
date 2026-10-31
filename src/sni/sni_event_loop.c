@@ -129,6 +129,7 @@ struct sni_conn {
 	int client_shut;
 	int up_shut;
 	int io_ms;
+	int idle_ms;
 	int socks_phase;
 	int naddr;
 	int addr_i;
@@ -740,6 +741,7 @@ static sni_conn *conn_new(sni_engine *e, int client_fd)
 	c->up_tag.eng = e;
 	c->up_tag.conn = c;
 	c->io_ms = net_timeout_ms(e->cfg.snitimeout);
+	c->idle_ms = e->cfg.sniidletimeout > 0 ? net_timeout_ms(e->cfg.sniidletimeout) : c->io_ms;
 	c->resolve_slot = -1;
 	e->next_generation++;
 	if (e->next_generation == 0)
@@ -763,8 +765,8 @@ static void note_idle(sni_conn *c)
 		return;
 	if (c->c2u_off < c->c2u_len || c->u2c_off < c->u2c_len)
 		return;
-	/* io_ms is clamped, so snitimeout 0 cannot make the idle timer fire at once. */
-	c->idle_at = now + (int64_t)c->io_ms;
+	/* idle_ms is clamped, so a zero timeout cannot make the idle timer fire at once. */
+	c->idle_at = now + (int64_t)c->idle_ms;
 }
 
 static void relay_pump(sni_engine *e, sni_conn *c);
@@ -788,7 +790,7 @@ static void enter_relay(sni_engine *e, sni_conn *c)
 		c->c2u_by = now + (int64_t)c->io_ms;
 		note_pending(c->c2u_len);
 	}
-	c->idle_at = now + (int64_t)c->io_ms;
+	c->idle_at = now + (int64_t)c->idle_ms;
 	c->touched = 1;
 	relay_pump(e, c);
 }

@@ -31,6 +31,8 @@ typedef struct
 	bool UserInternalDNS;
 	char DNSServer[20];
 	int			 snitimeout;
+	/* Relay idle limit in seconds; 0 falls back to snitimeout. */
+	int			 sniidletimeout;
 }SniServer_t;
 
 typedef struct
