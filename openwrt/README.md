@@ -32,6 +32,14 @@ The resulting package is under `bin/packages/<architecture>/zroxy/`. OpenWrt
 specific source commit and checks its archive SHA-256. It builds the binary
 without cross-compiling the test programs.
 
+The feed only supplies the recipe: the source is still downloaded from GitHub
+at the pinned commit, so local or unpushed changes are not built. To build a
+working tree instead, point the build at it:
+
+```sh
+make package/feeds/zroxy/zroxy/{clean,compile} USE_SOURCE_DIR=/absolute/path/to/zroxy V=s
+```
+
 Copy the package to the router and install it with the package manager for the
 router's release:
 
