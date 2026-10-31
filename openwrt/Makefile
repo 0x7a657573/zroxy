@@ -25,7 +25,7 @@ define Package/zroxy
   CATEGORY:=Network
   SUBMENU:=Web Servers/Proxies
   TITLE:=SNI and DNS proxy with optional SOCKS5 upstream
-  DEPENDS:=+libpthread
+  DEPENDS:=+USE_GLIBC:libpthread
 endef
 
 define Package/zroxy/description
