@@ -77,7 +77,46 @@ static void test_http_host_with_port(void)
 
     expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
                 "HTTP Host with port");
-    expect_string(host, "example.com:443", "HTTP Host with port value");
+    expect_string(host, "example.com", "HTTP Host with port value");
+}
+
+static void test_http_host_lowercase_name(void)
+{
+    uint8_t request[] =
+        "GET / HTTP/1.1\r\n"
+        "host: example.com\r\n"
+        "\r\n";
+    char host[ZROXY_MAX_HOSTNAME] = {0};
+
+    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+                "HTTP lowercase host");
+    expect_string(host, "example.com", "HTTP lowercase host value");
+}
+
+static void test_http_host_trailing_space(void)
+{
+    uint8_t request[] =
+        "GET / HTTP/1.1\r\n"
+        "HOST:\texample.com:8080 \t\r\n"
+        "\r\n";
+    char host[ZROXY_MAX_HOSTNAME] = {0};
+
+    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+                "HTTP Host with whitespace");
+    expect_string(host, "example.com", "HTTP Host with whitespace value");
+}
+
+static void test_http_host_only_port(void)
+{
+    uint8_t request[] =
+        "GET / HTTP/1.1\r\n"
+        "Host: :443\r\n"
+        "\r\n";
+    char host[ZROXY_MAX_HOSTNAME] = {0};
+
+    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+                "HTTP Host only port");
+    expect_string(host, ":443", "HTTP Host only port is not stripped to empty");
 }
 
 static void test_tls_sni_valid(void)
@@ -274,6 +313,9 @@ int main(void)
     test_http_host_valid();
     test_http_without_host();
     test_http_host_with_port();
+    test_http_host_lowercase_name();
+    test_http_host_trailing_space();
+    test_http_host_only_port();
     test_http_host_without_terminator();
     test_tls_sni_valid();
     test_tls_sni_truncated_record();

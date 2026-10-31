@@ -4,6 +4,7 @@
  *  Created on: Feb 9, 2020
  *      Author: zeus
  */
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <zroxy/log.h>
@@ -446,6 +447,28 @@ bool net_get_https_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHos
     return false;
 }
 
+static const uint8_t *net_find_host_header(const uint8_t *data, size_t len)
+{
+    static const char needle[] = "\r\nhost:";
+    const size_t n = sizeof(needle) - 1;
+    size_t i;
+    size_t j;
+
+    if (len < n)
+        return NULL;
+    for (i = 0; i + n <= len; i++)
+    {
+        for (j = 0; j < n; j++)
+        {
+            if (tolower(data[i + j]) != needle[j])
+                break;
+        }
+        if (j == n)
+            return data + i;
+    }
+    return NULL;
+}
+
 bool net_get_http_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName)
 {
     const uint8_t *data = buf;
@@ -459,14 +482,15 @@ bool net_get_http_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHost
     HostName[0] = '\0';
     end = data + len;
 
-    pos = (const uint8_t *)net_memmem(buf, len, "\r\nHost:", 7);
+    /* Header names are case-insensitive (RFC 9110 section 5.1). */
+    pos = net_find_host_header(data, len);
     if (pos == NULL || pos < data || pos > end)
         return false;
 
     if ((size_t)(end - pos) < 7)
         return false;
     pos += 7;
-    while (pos < end && *pos == ' ')
+    while (pos < end && (*pos == ' ' || *pos == '\t'))
         pos++;
     if (pos >= end)
         return false;
@@ -474,6 +498,19 @@ bool net_get_http_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHost
     end_pos = (const uint8_t *)net_memmem(pos, (size_t)(end - pos), "\r\n", 2);
     if (end_pos == NULL || end_pos < pos || end_pos > end)
         return false;
+
+    while (end_pos > pos && (end_pos[-1] == ' ' || end_pos[-1] == '\t'))
+        end_pos--;
+
+    /* The remote port comes from the listener, so drop a ":port" suffix. */
+    if (pos < end_pos && *pos != '[')
+    {
+        const uint8_t *colon = end_pos;
+        while (colon > pos && colon[-1] >= '0' && colon[-1] <= '9')
+            colon--;
+        if (colon - 1 > pos && colon < end_pos && colon[-1] == ':')
+            end_pos = colon - 1;
+    }
 
     host_len = (size_t)(end_pos - pos);
     if (host_len == 0)
