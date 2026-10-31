@@ -79,9 +79,10 @@ logread -e zroxy
 ```
 
 Edit `/etc/zroxy/zroxy.conf` to choose the SNI listener, direct or SOCKS5
-upstream, optional whitelist, and optional DNS service. Restart after changing
-this file or either UCI option. `/etc/init.d/zroxy reload` sends `SIGHUP` and
-reloads **only the hostname whitelist**; it does not re-read the main config.
+upstream, optional whitelist, and optional DNS service. After changing this
+file, run `/etc/init.d/zroxy reload`: procd restarts zroxy only if the file has
+changed. `uci commit zroxy` followed by `reload_config` applies UCI changes the
+same way. zroxy picks up whitelist edits by itself, without a reload.
 The service sends stderr to `logread` and procd restarts it after an unexpected
 exit. If a configured listener cannot start, zroxy exits with an error.
 
