@@ -159,6 +159,7 @@ static void test_cli_monitor_and_sni_timeout(void)
     expect_string(cfg.monitor_bind, "127.0.0.1", "bare monitor port binds localhost");
     expect_int(cfg.monitor_header_timeout, 5, "default monitor header timeout");
     expect_int(cfg.snitimeout, 45, "sni timeout value");
+    expect_int(cfg.sniidletimeout, 300, "default sni idle timeout");
 
     free_settings(&cfg);
 }
@@ -648,6 +649,50 @@ static void test_dns_connection_limit(void)
     }
 }
 
+static void test_sni_idle_timeout(void)
+{
+    zroxy_t cfg = {0};
+    char a0[] = "zroxy";
+    char a1[] = "-I";
+    char a2[] = "900";
+    const char *argv[] = {a0, a1, a2};
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 3, argv), "SNI idle timeout parses");
+    expect_int(cfg.sniidletimeout, 900, "SNI idle timeout value");
+    expect_int(cfg.snitimeout, 30, "SNI idle timeout leaves snitimeout alone");
+    free_settings(&cfg);
+
+    {
+        zroxy_t invalid = {0};
+        char b0[] = "zroxy";
+        char b1[] = "--sniidletimeout";
+        char b2[] = "0";
+        const char *bad_argv[] = {b0, b1, b2};
+        reset_getopt();
+        expect_true(!args_init(&invalid, 3, bad_argv), "SNI idle timeout 0 rejects");
+        free_settings(&invalid);
+    }
+
+    {
+        zroxy_t file_cfg = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        write_all_or_fail(fd, "SNIIDLETIMEOUT = 120\n");
+        close(fd);
+        expect_true(args_parse_config(&file_cfg, template_path), "config SNIIDLETIMEOUT parses");
+        expect_int(file_cfg.sniidletimeout, 120, "config SNIIDLETIMEOUT value");
+        unlink(template_path);
+        free_settings(&file_cfg);
+    }
+}
+
 static void test_dns_cache_and_ttl_ranges(void)
 {
     {
@@ -778,6 +823,7 @@ int main(void)
     test_config_dns_timeout_before_listener();
     test_dns_validation();
     test_dns_connection_limit();
+    test_sni_idle_timeout();
     test_dns_cache_and_ttl_ranges();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();

@@ -132,6 +132,7 @@ int main(int argc, const char **argv)
 	Xconf.sta = SniStat;
 	Xconf.wlist = whitelist;
 	Xconf.snitimeout = prg_setting.snitimeout;
+	Xconf.sniidletimeout = prg_setting.sniidletimeout;
 	/*if Set Socks proxy*/
 	if(prg_setting.socks)
 	{

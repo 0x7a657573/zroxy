@@ -123,6 +123,7 @@ static bool parse_dns_rate(zroxy_t *ptr,char *str);
 static bool parse_dns_connections(zroxy_t *ptr,char *str);
 static bool parse_log_level(zroxy_t *ptr,char *str);
 static bool parse_sni_timeout(zroxy_t *ptr,char *str);
+static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str);
 
 static dnshost_t *dns_config(zroxy_t *ptr)
 {
@@ -169,6 +170,7 @@ static arg_option options[] =
 	{ "port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]", OPTION_SECTION_SNI },
 	{ "socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI },
 	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
+	{ "sniidletimeout", 'I', "SECONDS", required_argument, "close a relay idle this long, 1..86400 (default: 300)", OPTION_SECTION_SNI },
 	{ "white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI },
 
 	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS },
@@ -237,6 +239,7 @@ void args_print_usage(void)
 bool args_init(zroxy_t *pgp,int argc, const char **argv)
 {
 	pgp->snitimeout = 30;
+	pgp->sniidletimeout = 300;
 	pgp->monitor_header_timeout = 5;
 	pgp->monitor_bind[0] = '\0';
 	pgp->monitor_token = NULL;
@@ -352,6 +355,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'C': if (!parse_dns_connections(setting,arg)) return -1; break;
 		case 'l': if (!parse_log_level(setting,arg)) return -1; break;
 		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
+		case 'I': if (!parse_sni_idle_timeout(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);
 		default: return -1;
     }
@@ -940,5 +944,14 @@ static bool parse_sni_timeout(zroxy_t *ptr,char *str)
 	if (!parse_i32_range(str, &timeout, 0, 86400))
 		return false;
 	ptr->snitimeout = timeout;
+	return true;
+}
+
+static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str)
+{
+	int timeout;
+	if (!parse_i32_range(str, &timeout, 1, 86400))
+		return false;
+	ptr->sniidletimeout = timeout;
 	return true;
 }
