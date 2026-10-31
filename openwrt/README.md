@@ -108,11 +108,12 @@ authenticate incoming clients.
 
 ## Optional DNS alongside dnsmasq
 
-dnsmasq normally owns port 53. To use zroxy DNS without a port conflict, add
-these lines to `/etc/zroxy/zroxy.conf` and restart zroxy:
+dnsmasq normally owns port 53, and mDNS (umdns, avahi) uses 5353. To use zroxy
+DNS without a port conflict, add these lines to `/etc/zroxy/zroxy.conf` and
+restart zroxy:
 
 ```ini
-LDNS = 127.0.0.1:5353
+LDNS = 127.0.0.1:5354
 DNS = 1.1.1.1:53
 DACL = 127.0.0.0/8
 ```
@@ -121,7 +122,7 @@ For selected domains, add a dnsmasq forwarding rule in `/etc/config/dhcp`,
 within the existing `config dnsmasq` section:
 
 ```text
-list server '/example.com/127.0.0.1#5353'
+list server '/example.com/127.0.0.1#5354'
 ```
 
 Then run `/etc/init.d/dnsmasq restart`. Replace `example.com` with your domain
