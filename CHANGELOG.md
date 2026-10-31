@@ -1,8 +1,8 @@
 # Changelog
 
-These notes describe the `1.4.0` release. Nothing here says the result is production-ready.
+These notes describe the `1.4.1` release. Nothing here says the result is production-ready.
 
-## Unreleased
+## 1.4.1 - 2026-10-31
 
 ### DNS
 
@@ -32,6 +32,17 @@ These notes describe the `1.4.0` release. Nothing here says the result is produc
 - Add DNS-over-SOCKS5, bounded-upstream, stress, and benchmark coverage. The
   benchmark records successful QPS, latency percentiles, process CPU time, and
   thread/fd peaks as a JSON baseline.
+
+### OpenWrt
+
+- Fix the package recipe: install from the CMake install tree, skip test
+  programs, pin the source by commit, and add maintainer and network metadata.
+- Add a procd service with respawn and stderr logging. `reload` restarts
+  zroxy only when its configuration file or UCI options changed.
+- Install `/etc/config/zroxy` and a loopback-only `/etc/zroxy/zroxy.conf` as
+  conffiles. The service ships disabled.
+- Rewrite the OpenWrt guide around the SDK and a local feed, with install,
+  service, firewall, and dnsmasq setup and a release checklist.
 
 ## 1.4.0 - 2026-10-29
 

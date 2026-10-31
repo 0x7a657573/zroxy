@@ -8,7 +8,13 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.4.0"
+#define version	 "1.4.1"
+/*
+* dns : replace the FIFO worker pool with one bounded DNS event loop
+* dns : dial resolved hostnames on the configured port
+* openwrt : add procd service, UCI and default configuration
+*/
+//#define version	 "1.4.0"
 /*
 * dns : add bounded event loop, caching, TCP service, ACL, rate limiting,
 *       synthetic answers, upstream validation, and bounded upstream sockets
