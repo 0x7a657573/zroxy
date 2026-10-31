@@ -665,6 +665,11 @@ flowchart TD
    step. A response larger than the client's UDP size (512, or its EDNS0 size
    clamped to 1232) is sent as header and question with TC set; the client
    retries over the local TCP listener (below).
+   Queries go upstream over TCP, even through SOCKS5, because SOCKS5 CONNECT
+   works with every SOCKS5 server. SOCKS5 UDP ASSOCIATE (RFC 1928, cmd 0x03)
+   could carry the datagram as is, but many servers lack it (`ssh -D`, Tor's
+   SOCKS port, microsocks) or need it enabled separately. The conversion only
+   adds the two-byte length prefix.
 7. Each upstream connection carries one request at a time and is reused while
    idle. A failed request is retried once on a fresh connection; a failure on
    a fresh connection is final, so a broken upstream is not hammered.
