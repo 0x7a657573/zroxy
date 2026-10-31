@@ -2608,6 +2608,7 @@ static void test_stuck_worker_shutdown(void)
 }
 
 static const char CASE_REQ[] = "GET / HTTP/1.1\r\nHost: LocalHost.\r\n\r\n";
+static const char PORT_REQ[] = "GET / HTTP/1.1\r\nhost: localhost:8080 \r\n\r\n";
 
 static void test_sni_resolver_behavior(void)
 {
@@ -2655,6 +2656,8 @@ static void test_sni_resolver_behavior(void)
 	expect_int(cfg.calls, calls_before, "whitelist rejection does not resolve");
 	expect_true(echo_roundtrip(local, CASE_REQ, sizeof(CASE_REQ) - 1, 2000) == 0,
 			"case and trailing dot match");
+	expect_true(echo_roundtrip(local, PORT_REQ, sizeof(PORT_REQ) - 1, 2000) == 0,
+			"lowercase header name and Host port match");
 	expect_true(cfg.calls > calls_before, "direct hostname used the resolver");
 	sni_resolver_test_hold_running(1);
 	sni_test_reset_counters();
