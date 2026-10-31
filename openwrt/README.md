@@ -120,7 +120,11 @@ restart zroxy:
 LDNS = 127.0.0.1:5354
 DNS = 1.1.1.1:53
 DACL = 127.0.0.0/8
+DNSCONNECTIONS = 8
 ```
+
+`DNSCONNECTIONS` caps the upstream DNS-over-TCP connections. Its default of 96
+suits a server; a small number is enough for a home router.
 
 For selected domains, add a dnsmasq forwarding rule in `/etc/config/dhcp`,
 within the existing `config dnsmasq` section:
