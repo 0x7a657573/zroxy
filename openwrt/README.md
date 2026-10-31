@@ -1,9 +1,10 @@
 # zroxy on OpenWrt
 
 This package installs the zroxy binary, a procd service, and two configuration
-files. The service starts on boot and is supervised by procd. Its default SNI
-listener is limited to `127.0.0.1:8443`, so it is safe to test locally before
-allowing LAN clients to connect.
+files. The service is installed disabled; once enabled, it starts on boot and
+is supervised by procd. Its default SNI listener is limited to
+`127.0.0.1:8443`, so it is safe to test locally before allowing LAN clients to
+connect.
 
 ## Build with an OpenWrt SDK
 
@@ -57,17 +58,10 @@ target; check startup and a real proxied connection on that router.
   backup used by sysupgrade. After a firmware upgrade, confirm that the zroxy
   package is installed for the new release before trying to start it.
 
-The default configuration starts a direct SNI proxy on loopback port 8443. To
-stop it or prevent it from starting at boot:
-
-```sh
-uci set zroxy.main.enabled='0'
-uci commit zroxy
-/etc/init.d/zroxy stop
-/etc/init.d/zroxy disable
-```
-
-To enable it and inspect status and logs:
+The package ships with `enabled '0'`, so nothing listens until you turn it on.
+The default configuration then runs a direct SNI proxy on loopback port 8443.
+Review `/etc/zroxy/zroxy.conf` first, then enable it and inspect status and
+logs:
 
 ```sh
 uci set zroxy.main.enabled='1'
@@ -76,6 +70,15 @@ uci commit zroxy
 /etc/init.d/zroxy restart
 /etc/init.d/zroxy status
 logread -e zroxy
+```
+
+To stop it and prevent it from starting at boot:
+
+```sh
+uci set zroxy.main.enabled='0'
+uci commit zroxy
+/etc/init.d/zroxy stop
+/etc/init.d/zroxy disable
 ```
 
 Edit `/etc/zroxy/zroxy.conf` to choose the SNI listener, direct or SOCKS5
