@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
@@ -306,6 +307,52 @@ static void test_net_connect_success_loopback(void)
     close(listen_fd);
 }
 
+/* Connections that arrive before accept() runs must wait in the queue. */
+static void test_listen_backlog_absorbs_burst(void)
+{
+    enum { BURST = 64 };
+    int listen_fd = -1;
+    int clients[BURST];
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+    int connected = 0;
+    int i;
+
+    expect_true(net_listen_ipv4(htonl(INADDR_LOOPBACK), 0, &listen_fd), "listen for burst");
+    if (listen_fd < 0)
+        return;
+    expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "burst getsockname");
+
+    for (i = 0; i < BURST; i++)
+    {
+        clients[i] = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        if (clients[i] >= 0)
+            (void)connect(clients[i], (struct sockaddr *)&addr, sizeof(addr));
+    }
+    for (i = 0; i < BURST; i++)
+    {
+        struct pollfd pfd;
+        int err = 0;
+        socklen_t elen = sizeof(err);
+        if (clients[i] < 0)
+            continue;
+        pfd.fd = clients[i];
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
+        if (poll(&pfd, 1, 300) == 1 &&
+            getsockopt(clients[i], SOL_SOCKET, SO_ERROR, &err, &elen) == 0 && err == 0)
+            connected++;
+    }
+    if (connected != BURST)
+        fprintf(stderr, "FAIL: burst connected %d of %d without accept\n", connected, BURST);
+    expect_true(connected == BURST, "listen backlog absorbs a burst");
+
+    for (i = 0; i < BURST; i++)
+        if (clients[i] >= 0)
+            close(clients[i]);
+    close(listen_fd);
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -322,6 +369,7 @@ int main(void)
     test_tls_sni_malformed_extensions();
     test_net_connect_failure_sets_invalid_fd();
     test_net_connect_success_loopback();
+    test_listen_backlog_absorbs_burst();
 
     return failures == 0 ? 0 : 1;
 }

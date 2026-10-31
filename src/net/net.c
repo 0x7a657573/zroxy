@@ -247,8 +247,13 @@ bool net_listen_ipv4(in_addr_t addr, uint16_t Port,int *sockfd)
 		return false;
 	}
 
-	// Now server is ready to listen and verification
-	if ((listen(*sockfd, 10)) != 0)
+	/*
+	 * An SNI listener holds up to 1024 connections and browsers open them in
+	 * bursts. A short queue drops SYNs while the event loop is busy, and the
+	 * client waits about a second to retry. The kernel caps this value at
+	 * net.core.somaxconn.
+	 */
+	if ((listen(*sockfd, SOMAXCONN)) != 0)
 	{
 	   log_error("Listen failed on port %d",Port);
 	   close(*sockfd);
