@@ -557,6 +557,7 @@ The default suite includes unit, process, and loopback integration tests:
 - `sni_forwarding`
 - `sni_engine`
 - `sni_engine_poll`
+- `fuzz_corpus_sni_host`, `fuzz_corpus_dns`, `fuzz_corpus_socks`, `fuzz_corpus_monitor_request`, `fuzz_corpus_config` (replay the seed corpora, see Fuzzing)
 - `process_limits`
 - `sni_e2e`
 - `dns_e2e`
@@ -568,6 +569,35 @@ Run only integration tests with:
 ```sh
 ctest --test-dir build -L integration --output-on-failure
 ```
+
+### Fuzzing
+
+`tests/fuzz/` has one harness per parser of untrusted input, each with a
+seed corpus in `tests/fuzz/corpus/<name>/`:
+
+| Harness | Covers |
+| --- | --- |
+| `sni_host` | TLS SNI and HTTP Host extraction, then `sni_resolver_normalize` and the whitelist match |
+| `dns` | DNS message decode and encode, error, truncate, cache key, TTL, age and reply-match helpers |
+| `socks` | SOCKS5 replies, read by `socks5_connect` from a loopback stand-in server |
+| `monitor_request` | monitor request line, end of header and Bearer token checks |
+| `config` | config-file parser (`args.c`) and whitelist file parser and matcher |
+
+A normal build (any compiler) replays the corpora as the `fuzz_corpus_*`
+tests; a crash or sanitizer report fails the test. To fuzz with libFuzzer,
+ASan and UBSan, use clang in a separate build directory:
+
+```sh
+CC=clang cmake -S . -B build-fuzz -DZROXY_FUZZ=ON
+cmake --build build-fuzz -j
+mkdir -p /tmp/fuzz-dns
+build-fuzz/tests/fuzz/fuzz_dns -max_total_time=120 /tmp/fuzz-dns tests/fuzz/corpus/dns
+```
+
+The first directory receives new inputs, the second is the read-only seed
+corpus. A failing input is written to `crash-*` / `leak-*` in the current
+directory; replay it with `build-fuzz/tests/fuzz/fuzz_dns crash-FILE`.
+The `dns` input is one length byte `N`, then an `N`-byte query and the reply.
 
 ### Stress tests
 

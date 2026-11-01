@@ -49,4 +49,13 @@ statistics_t *monitor_add_stat(mon_t *self,char *name);
 /* Adds a top-level object written by fn. ctx must outlive the monitor. */
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx);
 
+#ifdef MON_TEST_HOOKS
+#include <stddef.h>
+#include <stdint.h>
+/* -1 while the request line is incomplete, else 0 or the HTTP status to send. */
+int monitor_test_classify(const uint8_t *buf, size_t len);
+bool monitor_test_headers_done(const uint8_t *buf, size_t len);
+bool monitor_test_authorized(const uint8_t *buf, size_t len, const char *token);
+#endif
+
 #endif /* MONITOR_H_ */

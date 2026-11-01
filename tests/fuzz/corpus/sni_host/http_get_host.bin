@@ -1,0 +1,5 @@
+GET / HTTP/1.1
+Host: Example.COM:8080
+User-Agent: x
+Accept: */*
+

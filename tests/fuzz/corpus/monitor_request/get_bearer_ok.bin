@@ -1,0 +1,4 @@
+GET / HTTP/1.1
+Host: x
+Authorization: Bearer s3cret-token
+

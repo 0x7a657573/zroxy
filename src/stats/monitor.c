@@ -192,6 +192,27 @@ static bool mon_authorized(const uint8_t *buf, size_t len, const char *token)
 	return false;
 }
 
+#ifdef MON_TEST_HOOKS
+/* The request checks monitor_client_thread runs on the bytes read so far. */
+int monitor_test_classify(const uint8_t *buf, size_t len)
+{
+	size_t line_len = 0;
+	if (!mon_crlf(buf, len, &line_len))
+		return -1;
+	return mon_classify_line(buf, line_len);
+}
+
+bool monitor_test_headers_done(const uint8_t *buf, size_t len)
+{
+	return http_headers_done(buf, len);
+}
+
+bool monitor_test_authorized(const uint8_t *buf, size_t len, const char *token)
+{
+	return mon_authorized(buf, len, token);
+}
+#endif
+
 static void mon_send_empty(int fd, int code, int timeout_sec)
 {
 	const char *text = "400 Bad Request";

@@ -118,6 +118,17 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   present whenever the monitor is enabled. `Lookups` counts `getaddrinfo`
   calls and `LookupFailures` those that returned an error or no address.
 
+### Tests
+
+- Add fuzz harnesses in `tests/fuzz/` for the SNI/Host extraction (with
+  normalization and the whitelist match), the DNS codec and reply helpers,
+  SOCKS5 reply parsing, the monitor request and Bearer checks, and the
+  config and whitelist file parsers, with seed corpora. Plain builds replay
+  the corpora as the `fuzz_corpus_*` tests; `-DZROXY_FUZZ=ON` with clang
+  builds libFuzzer binaries with ASan and UBSan. The monitor and filter
+  modules gain `MON_TEST_HOOKS` / `FILTER_TEST_HOOKS` wrappers that only the
+  harness libraries compile in.
+
 ### Release
 
 - Pushing a version tag runs a GitHub Actions workflow. It checks the tag
