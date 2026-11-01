@@ -390,6 +390,7 @@ cmake --build build-musl
 The static build and platform-specific behavior should be validated with the
 toolchain used for the target device. A musl build is not implied by a normal
 glibc build.
+
 ### Making a release
 
 Bump `include/zroxy/version.h`, add a matching `## <version>` section to
@@ -412,7 +413,6 @@ The OpenWrt package is not built by this workflow; update its pinned source
 as described in the
 [OpenWrt release checklist](openwrt/README.md#release-checklist).
 
-
 ## Tests
 
 Tests are local and do not require public Internet access, external DNS, SSH,
@@ -426,16 +426,19 @@ ctest --test-dir build --output-on-failure
 
 The default suite includes unit, process, and loopback integration tests:
 
+- `help_output`
 - `net_host_extract`
 - `filter_whitelist`
 - `dns_codec`
+- `dns_cache`
+- `dns_acl`
+- `dns_rate`
+- `dns_throttle`
 - `args_parse`
 - `socks_handshake`
 - `sni_forwarding`
 - `sni_engine`
 - `sni_engine_poll`
-- `dnsproxy_tcp_io`
-- `io_limits`
 - `process_limits`
 - `sni_e2e`
 - `dns_e2e`
@@ -481,7 +484,7 @@ python3 tests/benchmark/compare_baseline.py \
 ```
 
 Stress and benchmark tests are registered with CTest but disabled in a plain
-`ctest` run. To include them:
+`ctest` run. To run them, call the scripts directly:
 
 ```sh
 ZROXY_BIN="$PWD/build/zroxy" python3 tests/stress/zroxy_stress.py \
