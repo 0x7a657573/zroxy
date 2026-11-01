@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +76,7 @@ typedef struct sni_resolver_pool {
 	uint32_t eagain_wakeups;
 	uint32_t closed_drops;
 	uint32_t ring_full;
+	uint32_t lookup_failures;
 #ifdef SNI_TEST_HOOKS
 	sni_resolve_hook hook;
 	void *hook_cookie;
@@ -513,6 +515,8 @@ static void resolve_and_finish(resolve_slot *slot, const char *host, int family)
 		return;
 	}
 	gai_error = do_resolve(host, family, addrs, &count);
+	if (gai_error != 0)
+		__atomic_fetch_add(&g_pool->lookup_failures, 1u, __ATOMIC_RELAXED);
 	worker_finish(slot, gai_error, addrs, count);
 }
 
@@ -669,6 +673,51 @@ static int pool_create(void)
 	}
 	pool->started = 1;
 	return 0;
+}
+
+void sni_resolver_get_stats(sni_resolver_stats *out)
+{
+	if (!out)
+		return;
+	memset(out, 0, sizeof(*out));
+	out->threads = SNI_RESOLVER_THREADS;
+	out->slots = SNI_RESOLVER_SLOTS;
+	/* g_start_mu keeps the pool from being freed under us; it is taken first, as in shutdown. */
+	pthread_mutex_lock(&g_start_mu);
+	if (g_pool && g_pool->started) {
+		pthread_mutex_lock(&g_pool->mu);
+		out->slots_in_use = SNI_RESOLVER_SLOTS - g_pool->free_count;
+		out->lookups = __atomic_load_n(&g_pool->calls, __ATOMIC_RELAXED);
+		out->lookup_failures = __atomic_load_n(&g_pool->lookup_failures, __ATOMIC_RELAXED);
+		out->ring_full = __atomic_load_n(&g_pool->ring_full, __ATOMIC_RELAXED);
+		pthread_mutex_unlock(&g_pool->mu);
+	}
+	pthread_mutex_unlock(&g_start_mu);
+}
+
+bool sni_resolver_stats_json(void *ctx, char **ptr, char *end)
+{
+	sni_resolver_stats st;
+	size_t left;
+	int n;
+
+	(void)ctx;
+	if (!ptr || !*ptr || *ptr >= end)
+		return false;
+	sni_resolver_get_stats(&st);
+	left = (size_t)(end - *ptr);
+	n = snprintf(*ptr, left, "\"Threads\" : %d ,\n"
+		"\"Slots\" : %d ,\n"
+		"\"SlotsInUse\" : %d ,\n"
+		"\"Lookups\" : %" PRIu32 " ,\n"
+		"\"LookupFailures\" : %" PRIu32 " ,\n"
+		"\"RingFull\" : %" PRIu32,
+		st.threads, st.slots, st.slots_in_use,
+		st.lookups, st.lookup_failures, st.ring_full);
+	if (n < 0 || (size_t)n >= left)
+		return false;
+	*ptr += n;
+	return true;
 }
 
 bool sni_resolver_start(void)
@@ -1398,6 +1447,7 @@ void sni_resolver_test_reset_stats(void)
 	__atomic_store_n(&g_pool->eagain_wakeups, 0u, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_pool->closed_drops, 0u, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_pool->ring_full, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_pool->lookup_failures, 0u, __ATOMIC_RELAXED);
 }
 
 void sni_resolver_test_pause_dequeue(int pause)

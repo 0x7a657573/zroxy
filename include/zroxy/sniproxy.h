@@ -59,6 +59,8 @@ int sni_worker_limit(void);
  * limit and the counters that say how connections ended.
  */
 bool sni_stats_json(void *ctx, char **ptr, char *end);
+/* Monitor section for the shared hostname resolver pool. */
+bool sni_resolver_stats_json(void *ctx, char **ptr, char *end);
 
 
 

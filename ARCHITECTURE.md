@@ -572,6 +572,12 @@ flowchart LR
 - `getaddrinfo`, pipe writes, and socket operations run without the pool mutex
   held.
 - The event-loop thread never calls `getaddrinfo`.
+- The monitor's `Resolver` object comes from `sni_resolver_get_stats`, which
+  takes the pool mutex once per report to read the free-slot count (`Slots`
+  minus the free count is `SlotsInUse`) and reads the `Lookups`
+  (`getaddrinfo` calls), `LookupFailures` and `RingFull` atomics. Workers
+  update those counters without extra locks. Before the pool exists only the
+  fixed sizes are reported.
 
 ### Hostname and address policy
 
@@ -1014,6 +1020,10 @@ The monitor exposes one JSON document containing:
 When a whitelist file is configured, a `Whitelist` object reports the entry
 count, successful and failed reloads, and the time of the last successful
 reload.
+
+A `Resolver` object, registered whenever the monitor is enabled, reports the
+resolver pool: thread and slot counts, slots in use, lookups, failed lookups,
+and completions dropped because a ring was full.
 
 The `SNI_Server` object also reports the connection limit, how many connections
 reached the relay, and why the others ended (see

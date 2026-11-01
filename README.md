@@ -303,7 +303,7 @@ logs the failure once.
 
 The report is one JSON object. `ZroxyVersion` and `CountOfOpenFile` come
 first, then the `Process` object, the `Whitelist` object when a whitelist is
-configured, then one object per enabled service
+configured, the `Resolver` object, then one object per enabled service
 (`DNS_Server`, `SNI_Server`). Keys are only ever added; existing keys keep
 their names and meaning.
 
@@ -335,6 +335,18 @@ object. It is absent otherwise.
 | `Reloads` | Successful reloads since start (the initial load is not counted) |
 | `ReloadFailures` | Reloads that failed and kept the previous list |
 | `LastReload` | Unix time of the last successful reload; `0` if none since start |
+
+The `Resolver` object describes the hostname resolver pool shared by the SNI
+and DNS paths:
+
+| Key | Meaning |
+| --- | --- |
+| `Threads` | Resolver worker threads (4) |
+| `Slots` | Request slots (128) |
+| `SlotsInUse` | Slots queued, running, or waiting to be collected now |
+| `Lookups` | `getaddrinfo` calls made |
+| `LookupFailures` | Lookups that returned an error or no address |
+| `RingFull` | Results dropped because a listener's completion ring was full |
 
 `SNI_Server` adds the connection cap and counters that say how connections
 ended. Each connection is counted once, under the reason it ended; a relay that

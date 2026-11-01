@@ -114,6 +114,12 @@ int main(int argc, const char **argv)
 			log_error("monitor whitelist section failed");
 	}
 
+	if(monitor)
+	{
+		if (!monitor_add_section(monitor, "Resolver", sni_resolver_stats_json, NULL))
+			log_error("monitor resolver section failed");
+	}
+
 	/*check for dns server*/
 	if(prg_setting.dnsserver)
 	{

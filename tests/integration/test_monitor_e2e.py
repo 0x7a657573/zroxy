@@ -66,6 +66,16 @@ SNI_CLOSE_KEYS = (
 )
 
 
+RESOLVER_KEYS = (
+    "Threads",
+    "Slots",
+    "SlotsInUse",
+    "Lookups",
+    "LookupFailures",
+    "RingFull",
+)
+
+
 def _dns_reply(query):
     return zroxy_lab.build_dns_response(query, UPSTREAM_IP)
 
@@ -324,6 +334,13 @@ def test_sni_close_reasons():
             tcp_ports=[sni_port, mon_port],
         )
         base = _sni_quiet(mon_port)
+        res_base = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"].get("Resolver")
+        if not isinstance(res_base, dict):
+            raise AssertionError("missing Resolver object")
+        for key in RESOLVER_KEYS:
+            _number(res_base.get(key), "Resolver." + key)
+        if (res_base["Threads"], res_base["Slots"]) != (4, 128):
+            raise AssertionError("unexpected Resolver sizes: %r" % res_base)
         for key in SNI_CLOSE_KEYS:
             _number(base.get(key), "SNI_Server." + key)
         if base["ConnectionLimit"] != 1024:
@@ -333,6 +350,15 @@ def test_sni_close_reasons():
         if data != zroxy_lab.HTTP_OK or not closed:
             raise AssertionError("relay failed: %r" % data)
         _sni_delta(mon_port, base, {"Relayed": 1})
+
+        # The hostname went through the shared resolver pool.
+        res = _wait_doc(
+            mon_port,
+            lambda d: d["Resolver"]["Lookups"] > res_base["Lookups"] and d["Resolver"]["SlotsInUse"] == 0,
+            3.0,
+        )["json"]["Resolver"]
+        if res["LookupFailures"] != res_base["LookupFailures"] or res["RingFull"] != 0:
+            raise AssertionError("unexpected Resolver counters: %r" % res)
         base = _sni_quiet(mon_port)
 
         # A name outside the whitelist.
