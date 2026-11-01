@@ -15,6 +15,19 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wno-unused-parameter -Wshadow -Wconversion)
 endif()
 
+# libFuzzer harnesses (tests/fuzz). Every module is built with coverage
+# instrumentation and the sanitizers; the harnesses add the fuzzer runtime.
+option(ZROXY_FUZZ "Build libFuzzer harnesses with ASan and UBSan (needs clang)" OFF)
+if(ZROXY_FUZZ)
+    if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "ZROXY_FUZZ needs clang (CMAKE_C_COMPILER is ${CMAKE_C_COMPILER_ID})")
+    endif()
+    target_compile_options(zroxy_build_options INTERFACE
+        -fsanitize=fuzzer-no-link,address,undefined -fno-sanitize-recover=undefined
+        -fno-omit-frame-pointer -g)
+    target_link_options(zroxy_build_options INTERFACE -fsanitize=address,undefined)
+endif()
+
 # Public headers: #include <zroxy/...>
 add_library(zroxy_headers INTERFACE)
 target_include_directories(zroxy_headers INTERFACE ${PROJECT_SOURCE_DIR}/include)
@@ -102,6 +115,13 @@ target_link_libraries(zroxy PRIVATE
     zroxy_build_options)
 
 install(TARGETS zroxy RUNTIME DESTINATION bin)
+
+# ---------------------------------------------------------------------------
+# Fuzz harnesses
+# ---------------------------------------------------------------------------
+if(BUILD_TESTING OR ZROXY_FUZZ)
+    add_subdirectory(tests/fuzz)
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests

@@ -1,0 +1,6 @@
+# whitelist
+example.com
+*.example.org
+api?.wild*.net
+  spaced.test  
+dotted.test.

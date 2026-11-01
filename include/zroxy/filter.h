@@ -41,6 +41,11 @@ filter_t *filter_from_list(const char *const *entries, size_t count);
 /* Only for lists without a watcher (filter_from_list). */
 void filter_free(filter_t *self);
 
+#ifdef FILTER_TEST_HOOKS
+/* Load a file like filter_init, but start no watcher. Release with filter_free. */
+filter_t *filter_test_open(const char *filename);
+#endif
+
 bool filter_match(filter_t *self,const char *host);
 /* Re-read the file; on any error the current list is kept. */
 void filter_reload(filter_t *self);

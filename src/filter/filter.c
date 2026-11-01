@@ -536,6 +536,22 @@ filter_t *filter_init(char *filename)
 	return self;
 }
 
+#ifdef FILTER_TEST_HOOKS
+/* filter_init without the watcher thread, so filter_free can release it. */
+filter_t *filter_test_open(const char *filename)
+{
+	filter_set_t *set = set_load_file(filename);
+	filter_t *self;
+
+	if (!set)
+		return NULL;
+	self = filter_alloc(set, filename);
+	if (!self)
+		set_free(set);
+	return self;
+}
+#endif
+
 filter_t *filter_from_list(const char *const *entries, size_t count)
 {
 	entry_list_t list = {0};

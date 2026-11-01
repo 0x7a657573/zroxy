@@ -1,0 +1,3 @@
+GET /a HTTP/1.0
+host: www.example.org.
+
