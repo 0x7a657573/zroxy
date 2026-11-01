@@ -787,7 +787,12 @@ static void test_partial_write_and_eagain(void)
 		expect_true(client_blocked, "client write blocks once the relay buffer is full");
 		expect_true(sent > 0, "some bytes were queued before backpressure");
 		deadline = mono_ms() + 1000;
-		while (mono_ms() < deadline && sni_test_max_pending() == 0)
+		/*
+		 * Wait for the event itself. max_pending turns non-zero as soon as
+		 * the engine reads from the client, which is before it attempts the
+		 * upstream write that consumes the injected EAGAIN.
+		 */
+		while (mono_ms() < deadline && sni_test_eagain_count() == 0)
 			usleep(1000);
 		expect_true(sni_test_eagain_count() > 0, "proxy write hit EAGAIN");
 		expect_true(sni_test_max_pending() > 0, "pending output was observed");
