@@ -6,6 +6,20 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
 
 ### Security
 
+- Drop privileges after startup. `USER` / `--user` (`-U`) and `GROUP` /
+  `--group` (`-G`, default: the user's primary group) name the account to run
+  as. zroxy resolves them at startup, binds every socket and reads the
+  config, whitelist and secret files as root, then clears the supplementary
+  groups, calls `setgid` and `setuid`, and exits when the drop did not stick.
+  Starting as non-root with a different `USER` is an error; starting as root
+  without `USER` logs a warning. On Linux zroxy also sets `no_new_privs` and
+  (after a drop) turns off core dumps and ptrace (`PR_SET_DUMPABLE`); the
+  monitor's process figures keep working. The whitelist file and its directory must be readable
+  by `USER` for reloads.
+- Add `contrib/zroxy.service`, a hardened sample systemd unit.
+- OpenWrt: the package creates a `zroxy` user, the init script starts zroxy
+  with `-U zroxy`, `no_new_privs` and, unless `jail` is `0` in
+  `/etc/config/zroxy`, a read-only procd jail. Not yet tested on a device.
 - Add `SOCKSPASSFILE` / `--sockspassfile` (`-S`), `DSOCKSPASSFILE` /
   `--dsockspassfile` (`-X`) and `MONITORTOKENFILE` / `--monitortokenfile`
   (`-K`) to read the SOCKS5 password (SNI and DNS) and the monitor Bearer

@@ -189,6 +189,8 @@ use the key names in the last column.
 | `-A`, `--dacl` | `CIDR[,CIDR...]` | IPv4 networks allowed to query the local DNS listener | `DACL` |
 | `-R`, `--drate` | `0..100000` | Per-source DNS queries per second; `0` disables | `DRATE` |
 | `-C`, `--dnsconnections` | `1..96` | Maximum concurrent nonblocking TCP connections to the DNS upstream | `DNSCONNECTIONS` |
+| `-U`, `--user` | name | After the ports are bound, switch to this user (needs a start as root; see [Dropping privileges](#dropping-privileges)) | `USER` |
+| `-G`, `--group` | name | Group to switch to with `USER`; default is the user's primary group | `GROUP` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
 
 ### Keeping secrets out of `ps`
@@ -205,6 +207,25 @@ refused when world-writable; group or world access logs a warning, so use
 `chmod 600`. A config file that holds a secret gets the same warning. The
 files are read once at startup, and the copies of the secrets in memory are
 wiped when freed.
+
+### Dropping privileges
+
+zroxy needs root only to bind ports below 1024. With `USER = zroxy` (and
+optionally `GROUP`) it binds every listener as root, reads the configuration,
+whitelist and secret files, then clears the supplementary groups, calls
+`setgid` and `setuid`, and refuses to continue if any step or the final check
+fails. `USER` and `GROUP` are looked up before any thread starts. Starting
+as a non-root user with a different `USER` is an error, and so is `GROUP`
+without `USER`; running as root without `USER` logs a warning. On Linux the
+process also sets `no_new_privs`, and after a drop it is non-dumpable, which
+stops core dumps and ptrace by other processes of the same user.
+
+After the drop, the only file zroxy opens again is the whitelist, on `SIGHUP`
+and when its directory changes, so the whitelist file and its directory must
+be readable by `USER`. Config and secret files are read once and may stay
+root-only. For systemd, [`contrib/zroxy.service`](contrib/zroxy.service) is a
+hardened sample that avoids root altogether with
+`AmbientCapabilities=CAP_NET_BIND_SERVICE`.
 
 `LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
 `DTIMEOUT`, and `SNIP` require `LDNS`; when `LDNS` is set, an upstream `DNS`
@@ -632,6 +653,7 @@ In particular:
   to a broader network.
 - The whitelist is not a universal default-deny firewall for every protocol.
 - SOCKS credentials are configuration secrets and must be protected accordingly.
+- Set `USER` so zroxy does not run as root once its ports are bound.
 - The project does not claim production readiness or independent security audit
   status.
 

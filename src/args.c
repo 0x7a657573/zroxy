@@ -22,6 +22,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <pwd.h>
+#include <grp.h>
 #include <zroxy/config.h>
 
 #define ARGS_MAX_IDENT 255
@@ -186,6 +188,8 @@ static arg_option options[] =
 	{ "config", 'c', "PATH", required_argument, "load configuration from PATH", OPTION_SECTION_GENERAL },
 	{ "log", 'l', "0..5", required_argument, "set log level (0=trace, 5=fatal)", OPTION_SECTION_GENERAL },
 	{ "help", 'h', "", no_argument, "show this help and exit", OPTION_SECTION_GENERAL },
+	{ "user", 'U', "NAME", required_argument, "after binding the ports, run as NAME (needs root at start)", OPTION_SECTION_GENERAL },
+	{ "group", 'G', "NAME", required_argument, "group to run as with USER (default: the user's primary group)", OPTION_SECTION_GENERAL },
 
 	{ "port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]", OPTION_SECTION_SNI },
 	{ "socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI },
@@ -451,6 +455,11 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 	pgp->allow_loopback = false;
 	pgp->deny_private = false;
 	pgp->open_proxy = false;
+	pgp->run_user = NULL;
+	pgp->run_group = NULL;
+	pgp->drop_priv = false;
+	pgp->drop_uid = 0;
+	pgp->drop_gid = 0;
 	pgp->monitor_header_timeout = 5;
 	pgp->monitor_bind[0] = '\0';
 	argv_secret_count = 0;
@@ -516,6 +525,79 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
     return true;
 }
 
+/*
+ * Look the run-as user and group up now, before any thread exists, so
+ * NSS is never entered from a threaded process and a bad name stops
+ * startup. Nothing changes here; main drops privileges once the sockets
+ * are bound.
+ */
+static bool resolve_run_identity(zroxy_t *ptr)
+{
+	struct passwd pw;
+	struct passwd *res = NULL;
+	char buf[4096];
+	uid_t uid;
+	gid_t gid;
+	int rc;
+
+	ptr->drop_priv = false;
+	if (!ptr->run_user)
+	{
+		if (ptr->run_group)
+		{
+			log_error("GROUP needs USER");
+			return false;
+		}
+		if (geteuid() == 0)
+			log_warn("running as root; set USER (--user) to drop privileges after the ports are bound");
+		return true;
+	}
+
+	rc = getpwnam_r(ptr->run_user, &pw, buf, sizeof(buf), &res);
+	if (rc != 0 || !res)
+	{
+		log_error("USER %s: %s", ptr->run_user, rc != 0 ? strerror(rc) : "no such user");
+		return false;
+	}
+	uid = res->pw_uid;
+	gid = res->pw_gid;
+	if (ptr->run_group)
+	{
+		struct group gr;
+		struct group *gres = NULL;
+		char gbuf[4096];
+
+		rc = getgrnam_r(ptr->run_group, &gr, gbuf, sizeof(gbuf), &gres);
+		if (rc != 0 || !gres)
+		{
+			log_error("GROUP %s: %s", ptr->run_group, rc != 0 ? strerror(rc) : "no such group");
+			return false;
+		}
+		gid = gres->gr_gid;
+	}
+
+	if (geteuid() != 0)
+	{
+		/* only root can change identity; the same one is a harmless no-op */
+		if (uid != geteuid() || (ptr->run_group && gid != getegid()))
+		{
+			log_error("USER %s needs zroxy to start as root, but it runs as uid %lu",
+				ptr->run_user, (unsigned long)geteuid());
+			return false;
+		}
+		return true;
+	}
+	if (uid == 0)
+	{
+		log_warn("USER %s is root; privileges are not dropped", ptr->run_user);
+		return true;
+	}
+	ptr->drop_priv = true;
+	ptr->drop_uid = uid;
+	ptr->drop_gid = gid;
+	return true;
+}
+
 bool args_validate(zroxy_t *ptr)
 {
 	bool sni_ip_zero;
@@ -523,6 +605,8 @@ bool args_validate(zroxy_t *ptr)
 	if (!ptr)
 		return true;
 	if (!load_secret_files(ptr))
+		return false;
+	if (!resolve_run_identity(ptr))
 		return false;
 	if (ptr->ports && !ptr->WhitePath)
 	{
@@ -590,6 +674,8 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
 		case 'L': if (!parse_bool(arg, &setting->allow_loopback)) return -1; break;
 		case 'P': if (!parse_bool(arg, &setting->deny_private)) return -1; break;
+		case 'U': if (!parse_secret_path(&setting->run_user,arg)) return -1; break;
+		case 'G': if (!parse_secret_path(&setting->run_group,arg)) return -1; break;
 		case 'O': if (!parse_bool(arg, &setting->open_proxy)) return -1; break;
 		case 'I': if (!parse_sni_idle_timeout(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);

@@ -7,6 +7,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <pwd.h>
+#include <grp.h>
 
 #include <zroxy/args.h>
 #include <zroxy/log.h>
@@ -67,6 +69,8 @@ static void free_settings(zroxy_t *cfg)
     }
     free(cfg->monitorPort);
     free(cfg->monitor_token);
+    free(cfg->run_user);
+    free(cfg->run_group);
     free(cfg->WhitePath);
     free(cfg->monitor_token_file);
     free(cfg->socks_pass_file);
@@ -1210,6 +1214,113 @@ static void test_argv_scrub(void)
     free_settings(&cfg);
 }
 
+static void test_run_identity(void)
+{
+    struct passwd *me = getpwuid(geteuid());
+    struct group *mygrp = getgrgid(getegid());
+    char a0[] = "zroxy";
+    char u1[] = "--user";
+    char g1[] = "--group";
+
+    expect_true(me != NULL, "current user is known");
+    if (!me)
+        return;
+    {
+        zroxy_t cfg = {0};
+        const char *argv[] = {a0, u1, me->pw_name};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "--user parses");
+        expect_true(cfg.run_user && strcmp(cfg.run_user, me->pw_name) == 0, "--user is stored");
+        expect_true(args_validate(&cfg), "the current user validates");
+        expect_true(!cfg.drop_priv, "the current user needs no privilege drop");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char short_opt[] = "-U";
+        const char *argv[] = {a0, short_opt, me->pw_name};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "-U parses");
+        expect_true(cfg.run_user != NULL, "-U is stored");
+        free_settings(&cfg);
+    }
+    if (mygrp)
+    {
+        zroxy_t cfg = {0};
+        const char *argv[] = {a0, u1, me->pw_name, g1, mygrp->gr_name};
+        reset_getopt();
+        expect_true(args_init(&cfg, 5, argv), "--user with --group parses");
+        expect_true(cfg.run_group && strcmp(cfg.run_group, mygrp->gr_name) == 0, "--group is stored");
+        expect_true(args_validate(&cfg), "the current user and group validate");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char name[] = "zroxy-no-such-user";
+        const char *argv[] = {a0, u1, name};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "an unknown user still parses");
+        expect_true(!args_validate(&cfg), "an unknown user is rejected");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char name[] = "zroxy-no-such-group";
+        const char *argv[] = {a0, u1, me->pw_name, g1, name};
+        reset_getopt();
+        expect_true(args_init(&cfg, 5, argv), "an unknown group still parses");
+        expect_true(!args_validate(&cfg), "an unknown group is rejected");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        const char *argv[] = {a0, g1, "root"};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "--group alone parses");
+        expect_true(!args_validate(&cfg), "--group without --user is rejected");
+        free_settings(&cfg);
+    }
+    if (geteuid() != 0)
+    {
+        zroxy_t cfg = {0};
+        char root[] = "root";
+        const char *argv[] = {a0, u1, root};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "--user root parses");
+        expect_true(!args_validate(&cfg), "a non-root process cannot switch to another user");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        zroxy_t cfg2 = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        char text[256];
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        snprintf(text, sizeof(text), "USER = %s\n", me->pw_name);
+        write_all_or_fail(fd, text);
+        close(fd);
+        expect_true(args_parse_config(&cfg, template_path), "config USER parses");
+        expect_true(cfg.run_user && strcmp(cfg.run_user, me->pw_name) == 0, "config USER value");
+        expect_true(args_validate(&cfg), "config USER validates");
+        free_settings(&cfg);
+
+        fd = open(template_path, O_WRONLY | O_TRUNC);
+        write_all_or_fail(fd, "USER = zroxy-no-such-user\nGROUP = zroxy-no-such-group\n");
+        close(fd);
+        expect_true(args_parse_config(&cfg2, template_path), "config USER and GROUP parse");
+        expect_true(cfg2.run_group != NULL, "config GROUP value");
+        expect_true(!args_validate(&cfg2), "config with an unknown user is rejected");
+        unlink(template_path);
+        free_settings(&cfg2);
+    }
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -1245,6 +1356,7 @@ int main(void)
     test_socks_pass_file();
     test_config_secret_files();
     test_argv_scrub();
+    test_run_identity();
 
     return failures == 0 ? 0 : 1;
 }

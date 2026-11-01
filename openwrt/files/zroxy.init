@@ -4,24 +4,91 @@ USE_PROCD=1
 START=95
 STOP=10
 
+# Print the value of KEY (case-insensitive) from a zroxy configuration
+# file; the last occurrence wins, as it does in zroxy.
+conf_value() {
+	awk -v key="$2" '
+		{
+			line = $0
+			sub(/^[ \t]+/, "", line)
+			eq = index(line, "=")
+			if (eq == 0)
+				next
+			k = substr(line, 1, eq - 1)
+			sub(/[ \t]+$/, "", k)
+			if (toupper(k) != key)
+				next
+			v = substr(line, eq + 1)
+			sub(/^[ \t]+/, "", v)
+			sub(/[ \t\r]+$/, "", v)
+			val = v
+		}
+		END { if (val != "") print val }
+	' "$1"
+}
+
+# Mount a path into the jail, read-only, when it exists.
+jail_ro() {
+	local path
+	for path in "$@"; do
+		[ -e "$path" ] && procd_add_jail_mount "$path"
+	done
+}
+
+# Confine zroxy to what it reads. Everything is mounted read-only.
+#  - /etc/passwd and /etc/group: zroxy resolves USER and GROUP by name.
+#  - resolv.conf and hosts: getaddrinfo() for client-supplied names.
+#  - the config file, the secret files, and the whitelist. The whitelist's
+#    directory is mounted, not the file, so a replaced file is seen again
+#    after reload (zroxy watches the directory).
+# /dev/log (flag "log") and /proc (flag "procfs", for the monitor's
+# process statistics) are provided by procd itself.
+setup_jail() {
+	local config_file="$1" key path dir
+
+	procd_add_jail zroxy log procfs
+	jail_ro /etc/passwd /etc/group /etc/hosts /etc/resolv.conf \
+		/tmp/resolv.conf /tmp/resolv.conf.d
+	procd_add_jail_mount "$config_file"
+
+	for key in SOCKSPASSFILE DSOCKSPASSFILE MONITORTOKENFILE; do
+		path="$(conf_value "$config_file" "$key")"
+		[ -n "$path" ] && jail_ro "$path"
+	done
+
+	path="$(conf_value "$config_file" WHITE)"
+	if [ -n "$path" ]; then
+		dir="${path%/*}"
+		case "$dir" in
+		""|/etc|"$path") jail_ro "$path" ;;
+		*) jail_ro "$dir" ;;
+		esac
+	fi
+}
+
 start_service() {
-	local enabled config_file
+	local enabled config_file jail
 
 	config_load zroxy
 	config_get_bool enabled main enabled 0
 	[ "$enabled" -eq 1 ] || return 0
 	config_get config_file main config_file /etc/zroxy/zroxy.conf
+	config_get_bool jail main jail 1
 	[ -f "$config_file" ] || {
 		logger -t zroxy "configuration file not found: $config_file"
 		return 1
 	}
 
 	procd_open_instance
-	procd_set_param command /usr/bin/zroxy -c "$config_file"
+	# zroxy starts as root so it can bind ports below 1024, then drops to
+	# the "zroxy" user. -U comes first so USER in the config file wins.
+	procd_set_param command /usr/bin/zroxy -U zroxy -c "$config_file"
 	# reload restarts zroxy only when this file has changed.
 	procd_set_param file "$config_file"
 	procd_set_param respawn 3600 5 5
 	procd_set_param stderr 1
+	procd_set_param no_new_privs 1
+	[ "$jail" -eq 1 ] && setup_jail "$config_file"
 	procd_close_instance
 }
 

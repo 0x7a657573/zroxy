@@ -18,6 +18,7 @@
 #include <zroxy/filter.h>
 #include <zroxy/dnsproxy.h>
 #include <zroxy/args.h>
+#include <zroxy/priv.h>
 
 static zroxy_t prg_setting = {0};
 
@@ -185,6 +186,22 @@ int main(int argc, const char **argv)
 	}
 	args_free_ports(&prg_setting); /*free Port List*/
 
+	/*
+	 * Everything that needs root is done: the sockets are bound and the
+	 * config, whitelist and secret files are read. The threads already
+	 * run; priv_drop checks that each one took the change.
+	 */
+	if (prg_setting.drop_priv)
+	{
+		if (!priv_drop(prg_setting.drop_uid, prg_setting.drop_gid))
+		{
+			log_error("can not drop privileges to %s", prg_setting.run_user);
+			goto out;
+		}
+		log_info("running as %s (uid %lu)", prg_setting.run_user, (unsigned long)prg_setting.drop_uid);
+	}
+	priv_harden(prg_setting.drop_priv);
+
 	log_info("shutting down on signal %d", wait_for_shutdown(&sigs, whitelist));
 	rc = 0;
 
@@ -201,6 +218,8 @@ out:
 	args_free_dns(&prg_setting);
 	args_free_socks(&prg_setting);
 	args_free_monitor_token(&prg_setting);
+	free(prg_setting.run_user);
+	free(prg_setting.run_group);
 	if (rc == 0)
 		log_info("zroxy stopped");
 	return rc;
