@@ -325,6 +325,25 @@ The `Process` object describes the zroxy process:
 | `PeakRssBytes` | Peak resident set size from `getrusage` |
 | `CpuUserMs`, `CpuSystemMs` | User and system CPU time used by the process, in milliseconds |
 
+`SNI_Server` adds the connection cap and counters that say how connections
+ended. Each connection is counted once, under the reason it ended; a relay that
+ends by EOF or reset from either side is counted under none of them.
+
+| Key | Meaning |
+| --- | --- |
+| `ConnectionLimit` | Maximum simultaneous connections (1024, shared by all listeners) |
+| `Relayed` | Connections that reached the relay: upstream connected, and SOCKS5 done if configured |
+| `Refused` | Rejected at accept: the cap was reached or an allocation failed |
+| `NoHostname` | No usable SNI or HTTP `Host`: the client left first, malformed or oversized hello, an IP literal |
+| `Blocked` | Hostname rejected by the whitelist |
+| `UnsafeDestination` | Resolved only to rejected addresses (loopback, link-local, ...) |
+| `ResolveFailures` | Hostname resolution failed |
+| `SocksFailures` | SOCKS5 negotiation failed or was refused |
+| `ConnectFailures` | The TCP connect (direct or to the SOCKS server) failed |
+| `HandshakeTimeouts` | `SNITIMEOUT` expired before the relay started (hello, resolve, connect, SOCKS) |
+| `IdleTimeouts` | `SNIIDLETIMEOUT` expired on an established relay |
+| `StallTimeouts` | An established relay could not write for `SNITIMEOUT` |
+
 `DNS_Server` and `SNI_Server` each carry `UpTime`, `MaxConnection`,
 `ActiveConnection`, `TotalConnection`, `TotalRx`, and `TotalTx`. The DNS
 counters are listed in the DNS section.

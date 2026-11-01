@@ -937,12 +937,13 @@ All normal SNI close paths converge on `conn_kill`:
 ```mermaid
 flowchart TD
     Cause[EOF / parse error / timeout / resolver error / socket error]
-    Cause --> Kill[conn_kill]
+    Cause --> Kill[conn_kill with a close reason]
     Kill --> Cancel[cancel pending resolver request]
     Kill --> Unwatch[remove client/upstream fds from backend]
     Unwatch --> Close[close fds and set -1]
     Close --> Once{already settled?}
-    Once -- no --> Stats[record Rx/Tx and close statistics]
+    Once -- no --> Reason[count the close reason]
+    Reason --> Stats[record Rx/Tx and close statistics]
     Stats --> Slot[release SNI slot]
     Slot --> Reap[unlink and free object]
     Once -- yes --> Reap
@@ -950,7 +951,29 @@ flowchart TD
 
 `conn_kill` is idempotent through the `dead` and `settled` flags. It cancels a
 pending resolver request, removes watched descriptors, closes each descriptor
-once, records statistics once when enabled, and releases the SNI slot once.
+once, counts the close reason once, records statistics once when enabled, and
+releases the SNI slot once.
+
+Every `conn_kill` call names a reason, set at the failure site, and only the
+first call on a connection counts. The reasons feed the `SNI_Server` counters
+reported by the monitor:
+
+| Reason | Counter | Set when |
+| --- | --- | --- |
+| none | none | a relay ends by EOF or reset from either side, an I/O error after the relay started, the listener shuts down, or an internal failure (clock, event-registration error) |
+| no hostname | `NoHostname` | the client closes or errors before a hostname is found, the hello overflows its buffer, or the name cannot be normalized or is an IP literal |
+| blocked | `Blocked` | the whitelist rejects the name |
+| unsafe destination | `UnsafeDestination` | every resolved address is rejected by the address policy |
+| resolve | `ResolveFailures` | the lookup fails, returns nothing, cannot be submitted (ring full), or the SOCKS server's address is unresolved |
+| socks | `SocksFailures` | SOCKS5 negotiation fails, is refused, or the configured SOCKS host is empty |
+| connect | `ConnectFailures` | every address failed to connect, directly or to the SOCKS server |
+| handshake timeout | `HandshakeTimeouts` | `SNITIMEOUT` expires while reading the hello, resolving, connecting, or negotiating SOCKS |
+| idle timeout | `IdleTimeouts` | `SNIIDLETIMEOUT` expires on an established relay with nothing pending |
+| stall timeout | `StallTimeouts` | buffered relay data could not be written within `SNITIMEOUT` |
+| refused | `Refused` | counted at accept, before a connection object exists or when registering it fails: the 1024 cap, an allocation failure, or a socket option failure |
+
+`Relayed` is incremented when the relay state is entered. The counters are
+word-sized atomics shared by every listener and are updated without locks.
 
 ### Resolver close
 
@@ -973,9 +996,15 @@ The monitor exposes one JSON document containing:
 
 - `ZroxyVersion`;
 - `CountOfOpenFile`;
+- a `Process` object with pid, start time, uptime, open and maximum open
+  files, threads, resident and peak memory, and CPU time;
 - service uptime;
 - maximum, active, and total connections; and
 - total received/transmitted byte counts.
+
+The `SNI_Server` object also reports the connection limit, how many connections
+reached the relay, and why the others ended (see
+[SNI connection close](#sni-connection-close)).
 
 The `DNS_Server` object also reports cache hits, misses, shared in-flight
 queries, current entries, evictions, stale queue drops, queue-full events, ACL

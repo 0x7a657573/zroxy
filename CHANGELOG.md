@@ -20,6 +20,12 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   `SOMAXCONN`. A burst of connections that arrived while the event loop was
   busy used to overflow the queue, and the dropped clients waited about a
   second to retry.
+- Report why SNI connections end. `SNI_Server` gains `ConnectionLimit`,
+  `Relayed`, `Refused`, `NoHostname`, `Blocked`, `UnsafeDestination`,
+  `ResolveFailures`, `SocksFailures`, `ConnectFailures`,
+  `HandshakeTimeouts`, `IdleTimeouts`, and `StallTimeouts`. Each connection
+  is counted once, under the reason set where it failed. A relay that ends
+  by EOF or reset from either side counts under none of them.
 
 ### Monitor
 

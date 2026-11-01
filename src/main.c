@@ -126,7 +126,10 @@ int main(int argc, const char **argv)
 	}
 
 	if(monitor)
+	{
 		SniStat = monitor_add_stat(monitor,"SNI_Server");
+		stats_set_extra(SniStat, sni_stats_json, NULL);
+	}
 
 	memset(&Xconf, 0, sizeof(Xconf));
 	Xconf.sta = SniStat;
