@@ -176,6 +176,7 @@ static arg_option options[] =
 	{ "allowloopback", 'L', "yes|no", required_argument, "let client-supplied names reach loopback upstreams (default: no)", OPTION_SECTION_SNI },
 	{ "denyprivate", 'P', "yes|no", required_argument, "refuse client-supplied names that resolve to private addresses (default: no)", OPTION_SECTION_SNI },
 	{ "white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI },
+	{ "openproxy", 'O', "yes|no", required_argument, "allow SNI listeners to forward every host name when no whitelist is set (default: no)", OPTION_SECTION_SNI },
 
 	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS },
 	{ "dns", 'u', "HOST[:PORT]", required_argument, "set the upstream DNS server (default port: 53)", OPTION_SECTION_DNS },
@@ -246,6 +247,7 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 	pgp->sniidletimeout = 300;
 	pgp->allow_loopback = false;
 	pgp->deny_private = false;
+	pgp->open_proxy = false;
 	pgp->monitor_header_timeout = 5;
 	pgp->monitor_bind[0] = '\0';
 	pgp->monitor_token = NULL;
@@ -309,7 +311,18 @@ bool args_validate(zroxy_t *ptr)
 {
 	bool sni_ip_zero;
 
-	if (!ptr || !ptr->dnsserver)
+	if (!ptr)
+		return true;
+	if (ptr->ports && !ptr->WhitePath)
+	{
+		if (!ptr->open_proxy)
+		{
+			log_error("SNI listeners without a whitelist would forward every host name; set a whitelist (WHITE = PATH) or OPENPROXY = yes");
+			return false;
+		}
+		log_warn("OPENPROXY is on and no whitelist is set: every host name is forwarded");
+	}
+	if (!ptr->dnsserver)
 		return true;
 	if (!ptr->dnsserver->listen_set)
 	{
@@ -363,6 +376,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
 		case 'L': if (!parse_bool(arg, &setting->allow_loopback)) return -1; break;
 		case 'P': if (!parse_bool(arg, &setting->deny_private)) return -1; break;
+		case 'O': if (!parse_bool(arg, &setting->open_proxy)) return -1; break;
 		case 'I': if (!parse_sni_idle_timeout(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);
 		default: return -1;

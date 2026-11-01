@@ -751,6 +751,119 @@ static void test_destination_policy_options(void)
     }
 }
 
+static void test_open_proxy_option(void)
+{
+    char a0[] = "zroxy";
+    char p1[] = "-p";
+
+    {
+        zroxy_t cfg = {0};
+        char p2[] = "127.0.0.1:8443@443";
+        const char *argv[] = {a0, p1, p2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "listener without whitelist parses");
+        expect_true(!cfg.open_proxy, "openproxy defaults off");
+        expect_true(!args_validate(&cfg), "listener without whitelist or openproxy rejects");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char o1[] = "--openproxy";
+        char o2[] = "yes";
+        char p2[] = "127.0.0.1:8443@443";
+        const char *argv[] = {a0, p1, p2, o1, o2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 5, argv), "openproxy yes parses");
+        expect_true(cfg.open_proxy, "openproxy yes sets the flag");
+        expect_true(args_validate(&cfg), "listener with openproxy validates");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char o1[] = "-O";
+        char o2[] = "off";
+        char w1[] = "-w";
+        char w2[] = "/tmp/zroxy-no-such-whitelist";
+        char p2[] = "127.0.0.1:8443@443";
+        const char *argv[] = {a0, p1, p2, o1, o2, w1, w2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 7, argv), "whitelist with openproxy off parses");
+        expect_true(!cfg.open_proxy, "openproxy off clears the flag");
+        expect_true(args_validate(&cfg), "listener with whitelist validates");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char o1[] = "-O";
+        char o2[] = "yes";
+        char w1[] = "-w";
+        char w2[] = "/tmp/zroxy-no-such-whitelist";
+        char p2[] = "127.0.0.1:8443@443";
+        const char *argv[] = {a0, p1, p2, o1, o2, w1, w2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 7, argv), "whitelist with openproxy yes parses");
+        expect_true(cfg.WhitePath != NULL, "whitelist stays configured with openproxy");
+        expect_true(args_validate(&cfg), "whitelist with openproxy validates");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t cfg = {0};
+        char d1[] = "-d";
+        char d2[] = "127.0.0.1:5353";
+        char u1[] = "-u";
+        char u2[] = "1.1.1.1";
+        const char *argv[] = {a0, d1, d2, u1, u2};
+        reset_getopt();
+        expect_true(args_init(&cfg, 5, argv), "DNS-only parses");
+        expect_true(args_validate(&cfg), "DNS-only needs no whitelist or openproxy");
+        free_settings(&cfg);
+    }
+    {
+        zroxy_t bad = {0};
+        char o1[] = "--openproxy";
+        char o2[] = "maybe";
+        const char *argv[] = {a0, o1, o2};
+        reset_getopt();
+        expect_true(!args_init(&bad, 3, argv), "openproxy rejects a non-boolean");
+        free_settings(&bad);
+    }
+    {
+        zroxy_t file_cfg = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        write_all_or_fail(fd, "PORT = 127.0.0.1:8443@443\nOPENPROXY = true\n");
+        close(fd);
+        expect_true(args_parse_config(&file_cfg, template_path), "config OPENPROXY parses");
+        expect_true(file_cfg.open_proxy, "config OPENPROXY value");
+        expect_true(args_validate(&file_cfg), "config listener with OPENPROXY validates");
+        unlink(template_path);
+        free_settings(&file_cfg);
+    }
+    {
+        zroxy_t file_cfg = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        write_all_or_fail(fd, "PORT = 127.0.0.1:8443@443\n");
+        close(fd);
+        expect_true(args_parse_config(&file_cfg, template_path), "config listener only parses");
+        expect_true(!args_validate(&file_cfg), "config listener without whitelist rejects");
+        unlink(template_path);
+        free_settings(&file_cfg);
+    }
+}
+
 static void test_dns_cache_and_ttl_ranges(void)
 {
     {
@@ -868,6 +981,7 @@ int main(void)
     test_cli_monitor_and_sni_timeout();
     test_cli_monitor_bind_and_token();
     test_destination_policy_options();
+    test_open_proxy_option();
     test_config_value_case_preserved();
     test_config_port_key_case_insensitive();
     test_cli_socks_no_auth_cleanup_safe();

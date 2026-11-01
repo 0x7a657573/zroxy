@@ -68,6 +68,8 @@ target; check startup and a real proxied connection on that router.
 
 The package ships with `enabled '0'`, so nothing listens until you turn it on.
 The default configuration then runs a direct SNI proxy on loopback port 8443.
+It needs a whitelist: zroxy refuses to start SNI listeners without `WHITE`
+unless you set `OPENPROXY = yes` (every host name is then forwarded).
 Review `/etc/zroxy/zroxy.conf` first, then enable it and inspect status and
 logs:
 

@@ -6,6 +6,14 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
 
 ### SNI
 
+- Breaking: refuse to start when SNI listeners (`PORT`) are configured
+  without a whitelist (`WHITE`), instead of silently forwarding every host
+  name to anywhere. Add `OPENPROXY` / `--openproxy` (`-O`), default `no`;
+  `yes` allows the whitelist-less setup and logs a warning at startup. A
+  configured whitelist always applies, whatever `OPENPROXY` says. DNS-only
+  configurations are not affected. To migrate an existing config that has
+  `PORT` and no `WHITE`, either create a whitelist file and set `WHITE`, or
+  add `OPENPROXY = yes` to keep the old open behaviour.
 - Stop dialing unsafe destinations resolved from client-supplied names.
   Loopback (127.0.0.0/8, `::1`) used to be refused only when a listener was
   bound to a wildcard address or the destination port matched a listener, so

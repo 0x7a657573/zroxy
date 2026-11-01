@@ -79,7 +79,7 @@ def measure(name, use_socks, concurrency, payload_size, duration, hello, sustain
     with zroxy_lab.Lab() as lab:
         upstream = lab.tcp_server(mode="echo")
         socks = None
-        args = ["-l", "3", "-o", "5", "-p"]
+        args = ["-l", "3", "-o", "5", "-O", "yes", "-p"]
         sni_port = zroxy_lab.free_tcp_port()
         if use_socks:
             socks = lab.socks_server(
