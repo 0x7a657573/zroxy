@@ -227,6 +227,7 @@ static void test_sni_forwarding_basic(void)
     client->SniConfig.Port.local_port = 0;
     client->SniConfig.Port.remote_port = ntohs(addr.sin_port);
     client->SniConfig.Socks = NULL;
+    client->SniConfig.allow_loopback = true;
     client->SniConfig.sta = NULL;
     client->SniConfig.wlist = NULL;
     client->SniConfig.snitimeout = 2;
@@ -331,6 +332,7 @@ static void test_stalled_upstream_releases_worker(void)
     strcpy(client->SniConfig.Port.bindip, "127.0.0.1");
     client->SniConfig.Port.remote_port = ntohs(addr.sin_port);
     client->SniConfig.snitimeout = 1;
+    client->SniConfig.allow_loopback = true;
     expect_true(sni_worker_acquire(), "reserve one SNI worker");
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = on_sni_alarm;

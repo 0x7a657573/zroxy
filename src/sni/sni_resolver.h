@@ -179,12 +179,22 @@ void sni_resolver_release(int slot_index, uint64_t req_id);
 void sni_resolver_watch_bind(uint32_t listener_id, const char *bindip, uint16_t port);
 void sni_resolver_unwatch_bind(uint32_t listener_id);
 
+/* Destination policy flags for sni_resolver_policy_keep. */
+#define SNI_POLICY_ALLOW_LOOPBACK 0x1u	/* dial 127.0.0.0/8 and ::1 */
+#define SNI_POLICY_DENY_PRIVATE   0x2u	/* also refuse private ranges */
+
 /*
  * Rewrite IPv4-mapped IPv6 to IPv4, drop addresses the proxy must not dial,
- * and compact the array. Private ranges are kept. Link-local, multicast,
- * unspecified, and self-connect targets are removed.
+ * and compact the array. Always removed: unspecified and 0.0.0.0/8,
+ * 255.255.255.255, 169.254/16, multicast, 240/4, fe80::/10, fec0::/10,
+ * IPv4-compatible (::a.b.c.d) and NAT64 (64:ff9b::/96) forms of those, and
+ * self-connect targets. Loopback is removed unless SNI_POLICY_ALLOW_LOOPBACK
+ * is set (a loopback target on a listener's own port still goes). Private
+ * ranges (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) are kept unless
+ * SNI_POLICY_DENY_PRIVATE is set. Only used for addresses resolved from
+ * client-supplied names, never for the operator's SOCKS or DNS upstream.
  */
-size_t sni_resolver_policy_keep(sni_resolved_addr *addrs, size_t count);
+size_t sni_resolver_policy_keep(sni_resolved_addr *addrs, size_t count, unsigned flags);
 
 /*
  * SOCKS startup. A numeric host is stored as a bypass. A hostname is looked

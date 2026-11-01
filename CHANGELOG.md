@@ -6,6 +6,21 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
 
 ### SNI
 
+- Stop dialing unsafe destinations resolved from client-supplied names.
+  Loopback (127.0.0.0/8, `::1`) used to be refused only when a listener was
+  bound to a wildcard address or the destination port matched a listener, so
+  with a listener on a specific address a name such as `localtest.me` (or a
+  DNS rebinding answer) reached local services like a router web UI.
+  Loopback is now always refused, along with 0.0.0.0/8, 255.255.255.255,
+  169.254/16, multicast, 240/4, `::`, `ff00::/8`, `fe80::/10`, `fec0::/10`,
+  and IPv4-compatible (`::a.b.c.d`) and NAT64 (`64:ff9b::/96`) forms of any
+  of those. Refusals count under `UnsafeDestination`.
+- Add `ALLOWLOOPBACK` / `--allowloopback` (`-L`), default `no`, to dial
+  loopback upstreams again for local backends and tests. A listener's own
+  address and port stay refused. The configured SOCKS and DNS upstreams are
+  chosen by the operator and are not filtered.
+- Add `DENYPRIVATE` / `--denyprivate` (`-P`), default `no`, to also refuse
+  10/8, 172.16/12, 192.168/16, 100.64/10, and `fc00::/7`.
 - Add `SNIIDLETIMEOUT` / `--sniidletimeout` (`-I`), 1 to 86400 seconds,
   default 300, to close a relay that carries no traffic. Before, an
   established relay was closed after `SNITIMEOUT` (default 30 s) of silence,

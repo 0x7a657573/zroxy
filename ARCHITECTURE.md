@@ -586,9 +586,12 @@ is removed. Lookup results are filtered before connection:
 
 - lookups ask for IPv4 only (`AF_INET`), because IPv6 is not proxied;
 - IPv4-mapped IPv6 results are normalized to IPv4 for policy checks;
-- loopback, unspecified, link-local, multicast, and listener self-connect
-  results are removed;
-- private IPv4 ranges are retained;
+- loopback (unless `ALLOWLOOPBACK`), unspecified, 0.0.0.0/8, broadcast,
+  link-local, site-local, multicast, 240/4, and listener self-connect results
+  are removed; IPv4-compatible and NAT64 IPv6 forms are checked as the IPv4
+  address they embed;
+- private ranges are retained unless `DENYPRIVATE` is set;
+- the operator's SOCKS and DNS upstreams are not filtered;
 - the selected remote port is applied after resolution.
 
 If all returned addresses are rejected, the SNI connection is closed without a

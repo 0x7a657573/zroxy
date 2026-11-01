@@ -1213,16 +1213,35 @@ void sni_resolver_unwatch_bind(uint32_t listener_id)
 	pthread_mutex_unlock(&g_pool->mu);
 }
 
-static int v4_rejected(uint32_t host, uint16_t port)
+static int v4_private(uint32_t host)
+{
+	if ((host >> 24) == 10)
+		return 1;
+	if ((host & 0xfff00000u) == 0xac100000u)
+		return 1;
+	if ((host & 0xffff0000u) == 0xc0a80000u)
+		return 1;
+	if ((host & 0xffc00000u) == 0x64400000u)
+		return 1;
+	return 0;
+}
+
+static int v4_rejected(uint32_t host, uint16_t port, unsigned flags)
 {
 	int i;
-	int wildcard = 0;
 	int self = 0;
-	if (host == 0 || host == 0xffffffffu)
+	int loopback = (host >> 24) == 127;
+	if ((host >> 24) == 0 || host == 0xffffffffu)
 		return 1;
 	if ((host & 0xffff0000u) == 0xa9fe0000u)
 		return 1;
 	if ((host & 0xf0000000u) == 0xe0000000u)
+		return 1;
+	if ((host & 0xf0000000u) == 0xf0000000u)
+		return 1;
+	if (loopback && !(flags & SNI_POLICY_ALLOW_LOOPBACK))
+		return 1;
+	if ((flags & SNI_POLICY_DENY_PRIVATE) && v4_private(host))
 		return 1;
 	for (i = 0; i < SNI_BIND_MAX; i++) {
 		sni_bind_rec *b = &g_pool->binds[i];
@@ -1230,38 +1249,39 @@ static int v4_rejected(uint32_t host, uint16_t port)
 		if (!b->used)
 			continue;
 		bip = ntohl(b->ip.s_addr);
-		if (b->wildcard)
-			wildcard = 1;
 		if (b->port == port && (b->wildcard || bip == host))
 			self = 1;
-		if (b->port == port && (host >> 24) == 127 && (b->wildcard || (bip >> 24) == 127))
+		if (b->port == port && loopback && (bip >> 24) == 127)
 			self = 1;
 	}
-	if (wildcard && ((host >> 24) == 127 || host == 0))
-		return 1;
-	if (self)
-		return 1;
-	return 0;
+	return self;
 }
 
-static int v6_rejected(const struct in6_addr *ip, uint16_t port)
+static int v6_rejected(const struct in6_addr *ip, uint16_t port, unsigned flags)
 {
 	int i;
-	if (IN6_IS_ADDR_UNSPECIFIED(ip) || IN6_IS_ADDR_MULTICAST(ip) || IN6_IS_ADDR_LINKLOCAL(ip))
+	static const uint8_t nat64[12] = { 0x00, 0x64, 0xff, 0x9b };
+	static const uint8_t zero12[12] = { 0 };
+	if (IN6_IS_ADDR_UNSPECIFIED(ip) || IN6_IS_ADDR_MULTICAST(ip) ||
+	    IN6_IS_ADDR_LINKLOCAL(ip) || IN6_IS_ADDR_SITELOCAL(ip))
 		return 1;
 	if (IN6_IS_ADDR_LOOPBACK(ip)) {
-		int wildcard = 0;
+		if (!(flags & SNI_POLICY_ALLOW_LOOPBACK))
+			return 1;
 		for (i = 0; i < SNI_BIND_MAX; i++) {
-			if (!g_pool->binds[i].used)
-				continue;
-			if (g_pool->binds[i].wildcard)
-				wildcard = 1;
-			if (g_pool->binds[i].port == port)
+			if (g_pool->binds[i].used && g_pool->binds[i].port == port)
 				return 1;
 		}
-		if (wildcard)
-			return 1;
+		return 0;
 	}
+	/* IPv4-compatible (::a.b.c.d) and NAT64 (64:ff9b::/96) embed an IPv4 address. */
+	if (memcmp(ip->s6_addr, zero12, 12) == 0 || memcmp(ip->s6_addr, nat64, 12) == 0) {
+		uint32_t host;
+		memcpy(&host, &ip->s6_addr[12], 4);
+		return v4_rejected(ntohl(host), port, flags);
+	}
+	if ((flags & SNI_POLICY_DENY_PRIVATE) && (ip->s6_addr[0] & 0xfe) == 0xfc)
+		return 1;
 	return 0;
 }
 
@@ -1289,7 +1309,7 @@ static int normalize_mapped(sni_resolved_addr *addr)
 	return 1;
 }
 
-size_t sni_resolver_policy_keep(sni_resolved_addr *addrs, size_t count)
+size_t sni_resolver_policy_keep(sni_resolved_addr *addrs, size_t count, unsigned flags)
 {
 	size_t i;
 	size_t kept = 0;
@@ -1310,11 +1330,11 @@ size_t sni_resolver_policy_keep(sni_resolved_addr *addrs, size_t count)
 			memcpy(&in, &addrs[i].address, sizeof(in));
 			host = ntohl(in.sin_addr.s_addr);
 			port = ntohs(in.sin_port);
-			drop = v4_rejected(host, port);
+			drop = v4_rejected(host, port, flags);
 		} else if (sa->sa_family == AF_INET6) {
 			struct sockaddr_in6 in6;
 			memcpy(&in6, &addrs[i].address, sizeof(in6));
-			drop = v6_rejected(&in6.sin6_addr, ntohs(in6.sin6_port));
+			drop = v6_rejected(&in6.sin6_addr, ntohs(in6.sin6_port), flags);
 		} else {
 			drop = 1;
 		}

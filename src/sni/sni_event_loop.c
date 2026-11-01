@@ -1148,7 +1148,9 @@ static bool install_checked(sni_conn *c, sni_resolved_addr *in, size_t n, uint16
 	size_t kept;
 	for (i = 0; i < n; i++)
 		set_addr_port(&in[i], port);
-	kept = sni_resolver_policy_keep(in, n);
+	kept = sni_resolver_policy_keep(in, n,
+		(c->cfg.allow_loopback ? SNI_POLICY_ALLOW_LOOPBACK : 0u) |
+		(c->cfg.deny_private ? SNI_POLICY_DENY_PRIVATE : 0u));
 	return install_addrs(c, in, kept);
 }
 

@@ -110,6 +110,7 @@ def test_monitor_after_traffic():
                 "-l", "0",
                 "-o", "2",
                 "-p", "127.0.0.1:%s@%s" % (sni_port, tcp_up.port),
+                "-L", "yes",
                 "-m", str(mon_port),
                 "-d", "127.0.0.1:%s" % ldns,
                 "-u", "127.0.0.1:%s" % dns_up.port,
@@ -332,7 +333,7 @@ def test_sni_close_reasons():
         sni_port = zroxy_lab.free_tcp_port()
         mon_port = zroxy_lab.free_tcp_port()
         proc = lab.zroxy(
-            ["-l", "0", "-o", "2", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
+            ["-l", "0", "-o", "2", "-L", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
              "-m", str(mon_port), "-w", wl],
             tcp_ports=[sni_port, mon_port],
         )
@@ -391,7 +392,7 @@ def test_sni_connect_failure_and_handshake_timeout():
         sni_port = zroxy_lab.free_tcp_port()
         mon_port = zroxy_lab.free_tcp_port()
         proc = lab.zroxy(
-            ["-l", "0", "-o", "1", "-p", "127.0.0.1:%s@%s" % (sni_port, dead_port),
+            ["-l", "0", "-o", "1", "-L", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, dead_port),
              "-m", str(mon_port)],
             tcp_ports=[sni_port, mon_port],
         )
@@ -411,6 +412,25 @@ def test_sni_connect_failure_and_handshake_timeout():
         proc.check_alive()
 
 
+def test_sni_loopback_refused_by_default():
+    hello = zroxy_lab.client_hello("localhost")
+    with zroxy_lab.Lab() as lab:
+        up = lab.tcp_server(response=b"", read_exact=len(hello))
+        sni_port = zroxy_lab.free_tcp_port()
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(
+            ["-l", "0", "-o", "2", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
+             "-m", str(mon_port)],
+            tcp_ports=[sni_port, mon_port],
+        )
+        base = _sni_quiet(mon_port)
+        data, closed = zroxy_lab.tcp_exchange("127.0.0.1", sni_port, hello, timeout=4.0)
+        if data != b"" or not closed:
+            raise AssertionError("loopback upstream was not refused: %r" % data)
+        _sni_delta(mon_port, base, {"UnsafeDestination": 1})
+        proc.check_alive()
+
+
 def test_sni_idle_timeout():
     hello = zroxy_lab.client_hello("localhost")
     with zroxy_lab.Lab() as lab:
@@ -419,7 +439,7 @@ def test_sni_idle_timeout():
         sni_port = zroxy_lab.free_tcp_port()
         mon_port = zroxy_lab.free_tcp_port()
         proc = lab.zroxy(
-            ["-l", "0", "-o", "5", "-I", "1", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
+            ["-l", "0", "-o", "5", "-I", "1", "-L", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
              "-m", str(mon_port)],
             tcp_ports=[sni_port, mon_port],
         )
@@ -489,6 +509,7 @@ def main():
     for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error,
                  test_monitor_http_framing, test_monitor_process_object,
                  test_sni_close_reasons, test_sni_connect_failure_and_handshake_timeout,
+                 test_sni_loopback_refused_by_default,
                  test_sni_idle_timeout, test_monitor_whitelist_object):
         try:
             test()

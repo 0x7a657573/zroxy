@@ -26,6 +26,8 @@ typedef struct
 	dnshost_t	*dnsserver;
 	int			snitimeout;
 	int			sniidletimeout;
+	bool		allow_loopback;
+	bool		deny_private;
 }zroxy_t;
 
 bool args_init(zroxy_t *pgp,int argc, const char **argv);

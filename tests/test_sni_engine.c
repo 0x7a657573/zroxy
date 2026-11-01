@@ -347,6 +347,7 @@ static sniclient_t *make_client(int fd, uint16_t remote, int timeout,
 	memcpy(c->SniConfig.Port.bindip, "127.0.0.1", 10);
 	c->SniConfig.Port.remote_port = remote;
 	c->SniConfig.snitimeout = timeout;
+	c->SniConfig.allow_loopback = true;
 	c->SniConfig.sta = st;
 	c->SniConfig.wlist = wl;
 	c->SniConfig.Socks = socks;
@@ -623,6 +624,7 @@ static void fill_listener(SniServer_t *cfg, uint16_t local, uint16_t remote, int
 	cfg->sta = st;
 	cfg->wlist = wl;
 	cfg->Socks = socks;
+	cfg->allow_loopback = true;
 }
 
 static void state_drop(statistics_t *st)
@@ -2289,37 +2291,115 @@ static void test_normalize(void)
 	expect_true(sni_resolver_normalize(big, out, sizeof(out)), "253 bytes accepted");
 }
 
+static int policy_kept(int v6, const char *ip, uint16_t port, unsigned flags)
+{
+	sni_resolved_addr addr;
+	size_t n;
+	if (v6)
+		fill_v6(&addr, &n, ip);
+	else
+		fill_v4(&addr, &n, ip);
+	set_port_test(&addr, port);
+	return (int)sni_resolver_policy_keep(&addr, 1, flags);
+}
+
+static void expect_policy(int v6, const char *ip, unsigned flags, int kept, const char *what)
+{
+	char msg[96];
+	snprintf(msg, sizeof(msg), "%s %s", ip, what);
+	expect_int(policy_kept(v6, ip, 80, flags), kept, msg);
+}
+
 static void test_policy_addresses(void)
 {
 	sni_completion_sink *sink = NULL;
-	sni_resolved_addr addr;
-	size_t n;
+	const unsigned lo = SNI_POLICY_ALLOW_LOOPBACK;
+	const unsigned priv = SNI_POLICY_DENY_PRIVATE;
+	static const char *const v4_always[] = {
+		"0.0.0.0", "0.1.2.3", "255.255.255.255", "169.254.1.1", "224.0.0.1",
+		"239.255.255.250", "240.0.0.1", "254.1.1.1"
+	};
+	static const char *const v6_always[] = {
+		"::", "ff02::1", "fe80::1", "febf::1", "fec0::1", "feff::1",
+		"::0.0.0.2", "::0.1.2.3", "::169.254.1.1", "::224.0.0.1",
+		"::240.0.0.1", "64:ff9b::0.0.0.0", "64:ff9b::169.254.1.1",
+		"64:ff9b::224.0.0.1", "64:ff9b::255.255.255.255"
+	};
+	static const char *const v4_priv[] = {
+		"10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1",
+		"100.64.0.1", "100.127.255.255"
+	};
+	static const char *const v4_public[] = {
+		"8.8.8.8", "172.15.255.255", "172.32.0.1", "192.167.1.1",
+		"100.63.255.255", "100.128.0.1", "223.255.255.255"
+	};
+	size_t i;
 	expect_true(sni_resolver_sink_open(SNI_SINK_LISTENER, &sink), "policy sink");
-	sni_resolver_watch_bind(sink->listener_id, "127.0.0.1", 9);
-	fill_v4(&addr, &n, "127.0.0.1");
-	set_port_test(&addr, 9);
-	expect_int((int)sni_resolver_policy_keep(&addr, 1), 0, "self connect dropped");
-	fill_v6(&addr, &n, "::ffff:127.0.0.1");
-	set_port_test(&addr, 9);
-	expect_int((int)sni_resolver_policy_keep(&addr, 1), 0, "mapped loopback dropped");
-	fill_v4(&addr, &n, "127.0.0.1");
-	set_port_test(&addr, 10);
-	expect_int((int)sni_resolver_policy_keep(&addr, 1), 1, "other loopback port kept");
-	fill_v4(&addr, &n, "10.1.2.3");
-	set_port_test(&addr, 9);
-	expect_int((int)sni_resolver_policy_keep(&addr, 1), 1, "private kept");
-	fill_v4(&addr, &n, "169.254.1.1");
-	set_port_test(&addr, 9);
-	expect_int((int)sni_resolver_policy_keep(&addr, 1), 0, "link local dropped");
-	fill_v4(&addr, &n, "0.0.0.0");
-	set_port_test(&addr, 9);
-	expect_int((int)sni_resolver_policy_keep(&addr, 1), 0, "unspecified dropped");
+	sni_resolver_watch_bind(sink->listener_id, "192.168.1.1", 8443);
+
+	/* Loopback is refused by default even with a specific-IP listener. */
+	expect_policy(0, "127.0.0.1", 0, 0, "loopback refused");
+	expect_policy(0, "127.255.255.254", 0, 0, "loopback /8 refused");
+	expect_policy(1, "::1", 0, 0, "loopback refused");
+	expect_policy(1, "::ffff:127.0.0.1", 0, 0, "mapped loopback refused");
+	expect_policy(1, "::127.0.0.1", 0, 0, "compat loopback refused");
+	expect_policy(1, "64:ff9b::127.0.0.1", 0, 0, "nat64 loopback refused");
+	/* The opt-in lets loopback through, but not a listener's own port. */
+	expect_policy(0, "127.0.0.1", lo, 1, "loopback allowed by opt-in");
+	expect_policy(1, "::1", lo, 1, "v6 loopback allowed by opt-in");
+	expect_policy(1, "::ffff:127.0.0.1", lo, 1, "mapped loopback allowed by opt-in");
+	expect_policy(1, "::127.0.0.1", lo, 1, "compat loopback allowed by opt-in");
+	expect_policy(1, "64:ff9b::127.0.0.1", lo, 1, "nat64 loopback allowed by opt-in");
+	expect_int(policy_kept(0, "127.0.0.1", 8443, lo), 1, "specific bind does not own loopback");
+	expect_int(policy_kept(0, "192.168.1.1", 8443, 0), 0, "own ip:port refused");
+	expect_int(policy_kept(0, "192.168.1.1", 8444, 0), 1, "own ip other port kept");
+
+	for (i = 0; i < sizeof(v4_always) / sizeof(v4_always[0]); i++) {
+		expect_policy(0, v4_always[i], 0, 0, "refused");
+		expect_policy(0, v4_always[i], lo | priv, 0, "refused with every opt-in");
+	}
+	for (i = 0; i < sizeof(v6_always) / sizeof(v6_always[0]); i++) {
+		expect_policy(1, v6_always[i], 0, 0, "refused");
+		expect_policy(1, v6_always[i], lo | priv, 0, "refused with every opt-in");
+	}
+	for (i = 0; i < sizeof(v4_priv) / sizeof(v4_priv[0]); i++) {
+		expect_policy(0, v4_priv[i], 0, 1, "private kept by default");
+		expect_policy(0, v4_priv[i], priv, 0, "private refused by opt-in");
+	}
+	for (i = 0; i < sizeof(v4_public) / sizeof(v4_public[0]); i++)
+		expect_policy(0, v4_public[i], priv, 1, "public kept with deny private");
+	/* Embedded IPv4 follows the IPv4 private rules too. */
+	expect_policy(1, "::ffff:10.0.0.1", 0, 1, "mapped private kept by default");
+	expect_policy(1, "::ffff:10.0.0.1", priv, 0, "mapped private refused by opt-in");
+	expect_policy(1, "64:ff9b::192.168.0.1", 0, 1, "nat64 private kept by default");
+	expect_policy(1, "64:ff9b::192.168.0.1", priv, 0, "nat64 private refused by opt-in");
+	expect_policy(1, "::10.0.0.1", priv, 0, "compat private refused by opt-in");
+	expect_policy(1, "64:ff9b::8.8.8.8", priv, 1, "nat64 public kept");
+	expect_policy(1, "::8.8.8.8", priv, 1, "compat public kept");
+	expect_policy(1, "fc00::1", 0, 1, "unique local kept by default");
+	expect_policy(1, "fd12:3456::1", 0, 1, "unique local kept by default");
+	expect_policy(1, "fc00::1", priv, 0, "unique local refused by opt-in");
+	expect_policy(1, "fdff::1", priv, 0, "unique local refused by opt-in");
+	expect_policy(1, "fe00::1", priv, 1, "outside fc00::/7 kept");
+	expect_policy(1, "2001:db8::1", priv, 1, "global kept");
+	expect_policy(1, "2606:4700::1111", 0, 1, "global kept");
 	sni_resolver_sink_release(sink);
+
+	/* A loopback listener refuses its own port even with the opt-in. */
+	expect_true(sni_resolver_sink_open(SNI_SINK_DIRECT, &sink), "loopback sink");
+	sni_resolver_watch_bind(sink->listener_id, "127.0.0.1", 9);
+	expect_int(policy_kept(0, "127.0.0.2", 9, lo), 0, "own port refused on 127/8 with opt-in");
+	expect_int(policy_kept(1, "::1", 9, lo), 0, "own port refused on ::1 with opt-in");
+	expect_int(policy_kept(0, "127.0.0.1", 10, lo), 1, "other loopback port kept with opt-in");
+	sni_resolver_sink_release(sink);
+
+	/* A wildcard listener still refuses its own port on loopback. */
 	expect_true(sni_resolver_sink_open(SNI_SINK_DIRECT, &sink), "wildcard sink");
 	sni_resolver_watch_bind(sink->listener_id, "0.0.0.0", 1);
-	fill_v4(&addr, &n, "127.0.0.1");
-	set_port_test(&addr, 80);
-	expect_int((int)sni_resolver_policy_keep(&addr, 1), 0, "wildcard rejects loopback");
+	expect_int(policy_kept(0, "127.0.0.1", 80, 0), 0, "wildcard rejects loopback");
+	expect_int(policy_kept(0, "127.0.0.1", 1, lo), 0, "wildcard rejects own port on loopback");
+	expect_int(policy_kept(0, "10.0.0.1", 1, 0), 0, "wildcard rejects own port");
+	expect_int(policy_kept(0, "127.0.0.1", 80, lo), 1, "wildcard allows other loopback port by opt-in");
 	sni_resolver_sink_release(sink);
 	sink = NULL;
 }

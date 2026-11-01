@@ -7,6 +7,7 @@
 #include <zroxy/args.h>
 #include <zroxy/dnscache.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <zroxy/version.h>
@@ -124,6 +125,7 @@ static bool parse_dns_connections(zroxy_t *ptr,char *str);
 static bool parse_log_level(zroxy_t *ptr,char *str);
 static bool parse_sni_timeout(zroxy_t *ptr,char *str);
 static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str);
+static bool parse_bool(char *str, bool *out);
 
 static dnshost_t *dns_config(zroxy_t *ptr)
 {
@@ -171,6 +173,8 @@ static arg_option options[] =
 	{ "socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI },
 	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
 	{ "sniidletimeout", 'I', "SECONDS", required_argument, "close a relay idle this long, 1..86400 (default: 300)", OPTION_SECTION_SNI },
+	{ "allowloopback", 'L', "yes|no", required_argument, "let client-supplied names reach loopback upstreams (default: no)", OPTION_SECTION_SNI },
+	{ "denyprivate", 'P', "yes|no", required_argument, "refuse client-supplied names that resolve to private addresses (default: no)", OPTION_SECTION_SNI },
 	{ "white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI },
 
 	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS },
@@ -240,6 +244,8 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 {
 	pgp->snitimeout = 30;
 	pgp->sniidletimeout = 300;
+	pgp->allow_loopback = false;
+	pgp->deny_private = false;
 	pgp->monitor_header_timeout = 5;
 	pgp->monitor_bind[0] = '\0';
 	pgp->monitor_token = NULL;
@@ -355,6 +361,8 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'C': if (!parse_dns_connections(setting,arg)) return -1; break;
 		case 'l': if (!parse_log_level(setting,arg)) return -1; break;
 		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
+		case 'L': if (!parse_bool(arg, &setting->allow_loopback)) return -1; break;
+		case 'P': if (!parse_bool(arg, &setting->deny_private)) return -1; break;
 		case 'I': if (!parse_sni_idle_timeout(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);
 		default: return -1;
@@ -953,5 +961,16 @@ static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str)
 	if (!parse_i32_range(str, &timeout, 1, 86400))
 		return false;
 	ptr->sniidletimeout = timeout;
+	return true;
+}
+
+static bool parse_bool(char *str, bool *out)
+{
+	if (!strcasecmp(str, "yes") || !strcasecmp(str, "on") || !strcasecmp(str, "true") || !strcmp(str, "1"))
+		*out = true;
+	else if (!strcasecmp(str, "no") || !strcasecmp(str, "off") || !strcasecmp(str, "false") || !strcmp(str, "0"))
+		*out = false;
+	else
+		return false;
 	return true;
 }

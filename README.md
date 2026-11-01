@@ -172,6 +172,8 @@ use the key names in the last column.
 | `-a`, `--monitortimeout` | seconds | Incomplete monitor-header timeout | `MONITORTIMEOUT` |
 | `-o`, `--snitimeout` | seconds | SNI handshake, connect, and write-stall timeout | `SNITIMEOUT` |
 | `-I`, `--sniidletimeout` | `1..86400` | Close a relay with no traffic after this many seconds (default 300) | `SNIIDLETIMEOUT` |
+| `-L`, `--allowloopback` | `yes`/`no` | Let names from clients resolve to loopback (127.0.0.0/8, `::1`) upstreams; default `no`, for tests and local backends only | `ALLOWLOOPBACK` |
+| `-P`, `--denyprivate` | `yes`/`no` | Also refuse names that resolve to private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); default `no` | `DENYPRIVATE` |
 | `-w`, `--white` | path | Whitelist file | `WHITE` |
 | `-d`, `--ldns` | bind:port | Local DNS listener (UDP and TCP) | `LDNS` |
 | `-u`, `--dns` | host[:port] | Upstream DNS server | `DNS` |
@@ -359,7 +361,7 @@ ends by EOF or reset from either side is counted under none of them.
 | `Refused` | Rejected at accept: the cap was reached or an allocation failed |
 | `NoHostname` | No usable SNI or HTTP `Host`: the client left first, malformed or oversized hello, an IP literal |
 | `Blocked` | Hostname rejected by the whitelist |
-| `UnsafeDestination` | Resolved only to rejected addresses (loopback, link-local, ...) |
+| `UnsafeDestination` | Resolved only to rejected addresses (loopback, link-local, ...; see `ALLOWLOOPBACK` and `DENYPRIVATE`) |
 | `ResolveFailures` | Hostname resolution failed |
 | `SocksFailures` | SOCKS5 negotiation failed or was refused |
 | `ConnectFailures` | The TCP connect (direct or to the SOCKS server) failed |
