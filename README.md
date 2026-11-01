@@ -302,10 +302,9 @@ controls.
 
 ## DNS forwarding
 
-When `LDNS` is configured, zroxy listens for DNS over UDP and TCP locally. Whitelisted
-names receive a synthetic A answer using `SNIP` with a configurable TTL
-(`DTTL`, default 300 seconds). IPv6 is
-not proxied, so every other query type for a whitelisted name (AAAA, HTTPS,
+When `LDNS` is configured, zroxy listens for DNS over UDP and TCP locally.
+Whitelisted names receive a synthetic A answer using `SNIP` with a configurable
+TTL (`DTTL`, default 300 seconds). IPv6 is not proxied, so every other query type for a whitelisted name (AAAA, HTTPS,
 SVCB, ...) gets an empty NOERROR (NODATA) answer with one SOA authority record
 using the same TTL for RFC 2308 negative caching, and the client falls back to
 IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
@@ -315,24 +314,27 @@ resolves upstream names to IPv4 only.
 DNS settings may appear in any CLI or configuration-file order. The parser keeps
 one DNS configuration object and the last `LDNS` value wins.
 
-Forwarded answers are cached in memory (up to `DCACHE` entries, default 2048)
-for their TTL; `DCACHE = 0` disables the cache,
-capped at one hour, or five minutes for NXDOMAIN and NODATA. Identical queries
-that arrive while one is being fetched wait for that fetch instead of going
-upstream again. A query that waited more than three seconds in the queue is
-dropped.
+Forwarded answers are cached in memory for their TTL, capped at one hour, or
+five minutes for NXDOMAIN and NODATA. The cache holds up to `DCACHE` entries
+(default 2048); `DCACHE = 0` disables it. Identical queries that arrive while
+one is being fetched wait for that fetch instead of going upstream again. A
+forwarded query has one deadline of twice `DTIMEOUT`.
 
-A failed upstream exchange or a full queue is answered with SERVFAIL. An
-upstream reply whose id or question does not match the query is discarded. A
+A failed upstream exchange is answered with SERVFAIL, and so is a query that
+arrives while 2048 requests are already held or response buffers have reached
+16 MiB. An upstream reply whose id or question does not match the query is
+discarded. A
 response larger than the client's UDP size (512 bytes, or its EDNS0 size up to
 1232) is answered with TC set, and the client retries over TCP on the same
-address and port, where the whole reply is sent. Up to 8 TCP connections are
+address and port, where the whole reply is sent. Up to 128 TCP connections are
 served at once, each for at most 32 queries and closed after 3 seconds idle.
 If the TCP port cannot be bound, zroxy logs it and keeps serving UDP.
 
 The `DNS_Server` monitor object adds `CacheHits`, `CacheMisses`, `CacheShared`,
-`CacheEntries`, `CacheEvictions`, `QueueStaleDropped`, `QueueFull`,
-`AclDropped`, `TcpRefused`, and `TcpActive`. These counters are detached before the DNS
+`CacheEntries`, `CacheEvictions`, `AclDropped`, `RateDropped`, `TcpRefused`,
+`TcpActive`, `QueueDropped`, `UpstreamTimeouts`, `UpstreamErrors`, and
+`ActiveUpstreams`. `QueueStaleDropped` and `QueueFull` are still reported for
+compatibility but are always 0. These counters are detached before the DNS
 service is freed during shutdown.
 
 `DACL` silently drops UDP datagrams and closes TCP connections whose source
@@ -343,12 +345,9 @@ to explicitly allow every IPv4 source.
 
 `DRATE` applies a per-source-IP token bucket to UDP queries only. Its burst is
 twice the configured QPS and its fixed 1024-slot table intentionally shares
-capacity when source hashes collide. TCP remains governed by the eight-connection
+capacity when source hashes collide. TCP remains governed by the 128-connection
 and 32-query limits. Rate-limited UDP queries are silent and counted as
 `RateDropped` in the monitor.
-
-Repeated queue, TCP-capacity, and upstream-failure logs are limited to one line
-per second; a later line reports how many messages were suppressed.
 
 Example:
 
@@ -361,8 +360,8 @@ DSOCKS = 127.0.0.1:9050
 DTIMEOUT = 5
 ```
 
-DNS-over-TCP framing uses a two-byte length prefix. DNS is forwarded over TCP
-upstream even though clients use the local UDP listener.
+DNS-over-TCP framing uses a two-byte length prefix. Queries are forwarded
+upstream over TCP even when the client asked over UDP.
 
 ## Build and install
 
