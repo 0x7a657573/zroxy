@@ -1,7 +1,7 @@
 # zroxy on OpenWrt
 
-This package installs the zroxy binary, a procd service, and two configuration
-files. The service is installed disabled; once enabled, it starts on boot and
+This package installs the zroxy binary, a procd service, and its UCI
+configuration (plus an example native file for the legacy mode below). The service is installed disabled; once enabled, it starts on boot and
 is supervised by procd. Its default SNI listener is limited to
 `127.0.0.1:8443`, so it is safe to test locally before allowing LAN clients to
 connect.
@@ -57,41 +57,68 @@ target; check startup and a real proxied connection on that router.
 
 ## Configure and run
 
-- `/etc/config/zroxy` is the UCI service control: `enabled` and the path to the
-  native configuration file.
-- `/etc/zroxy/zroxy.conf` contains all zroxy settings, including any SOCKS5
-  credentials. It is always passed with `-c`; the process working directory is
-  irrelevant. Keep credentials readable only by root if you add them.
-  To keep a SOCKS5 password or monitor token out of this file, point
-  `SOCKSPASSFILE`, `DSOCKSPASSFILE` or `MONITORTOKENFILE` at a `chmod 600`
-  file; zroxy warns about group or world access and refuses world-writable
-  files.
+- `/etc/config/zroxy` is the source of truth. It has a `zroxy 'main'` section
+  (service control and SNI settings), a `dns 'dns'` section, repeatable
+  `route` sections for upstream DNS servers, and a `monitor 'monitor'`
+  section. At every start or reload the init script turns it into the native
+  zroxy configuration `/var/etc/zroxy/zroxy.conf` (directory `0700`, file
+  `0600`, root) and passes that file with `-c`. Only options that are set are
+  written, and a disabled `dns` or `monitor` section writes nothing.
+  The generated file is rewritten each time: edit UCI, not that file.
+- The start fails, with a message in `logread -e zroxy`, if a value contains a
+  line break, a boolean is not `0`/`1`/`yes`/`no`, a route has no `server`, or
+  more than 4 routes are enabled.
+- Secrets are never inline: `socks_pass_file`, `dsocks_pass_file` and
+  `token_file` name a `chmod 600` file; zroxy warns about group or world
+  access and refuses world-writable files. `socks` and `dsocks` hold at most
+  `user@host:port`.
 - zroxy starts as root, binds its ports, then drops to the `zroxy` user the
   package creates (`USERID` in the package Makefile). `-U zroxy` is passed
-  first, so `USER` or `GROUP` in `zroxy.conf` overrides it. The whitelist file
-  and its directory must be readable by that user; the config file and the
-  secret files are read before the drop and may stay root-only (`chmod 600`).
+  first, so `user` or `group` in UCI overrides it. The whitelist file and its
+  directory must be readable by that user; the generated file and the secret
+  files are read before the drop and may stay root-only (`chmod 600`).
 - The init script also sets `no_new_privs` and runs zroxy in a procd jail
-  (`procd_add_jail zroxy log procfs`) that mounts read-only the config file,
-  the secret files named in it, the whitelist's directory, `/etc/passwd`,
+  (`procd_add_jail zroxy log procfs`) that mounts read-only the generated
+  file, the secret files named in it, the whitelist's directory, `/etc/passwd`,
   `/etc/group`, `/etc/hosts` and the resolver files. Set
   `uci set zroxy.main.jail='0'` and reload to run without the jail, for
   example if a name lookup fails inside it. The jail, the user creation and
   the privilege drop under procd have not been tested on a device. If the
   resolver file is replaced rather than rewritten, the jail may keep seeing
   the old one until zroxy restarts.
-- Both files are package conffiles and are included in the normal configuration
-  backup used by sysupgrade. After a firmware upgrade, confirm that the zroxy
-  package is installed for the new release before trying to start it.
+- `/etc/config/zroxy` is a package conffile and is included in the normal
+  configuration backup used by sysupgrade. After a firmware upgrade, confirm
+  that the zroxy package is installed for the new release before trying to
+  start it.
+
+UCI options and the zroxy keys they write:
+
+| Section | Option | zroxy key |
+| --- | --- | --- |
+| `main` | `enabled`, `jail` | service control only |
+| `main` | `list listen` | `PORT` (one line each) |
+| `main` | `white`, `openproxy`, `allowloopback`, `denyprivate` | `WHITE`, `OPENPROXY`, `ALLOWLOOPBACK`, `DENYPRIVATE` |
+| `main` | `socks`, `socks_pass_file` | `SOCKS`, `SOCKSPASSFILE` |
+| `main` | `snitimeout`, `sniidletimeout` | `SNITIMEOUT`, `SNIIDLETIMEOUT` |
+| `main` | `log`, `user`, `group` | `LOG`, `USER`, `GROUP` |
+| `dns` | `enabled` | when `0`, no DNS keys are written |
+| `dns` | `listen` | `LDNS` |
+| `dns` | `list acl` | `DACL` (joined with commas) |
+| `dns` | `dsocks`, `dsocks_pass_file` | `DSOCKS`, `DSOCKSPASSFILE` |
+| `dns` | `timeout`, `cache`, `ttl`, `rate`, `connections` | `DTIMEOUT`, `DCACHE`, `DTTL`, `DRATE`, `DNSCONNECTIONS` |
+| `dns` | `snip` | `SNIP` |
+| `route` | `enabled`, `server`, `via` | `DNS = server [via VIA]`, in order |
+| `monitor` | `enabled` | when `0`, no monitor keys are written |
+| `monitor` | `listen`, `token_file`, `timeout` | `MONITOR`, `MONITORTOKENFILE`, `MONITORTIMEOUT` |
 
 The package ships with `enabled '0'`, so nothing listens until you turn it on.
-The default configuration then runs a direct SNI proxy on loopback port 8443.
-It needs a whitelist: zroxy refuses to start SNI listeners without `WHITE`
-unless you set `OPENPROXY = yes` (every host name is then forwarded).
-Review `/etc/zroxy/zroxy.conf` first, then enable it and inspect status and
-logs:
+The default settings run a direct SNI proxy on loopback port 8443. It needs a
+whitelist: zroxy refuses to start SNI listeners without one unless you set
+`openproxy '1'` (every host name is then forwarded). Create the whitelist,
+then enable the service and inspect status and logs:
 
 ```sh
+uci set zroxy.main.white='/etc/zroxy/whitelist.txt'
 uci set zroxy.main.enabled='1'
 uci commit zroxy
 /etc/init.d/zroxy enable
@@ -109,20 +136,44 @@ uci commit zroxy
 /etc/init.d/zroxy disable
 ```
 
-Edit `/etc/zroxy/zroxy.conf` to choose the SNI listener, direct or SOCKS5
-upstream, optional whitelist, and optional DNS service. After changing this
-file, run `/etc/init.d/zroxy reload`: procd restarts zroxy only if the file has
-changed. `uci commit zroxy` followed by `reload_config` applies UCI changes the
-same way. zroxy picks up whitelist edits by itself, without a reload.
+After changing UCI, run `uci commit zroxy` and then `/etc/init.d/zroxy reload`
+(or `reload_config`): procd restarts zroxy only if the generated file has
+changed. zroxy picks up whitelist edits by itself, without a reload.
 The service sends stderr to `logread` and procd restarts it after an unexpected
 exit. If a configured listener cannot start, zroxy exits with an error.
 
+### Legacy mode: a hand-written native file
+
+If `option config_file` is set to a non-empty path, the init script uses that
+file exactly as before and generates nothing; every UCI option except
+`enabled`, `jail` and `config_file` is then ignored. Routers upgraded from an
+earlier package release keep their old `/etc/config/zroxy`, which sets
+`config_file '/etc/zroxy/zroxy.conf'`, so they stay in this mode and keep
+working. `/etc/zroxy/zroxy.conf` is still installed as an example and is also a
+conffile. To migrate, move the settings from that file into UCI (see the table
+above), then switch:
+
+```sh
+uci delete zroxy.main.config_file
+uci commit zroxy
+/etc/init.d/zroxy restart
+```
+
+A fresh install has no `config_file`, so it uses the UCI settings.
+
 ## LAN access and firewall
 
-The packaged listener binds only to loopback. To accept LAN connections, set
-`PORT` in `/etc/zroxy/zroxy.conf` to the router's LAN address and desired port,
-for example `PORT = 192.168.1.1:8443@443`, then restart zroxy. Adapt the
-address and port to your network. Add a firewall rule in `/etc/config/firewall`
+The packaged listener binds only to loopback. To accept LAN connections,
+replace the `listen` entry with the router's LAN address and desired port,
+then restart zroxy. Adapt the address and port to your network.
+
+```sh
+uci del_list zroxy.main.listen='127.0.0.1:8443@443'
+uci add_list zroxy.main.listen='192.168.1.1:8443@443'
+uci commit zroxy
+/etc/init.d/zroxy restart
+```
+ Add a firewall rule in `/etc/config/firewall`
 for the LAN zone if that zone does not already allow access to the router:
 
 ```text
@@ -141,18 +192,29 @@ authenticate incoming clients.
 ## Optional DNS alongside dnsmasq
 
 dnsmasq normally owns port 53, and mDNS (umdns, avahi) uses 5353. To use zroxy
-DNS without a port conflict, add these lines to `/etc/zroxy/zroxy.conf` and
-restart zroxy:
+DNS without a port conflict, enable the `dns` section and add upstream routes
+(up to 4 enabled, tried in order with failover):
 
-```ini
-LDNS = 127.0.0.1:5354
-DNS = 1.1.1.1:53
-DACL = 127.0.0.0/8
-DNSCONNECTIONS = 8
+```sh
+uci set zroxy.dns.enabled='1'
+uci set zroxy.dns.listen='127.0.0.1:5354'
+uci add_list zroxy.dns.acl='127.0.0.0/8'
+uci set zroxy.dns.connections='8'
+
+uci add zroxy route
+uci set zroxy.@route[-1].server='1.1.1.1:53'
+uci add zroxy route
+uci set zroxy.@route[-1].server='192.168.1.2'
+uci set zroxy.@route[-1].via='direct'
+uci commit zroxy
+/etc/init.d/zroxy restart
 ```
 
-`DNSCONNECTIONS` caps the upstream DNS-over-TCP connections. Its default of 96
-suits a server; a small number is enough for a home router.
+Each route becomes a `DNS = server [via X]` line. `via` is a SOCKS5 spec
+(`127.0.0.1:9050`) for that route only, or `direct` to skip the DNS SOCKS5
+proxy (`dsocks`); set `enabled '0'` on a route to skip it. `connections` caps
+the upstream DNS-over-TCP connections. Its default of 96 suits a server; a
+small number is enough for a home router.
 
 For selected domains, add a dnsmasq forwarding rule in `/etc/config/dhcp`,
 within the existing `config dnsmasq` section:
@@ -163,7 +225,7 @@ list server '/example.com/127.0.0.1#5354'
 
 Then run `/etc/init.d/dnsmasq restart`. Replace `example.com` with your domain
 and verify a query through dnsmasq. If you also enable `WHITE` and synthetic
-answers, set `SNIP` to the address clients should use for the SNI listener.
+answers, set `snip` to the address clients should use for the SNI listener.
 Do not point zroxy's DNS upstream back at dnsmasq when dnsmasq forwards to
 zroxy; that creates a forwarding loop.
 
