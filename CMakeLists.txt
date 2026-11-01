@@ -149,6 +149,14 @@ if(BUILD_TESTING)
         -DZROXY_BIN=$<TARGET_FILE:zroxy>
         -P ${PROJECT_SOURCE_DIR}/tests/check_help.cmake)
 
+    find_program(ZROXY_SH sh)
+    if(ZROXY_SH)
+        add_test(NAME openwrt_init_uci COMMAND ${ZROXY_SH}
+            ${PROJECT_SOURCE_DIR}/tests/openwrt/test_init_uci.sh
+            ${PROJECT_SOURCE_DIR}/openwrt/files/zroxy.init
+            $<TARGET_FILE:zroxy>)
+    endif()
+
     zroxy_add_unit_test(net_host_extract tests/test_net_host_extract.c zroxy_net)
     zroxy_add_unit_test(filter_whitelist tests/test_filter_whitelist.c zroxy_filter)
     zroxy_add_unit_test(dns_codec        tests/test_dns_codec.c        zroxy_dns)
