@@ -66,25 +66,204 @@ setup_jail() {
 	fi
 }
 
+# Directory of the configuration generated from /etc/config/zroxy.
+ZR_RUN_DIR="${ZR_RUN_DIR:-/var/etc/zroxy}"
+
+ZR_NL='
+'
+ZR_CR="$(printf '\r')"
+
+zr_fail() {
+	logger -t zroxy "$*"
+	ZR_ERR=1
+}
+
+# Append "KEY = VALUE" to the file being generated. A value holding a line
+# break would add keys of its own, so it fails the whole generation.
+zr_emit() {
+	case "$2" in
+	*"$ZR_NL"*|*"$ZR_CR"*)
+		zr_fail "UCI option for $1 contains a line break; refusing to start"
+		return 1
+		;;
+	esac
+	printf '%s = %s\n' "$1" "$2" >>"$ZR_OUT"
+}
+
+# zr_opt KEY SECTION OPTION: emit KEY when the option is set and not empty.
+zr_opt() {
+	local value
+	config_get value "$2" "$3" ""
+	[ -n "$value" ] || return 0
+	zr_emit "$1" "$value"
+}
+
+# zr_bool KEY SECTION OPTION: emit yes/no when the option is set.
+zr_bool() {
+	local value
+	config_get value "$2" "$3" ""
+	[ -n "$value" ] || return 0
+	case "$value" in
+	1|yes|on|true) zr_emit "$1" yes ;;
+	0|no|off|false) zr_emit "$1" no ;;
+	*) zr_fail "UCI option $2.$3 must be a boolean, got: $value" ;;
+	esac
+}
+
+# zr_list KEY SECTION OPTION: emit one KEY line per list entry.
+zr_list_item() {
+	[ -n "$1" ] && zr_emit "$ZR_LIST_KEY" "$1"
+}
+zr_list() {
+	ZR_LIST_KEY="$1"
+	config_list_foreach "$2" "$3" zr_list_item
+}
+
+# zr_join KEY SECTION OPTION: emit one KEY line with the entries joined by
+# commas.
+zr_join_item() {
+	[ -n "$1" ] || return 0
+	case "$1" in
+	*"$ZR_NL"*|*"$ZR_CR"*)
+		zr_fail "UCI option for $ZR_LIST_KEY contains a line break; refusing to start"
+		return 1
+		;;
+	esac
+	ZR_JOINED="${ZR_JOINED:+$ZR_JOINED,}$1"
+}
+zr_join() {
+	ZR_LIST_KEY="$1"
+	ZR_JOINED=""
+	config_list_foreach "$2" "$3" zr_join_item
+	[ -n "$ZR_JOINED" ] && zr_emit "$1" "$ZR_JOINED"
+}
+
+# One "config route" section becomes one DNS line, in file order.
+zr_route() {
+	local enabled server via
+	config_get_bool enabled "$1" enabled 1
+	[ "$enabled" -eq 1 ] || return 0
+	config_get server "$1" server ""
+	config_get via "$1" via ""
+	if [ -z "$server" ]; then
+		zr_fail "DNS route $1 has no server"
+		return 1
+	fi
+	ZR_ROUTES=$((ZR_ROUTES + 1))
+	if [ "$ZR_ROUTES" -gt 4 ]; then
+		zr_fail "more than 4 enabled DNS routes; disable or delete some"
+		return 1
+	fi
+	case "$via$server" in
+	*"$ZR_NL"*|*"$ZR_CR"*)
+		zr_fail "UCI route $1 contains a line break; refusing to start"
+		return 1
+		;;
+	esac
+	if [ -n "$via" ]; then
+		zr_emit DNS "$server via $via"
+	else
+		zr_emit DNS "$server"
+	fi
+}
+
+# Write the native configuration for the UCI sections already loaded to
+# $1, through a temporary file so a failure never leaves a partial one.
+# Returns 1, with a message in the system log, on any rejected value.
+generate_conf() {
+	local target="$1" dir enabled
+	dir="${target%/*}"
+	ZR_ERR=0
+	ZR_ROUTES=0
+
+	if ! (umask 077; mkdir -p "$dir") || ! chmod 700 "$dir"; then
+		zr_fail "cannot create $dir"
+		return 1
+	fi
+	ZR_OUT="$(umask 077; mktemp "$dir/.zroxy.conf.XXXXXX")" || {
+		zr_fail "cannot create a temporary file in $dir"
+		return 1
+	}
+
+	printf '%s\n' "# Generated from /etc/config/zroxy by the init script. Do not edit." >"$ZR_OUT"
+
+	zr_opt LOG main log
+	zr_opt USER main user
+	zr_opt GROUP main group
+	zr_list PORT main listen
+	zr_opt SOCKS main socks
+	zr_opt SOCKSPASSFILE main socks_pass_file
+	zr_opt SNITIMEOUT main snitimeout
+	zr_opt SNIIDLETIMEOUT main sniidletimeout
+	zr_bool ALLOWLOOPBACK main allowloopback
+	zr_bool DENYPRIVATE main denyprivate
+	zr_opt WHITE main white
+	zr_bool OPENPROXY main openproxy
+
+	config_get_bool enabled dns enabled 0
+	if [ "$enabled" -eq 1 ]; then
+		zr_opt LDNS dns listen
+		config_foreach zr_route route
+		zr_opt DSOCKS dns dsocks
+		zr_opt DSOCKSPASSFILE dns dsocks_pass_file
+		zr_opt DTIMEOUT dns timeout
+		zr_opt SNIP dns snip
+		zr_opt DCACHE dns cache
+		zr_opt DTTL dns ttl
+		zr_join DACL dns acl
+		zr_opt DRATE dns rate
+		zr_opt DNSCONNECTIONS dns connections
+	fi
+
+	config_get_bool enabled monitor enabled 0
+	if [ "$enabled" -eq 1 ]; then
+		zr_opt MONITOR monitor listen
+		zr_opt MONITORTOKENFILE monitor token_file
+		zr_opt MONITORTIMEOUT monitor timeout
+	fi
+
+	if [ "$ZR_ERR" -ne 0 ]; then
+		rm -f "$ZR_OUT"
+		return 1
+	fi
+	if ! chmod 600 "$ZR_OUT" || ! mv -f "$ZR_OUT" "$target"; then
+		rm -f "$ZR_OUT"
+		zr_fail "cannot write $target"
+		return 1
+	fi
+}
+
 start_service() {
-	local enabled config_file jail
+	local enabled config_file jail generated=0
 
 	config_load zroxy
 	config_get_bool enabled main enabled 0
 	[ "$enabled" -eq 1 ] || return 0
-	config_get config_file main config_file /etc/zroxy/zroxy.conf
+	config_get config_file main config_file ""
 	config_get_bool jail main jail 1
-	[ -f "$config_file" ] || {
-		logger -t zroxy "configuration file not found: $config_file"
-		return 1
-	}
+
+	if [ -n "$config_file" ]; then
+		# Legacy mode: a hand-written native file, used as is.
+		[ -f "$config_file" ] || {
+			logger -t zroxy "configuration file not found: $config_file"
+			return 1
+		}
+	else
+		config_file="$ZR_RUN_DIR/zroxy.conf"
+		generate_conf "$config_file" || return 1
+		generated=1
+	fi
 
 	procd_open_instance
 	# zroxy starts as root so it can bind ports below 1024, then drops to
 	# the "zroxy" user. -U comes first so USER in the config file wins.
 	procd_set_param command /usr/bin/zroxy -U zroxy -c "$config_file"
-	# reload restarts zroxy only when this file has changed.
-	procd_set_param file "$config_file"
+	# reload restarts zroxy only when these files have changed.
+	if [ "$generated" -eq 1 ]; then
+		procd_set_param file /etc/config/zroxy "$config_file"
+	else
+		procd_set_param file "$config_file"
+	fi
 	procd_set_param respawn 3600 5 5
 	procd_set_param stderr 1
 	procd_set_param no_new_privs 1
