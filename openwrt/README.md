@@ -24,8 +24,12 @@ printf '\nsrc-link zroxy /absolute/path/to/zroxy\n' >> feeds.conf
 ./scripts/feeds update zroxy
 ./scripts/feeds install -p zroxy zroxy
 make defconfig
-make package/feeds/zroxy/zroxy/compile V=s
+make package/feeds/zroxy/openwrt/compile V=s
 ```
+
+The build target is the package directory, `openwrt`, not the package name:
+`make package/zroxy/compile` finds no rule. The feed install line prints
+`Installing package 'openwrt' from zroxy`, which is expected.
 
 The resulting package is under `bin/packages/<architecture>/zroxy/`. OpenWrt
 24.10 produces an `.ipk`; OpenWrt 25.12 produces an `.apk`. The recipe pins a
@@ -37,7 +41,7 @@ at the pinned commit, so local or unpushed changes are not built. To build a
 working tree instead, point the build at it:
 
 ```sh
-make package/feeds/zroxy/zroxy/{clean,compile} USE_SOURCE_DIR=/absolute/path/to/zroxy V=s
+make package/feeds/zroxy/openwrt/{clean,compile} USE_SOURCE_DIR=/absolute/path/to/zroxy V=s
 ```
 
 Copy the package to the router and install it with the package manager for the
