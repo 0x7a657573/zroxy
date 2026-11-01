@@ -454,6 +454,25 @@ order given (config file first, then the command line, like `PORT`):
 A fifth route, an exact duplicate (same server and same way of reaching it),
 or an empty or malformed `via` is an error.
 
+With more than one route zroxy fails over. New queries go to the active route,
+the first one at start. A query attempt fails on a connect error, a SOCKS
+handshake failure, a read or write error, EOF, a reply too short to be DNS, or
+when `DTIMEOUT` seconds pass without a complete reply. Any valid reply counts
+as success, whatever its rcode. When an attempt on the active route fails, the
+next route (wrapping around) becomes active, and the query is tried on a route
+it has not used yet as long as its overall deadline, `2 * DTIMEOUT`, allows;
+if none is left it gets SERVFAIL. Because the whole path counts, a dead SOCKS
+proxy in front of a route moves queries to the next route like a dead server
+does. A route whose address is still being resolved is skipped for the
+queries that need an answer now.
+
+Failover is sticky: zroxy keeps using a route that works and does not go back
+to the first one when it recovers; it moves only when the current route
+fails, so a list is a ring, not a priority order. There is never an automatic
+fallback to a direct connection: if you want one, write it as a route
+(`DNS = HOST via direct`). With a single route a fast error is retried once on
+the same server and a timeout is not retried.
+
 Forwarded answers are cached in memory for their TTL, capped at one hour, or
 five minutes for NXDOMAIN and NODATA. The cache holds up to `DCACHE` entries
 (default 2048); `DCACHE = 0` disables it. Identical queries that arrive while
