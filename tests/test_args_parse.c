@@ -693,6 +693,64 @@ static void test_sni_idle_timeout(void)
     }
 }
 
+static void test_destination_policy_options(void)
+{
+    zroxy_t cfg = {0};
+    char a0[] = "zroxy";
+    char a1[] = "--allowloopback";
+    char a2[] = "yes";
+    char a3[] = "-P";
+    char a4[] = "on";
+    const char *argv[] = {a0, a1, a2, a3, a4};
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 5, argv), "destination policy options parse");
+    expect_true(cfg.allow_loopback, "allowloopback yes");
+    expect_true(cfg.deny_private, "denyprivate on");
+    free_settings(&cfg);
+
+    {
+        zroxy_t d = {0};
+        char b1[] = "-l";
+        char b2[] = "2";
+        const char *dargv[] = {a0, b1, b2};
+        reset_getopt();
+        expect_true(args_init(&d, 3, dargv), "defaults parse");
+        expect_true(!d.allow_loopback, "allowloopback defaults off");
+        expect_true(!d.deny_private, "denyprivate defaults off");
+        free_settings(&d);
+    }
+
+    {
+        zroxy_t bad = {0};
+        char b1[] = "--denyprivate";
+        char b2[] = "maybe";
+        const char *bad_argv[] = {a0, b1, b2};
+        reset_getopt();
+        expect_true(!args_init(&bad, 3, bad_argv), "denyprivate rejects a non-boolean");
+        free_settings(&bad);
+    }
+
+    {
+        zroxy_t file_cfg = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        write_all_or_fail(fd, "ALLOWLOOPBACK = true\nDENYPRIVATE = no\n");
+        close(fd);
+        expect_true(args_parse_config(&file_cfg, template_path), "config destination policy parses");
+        expect_true(file_cfg.allow_loopback, "config ALLOWLOOPBACK value");
+        expect_true(!file_cfg.deny_private, "config DENYPRIVATE value");
+        unlink(template_path);
+        free_settings(&file_cfg);
+    }
+}
+
 static void test_dns_cache_and_ttl_ranges(void)
 {
     {
@@ -809,6 +867,7 @@ int main(void)
     test_cli_socks_case_preserved();
     test_cli_monitor_and_sni_timeout();
     test_cli_monitor_bind_and_token();
+    test_destination_policy_options();
     test_config_value_case_preserved();
     test_config_port_key_case_insensitive();
     test_cli_socks_no_auth_cleanup_safe();

@@ -33,6 +33,10 @@ typedef struct
 	int			 snitimeout;
 	/* Relay idle limit in seconds; 0 falls back to snitimeout. */
 	int			 sniidletimeout;
+	/* Dial resolved loopback addresses (default off). */
+	bool		 allow_loopback;
+	/* Refuse resolved private addresses (default off). */
+	bool		 deny_private;
 }SniServer_t;
 
 typedef struct

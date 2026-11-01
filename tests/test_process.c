@@ -601,7 +601,7 @@ static void test_sigpipe_does_not_kill_process(const char *logpath)
     pid_t pid;
     char spec[64];
     char timeout[] = "2";
-    char *argv[6];
+    char *argv[8];
     struct pollfd pfd;
     char request[] = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
     char extra[] = "MORE";
@@ -619,7 +619,9 @@ static void test_sigpipe_does_not_kill_process(const char *logpath)
     argv[2] = timeout;
     argv[3] = "-p";
     argv[4] = spec;
-    argv[5] = NULL;
+    argv[5] = "-L";
+    argv[6] = "yes";
+    argv[7] = NULL;
     pid = spawn_child(argv, logpath);
     expect_true(pid > 0, "start SNI listener");
     if (pid <= 0)

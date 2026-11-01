@@ -148,6 +148,8 @@ int main(int argc, const char **argv)
 	Xconf.wlist = whitelist;
 	Xconf.snitimeout = prg_setting.snitimeout;
 	Xconf.sniidletimeout = prg_setting.sniidletimeout;
+	Xconf.allow_loopback = prg_setting.allow_loopback;
+	Xconf.deny_private = prg_setting.deny_private;
 	/*if Set Socks proxy*/
 	if(prg_setting.socks)
 	{
