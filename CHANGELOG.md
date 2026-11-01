@@ -58,6 +58,10 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   when the list has not been reloaded since start). Reloads triggered by the
   file watcher and by `SIGHUP` are both counted; a failed reload keeps the
   previous list and counts as a failure.
+- Add a `Resolver` object with `Threads`, `Slots`, `SlotsInUse`, `Lookups`,
+  `LookupFailures`, and `RingFull` for the hostname resolver pool. It is
+  present whenever the monitor is enabled. `Lookups` counts `getaddrinfo`
+  calls and `LookupFailures` those that returned an error or no address.
 
 ### Release
 

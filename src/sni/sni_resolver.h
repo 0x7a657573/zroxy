@@ -136,6 +136,21 @@ typedef struct sni_resolver_accounting {
 
 bool sni_resolver_start(void);
 
+typedef struct sni_resolver_stats {
+	int threads;
+	int slots;
+	int slots_in_use;
+	uint32_t lookups;         /* getaddrinfo calls, retries after EINTR included */
+	uint32_t lookup_failures; /* lookups that returned an error or no address */
+	uint32_t ring_full;       /* completions dropped because a sink's ring was full */
+} sni_resolver_stats;
+
+/*
+ * Snapshot for the monitor. Takes the pool mutex once; before the pool is
+ * started only the fixed sizes are filled in. Safe to call at any time.
+ */
+void sni_resolver_get_stats(sni_resolver_stats *out);
+
 /*
  * Bounded wait for workers to leave getaddrinfo(). On timeout the pool is
  * left allocated: mutexes, slots, and threads stay valid until process exit.
