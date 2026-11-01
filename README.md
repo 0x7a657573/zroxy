@@ -391,6 +391,28 @@ cmake --build build-musl
 The static build and platform-specific behavior should be validated with the
 toolchain used for the target device. A musl build is not implied by a normal
 glibc build.
+### Making a release
+
+Bump `include/zroxy/version.h`, add a matching `## <version>` section to
+`CHANGELOG.md`, commit, and push. Then tag the commit and push the tag; the tag
+has no `v` prefix:
+
+```sh
+git tag -a X.Y.Z -m "Release X.Y.Z"
+git push origin X.Y.Z
+```
+
+The `release` workflow checks the tag against `version.h` and the changelog,
+runs the full test suite, builds every architecture, and publishes the GitHub
+release using the changelog section as its notes. A tag containing `-` is
+published as a prerelease. Running the workflow by hand performs the same
+builds without publishing. `scripts/release-build.sh <arch>` reproduces one
+build locally (set `ZIG` if `zig` is not on `PATH`) and writes to `dist/`.
+
+The OpenWrt package is not built by this workflow; update its pinned source
+as described in the
+[OpenWrt release checklist](openwrt/README.md#release-checklist).
+
 
 ## Tests
 
