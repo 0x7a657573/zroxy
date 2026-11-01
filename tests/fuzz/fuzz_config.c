@@ -6,10 +6,6 @@
  * both parsers take their input. Inputs that name the "config" key (it loads
  * another file, and a file that names itself recurses without bound) or the
  * "help" key (it prints usage and calls exit) are skipped.
- *
- * Inputs with two PORT lines are skipped as well: parse_ports replaces
- * ptr->ports without freeing the earlier list, so a repeated PORT leaks (a
- * known finding, not a harness fault). Drop the skip once that is fixed.
  */
 #define _GNU_SOURCE
 #include <ctype.h>
@@ -148,8 +144,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	fuzz_init_once();
 	if (size > MAX_FILE)
 		size = MAX_FILE;
-	if (count_icase(data, size, "config") || count_icase(data, size, "help") ||
-	    count_icase(data, size, "port") > 1)
+	if (count_icase(data, size, "config") || count_icase(data, size, "help"))
 		return 0;
 	in = fuzz_dup(data, size);
 	fd = make_file(in, size, path, sizeof(path));

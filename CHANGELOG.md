@@ -118,6 +118,16 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   present whenever the monitor is enabled. `Lookups` counts `getaddrinfo`
   calls and `LookupFailures` those that returned an error or no address.
 
+### Fixed
+
+- A second `PORT` line, or `-p` given twice, no longer drops the listeners
+  parsed before it and leaks them. Repeated `PORT` / `-p` now append, in
+  order. A listener with the same bind address and local port as an earlier
+  one, or a wildcard (`0.0.0.0`) bind on a port a specific address already
+  uses (or the reverse), is rejected when the config is parsed instead of
+  failing later in `bind`. A list with a bad entry is rejected whole and
+  leaves the earlier listeners unchanged.
+
 ### Tests
 
 - Add fuzz harnesses in `tests/fuzz/` for the SNI/Host extraction (with

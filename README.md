@@ -258,6 +258,13 @@ PORT = 127.0.0.1:8443@443, 127.0.0.1:8080@80
 The local port is where zroxy accepts connections. The remote port is used for
 the selected upstream hostname. The listener address is an IPv4 address.
 
+`PORT` and `-p` can be repeated, in the config file and on the command line;
+each one adds its listeners to the ones already defined, in order. A listener
+that repeats an earlier bind address and local port, or that binds `0.0.0.0`
+on a local port another listener already uses (or the other way round), is an
+error at startup, as is a bad entry anywhere in a list. Port `0` asks for any
+free port and is never a duplicate.
+
 ### SOCKS5 syntax
 
 For `SOCKS` and `DSOCKS`, use either:
