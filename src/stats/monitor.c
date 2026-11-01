@@ -506,12 +506,12 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 		LiveTime = CurrentTime - stdata.StartTime;
 
 		ok = mon_append(&ptr, end, "\"%s\" : {\n", sta->name) &&
-		     mon_append(&ptr, end, "\"UpTime\" : %lu ,\n", LiveTime) &&
-		     mon_append(&ptr, end, "\"MaxConnection\" : %i ,\n", stdata.MaxConnection) &&
-		     mon_append(&ptr, end, "\"ActiveConnection\" : %i ,\n", stdata.ActiveConnection) &&
-		     mon_append(&ptr, end, "\"TotalConnection\" : %i ,\n", stdata.TotalConnection) &&
-		     mon_append(&ptr, end, "\"TotalRx\" : %lu ,\n", stdata.TotalRx) &&
-		     mon_append(&ptr, end, "\"TotalTx\" : %lu", stdata.TotalTx);
+		     mon_append(&ptr, end, "\"UpTime\" : %lld ,\n", (long long)LiveTime) &&
+		     mon_append(&ptr, end, "\"MaxConnection\" : %" PRIu32 " ,\n", stdata.MaxConnection) &&
+		     mon_append(&ptr, end, "\"ActiveConnection\" : %" PRIu32 " ,\n", stdata.ActiveConnection) &&
+		     mon_append(&ptr, end, "\"TotalConnection\" : %" PRIu32 " ,\n", stdata.TotalConnection) &&
+		     mon_append(&ptr, end, "\"TotalRx\" : %" PRIu64 " ,\n", stdata.TotalRx) &&
+		     mon_append(&ptr, end, "\"TotalTx\" : %" PRIu64, stdata.TotalTx);
 		if (ok && extra)
 			ok = extra(extra_ctx, &ptr, end);
 		if (ok)
