@@ -37,6 +37,11 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   A report that does not fit used to be dropped and the connection closed
   with no reply; it is now answered with `500 Internal Server Error` and
   logged once.
+- Report the open-file count correctly. `CountOfOpenFile` included the
+  descriptor of the `/proc/self/fd` directory stream used to count, so it was
+  one too high. It now excludes that descriptor; the monitor client's own
+  connection is still counted. A failure to open the directory is logged with
+  `log_error` instead of written to stderr.
 
 ### Release
 

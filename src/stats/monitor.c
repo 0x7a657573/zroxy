@@ -574,30 +574,38 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 
 static int count_open_files(void)
 {
-    struct dirent *entry;
-    int count = 0;
-
+	struct dirent *entry;
+	int count = 0;
+	int self_fd;
 	DIR *dp = NULL;
+
 #ifdef __linux__
-    dp = opendir("/proc/self/fd");
+	dp = opendir("/proc/self/fd");
 #elif __FreeBSD__
-    dp = opendir("/dev/fd/");
+	dp = opendir("/dev/fd/");
 #endif
 
-    if (dp == NULL) 
+	if (dp == NULL)
 	{
-        perror("opendir");
-        return -1;
-    }
+		log_error("monitor can not open the descriptor directory: %s", strerror(errno));
+		return -1;
+	}
 
-    // The number of files in the directory '/proc/self/fd'
-    while ((entry = readdir(dp)) != NULL) 
+	/* The directory stream holds a descriptor of its own; do not count it. */
+	self_fd = dirfd(dp);
+	while ((entry = readdir(dp)) != NULL)
 	{
-        count++;
-    }
+		char *tail = NULL;
+		long fd;
 
-    closedir(dp);
-    
-	// because "." and ".." are also in the directory, we need to reduce by 2
-    return count - 2;
+		if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
+			continue;	/* "." and ".." */
+		fd = strtol(entry->d_name, &tail, 10);
+		if (*tail == '\0' && fd == (long)self_fd)
+			continue;
+		count++;
+	}
+
+	closedir(dp);
+	return count;
 }
