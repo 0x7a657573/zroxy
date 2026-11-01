@@ -201,8 +201,17 @@ def test_dns_timeout_is_not_also_an_error():
 def test_monitor_http_framing():
     with zroxy_lab.Lab() as lab:
         mon_port = zroxy_lab.free_tcp_port()
-        lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
+        proc = lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
         got = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)
+        fd_dir = "/proc/%d/fd" % proc.proc.pid
+        if os.path.isdir(fd_dir):
+            # Idle descriptors are stdin, stdout, stderr and the listener; the
+            # report is built while the monitor's own client socket is open.
+            # The descriptor of the directory scan itself is not counted.
+            idle = len(os.listdir(fd_dir))
+            if got["json"]["CountOfOpenFile"] != idle + 1:
+                raise AssertionError("CountOfOpenFile %r, expected %d" % (
+                    got["json"]["CountOfOpenFile"], idle + 1))
         headers = got["headers"]
         if headers.get("connection") != "close":
             raise AssertionError("Connection header is %r" % headers.get("connection"))
