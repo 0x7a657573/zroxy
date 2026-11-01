@@ -13,8 +13,24 @@ These notes describe the `2.0.0` release. Nothing here says the result is produc
   or `via direct` (never use `DSOCKS`). A route with neither goes through
   the global `DSOCKS` if one is set. A fifth route, an exact duplicate, or
   a bad `via` is a start-up error and leaves the earlier routes alone.
-  Before, a second `DNS` replaced the first. The forwarder still uses only
-  the first route; failover between routes follows.
+  Before, a second `DNS` replaced the first.
+- Fail over between DNS routes. New queries go to the active route, which
+  starts as the first. An attempt fails on a connect error, a SOCKS
+  handshake failure, a write or read error, EOF, a reply shorter than a DNS
+  header, or after `DTIMEOUT` seconds with no complete reply; a valid reply
+  with any rcode counts as success. The active route then moves to the next
+  one (wrapping), only if the failing route was still the active one, and
+  the query is retried on a route it has not tried while its overall
+  deadline (`2 * DTIMEOUT`, as before) allows; otherwise the client gets
+  SERVFAIL. Failover covers the whole path, so a dead SOCKS proxy moves
+  queries to the next route too. It is sticky: zroxy does not return to
+  route 0 when it recovers, only moves on when the current route fails.
+  There is no automatic fallback to a direct connection. With a single
+  route nothing changes: a fast error is retried once on the same server and
+  a timeout is not retried.
+- A connect that fails immediately now counts as a failed attempt (retried
+  once with one route) instead of leaving the query waiting until its
+  deadline.
 
 ## 2.0.0 - 2026-11-01
 

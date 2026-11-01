@@ -595,6 +595,162 @@ def test_dns_tcp_fallback():
         proc.check_alive()
 
 
+def _start_routes(lab, ldns, routes, dtimeout="1", extra=()):
+    """Start zroxy with one -u option per route."""
+    args = ["-l", "0", "-d", "127.0.0.1:%s" % ldns, "-t", dtimeout]
+    for route in routes:
+        args.extend(["-u", route])
+    args.extend(extra)
+    return lab.zroxy(args, udp_ports=[ldns])
+
+
+def _local(port):
+    return "127.0.0.1:%s" % port
+
+
+def _expect_answer_from(ldns, name, qid, ip, timeout):
+    query = zroxy_lab.build_dns_query(name, qid=qid)
+    started = time.monotonic()
+    reply = zroxy_lab.udp_exchange(ldns, query, timeout)
+    elapsed = time.monotonic() - started
+    if reply is None:
+        raise AssertionError("no DNS response for %s within %.2fs" % (name, elapsed))
+    if reply != zroxy_lab.build_dns_response(query, ip):
+        raise AssertionError("%s was not answered by the route with %r: %r" % (name, ip, reply))
+    return elapsed
+
+
+def test_dns_failover_refused():
+    with zroxy_lab.Lab() as lab:
+        good = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        closed = zroxy_lab.free_tcp_port()
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start_routes(lab, ldns, [_local(closed), _local(good.port)], dtimeout="2")
+        elapsed = _expect_answer_from(ldns, "refused0.test", 0x5001, UPSTREAM_IP, 3.0)
+        if elapsed > 0.75:
+            raise AssertionError("refused route was not skipped quickly: %.2fs" % elapsed)
+        for i in range(4):
+            elapsed = _expect_answer_from(ldns, "refused%d.test" % (i + 1), 0x5002 + i,
+                                          UPSTREAM_IP, 3.0)
+            if elapsed > 0.75:
+                raise AssertionError("later query was slow: %.2fs" % elapsed)
+        if good.query_count() != 5:
+            raise AssertionError("route 1 saw %d of 5 queries" % good.query_count())
+        proc.check_alive()
+
+
+def test_dns_failover_blackhole():
+    with zroxy_lab.Lab() as lab:
+        hole = lab.dns_server(mode="timeout", response_fn=_answer_with((1, 1, 1, 1)), stall=8.0)
+        good = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start_routes(lab, ldns, [_local(hole.port), _local(good.port)], dtimeout="1")
+        elapsed = _expect_answer_from(ldns, "hole0.test", 0x5101, UPSTREAM_IP, 3.0)
+        if not 0.8 <= elapsed <= 1.8:
+            raise AssertionError("first answer took %.2fs, expected about 1s" % elapsed)
+        for i in range(3):
+            elapsed = _expect_answer_from(ldns, "hole%d.test" % (i + 1), 0x5102 + i,
+                                          UPSTREAM_IP, 3.0)
+            if elapsed > 0.75:
+                raise AssertionError("query after the switch took %.2fs" % elapsed)
+        if hole.upstream_connections() != 1:
+            raise AssertionError("black-hole route got %d connections, expected 1"
+                                 % hole.upstream_connections())
+        proc.check_alive()
+
+
+def test_dns_failover_socks_down():
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        socks = lab.socks_server(upstream_host="127.0.0.1", upstream_port=upstream.port)
+        dead = zroxy_lab.free_tcp_port()
+        ldns = zroxy_lab.free_udp_port()
+        routes = [
+            "%s via %s" % (_local(upstream.port), _local(dead)),
+            "%s via %s" % (_local(upstream.port), _local(socks.port)),
+        ]
+        proc = _start_routes(lab, ldns, routes, dtimeout="2")
+        elapsed = _expect_answer_from(ldns, "socks0.test", 0x5201, UPSTREAM_IP, 3.0)
+        if elapsed > 0.75:
+            raise AssertionError("dead SOCKS route was not skipped quickly: %.2fs" % elapsed)
+        _expect_answer_from(ldns, "socks1.test", 0x5202, UPSTREAM_IP, 3.0)
+        if len(socks.connects) != 2:
+            raise AssertionError("working SOCKS proxy saw %d connects, expected 2"
+                                 % len(socks.connects))
+        proc.check_alive()
+
+
+def test_dns_via_direct_ignores_dsocks():
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        dead = zroxy_lab.free_tcp_port()
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start_routes(lab, ldns, ["%s via direct" % _local(upstream.port)],
+                             extra=["-x", _local(dead)])
+        elapsed = _expect_answer_from(ldns, "direct.test", 0x5301, UPSTREAM_IP, 3.0)
+        if elapsed > 0.75:
+            raise AssertionError("direct route was slow: %.2fs" % elapsed)
+        proc.check_alive()
+
+
+def test_dns_failover_all_down():
+    with zroxy_lab.Lab() as lab:
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start_routes(lab, ldns, [_local(zroxy_lab.free_tcp_port()),
+                                         _local(zroxy_lab.free_tcp_port())])
+        query = zroxy_lab.build_dns_query("down0.test", qid=0x5401)
+        started = time.monotonic()
+        reply = zroxy_lab.udp_exchange(ldns, query, 4.0)
+        elapsed = time.monotonic() - started
+        _expect_rcode(reply, query, 2)
+        if elapsed > 2.75:
+            raise AssertionError("refused routes took %.2fs to give SERVFAIL" % elapsed)
+        proc.check_alive()
+
+    with zroxy_lab.Lab() as lab:
+        first = lab.dns_server(mode="timeout", response_fn=_answer_with(UPSTREAM_IP), stall=8.0)
+        second = lab.dns_server(mode="timeout", response_fn=_answer_with(UPSTREAM_IP), stall=8.0)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start_routes(lab, ldns, [_local(first.port), _local(second.port)], dtimeout="1")
+        query = zroxy_lab.build_dns_query("down1.test", qid=0x5402)
+        started = time.monotonic()
+        reply = zroxy_lab.udp_exchange(ldns, query, 5.0)
+        elapsed = time.monotonic() - started
+        _expect_rcode(reply, query, 2)
+        if not 1.8 <= elapsed <= 2.75:
+            raise AssertionError("SERVFAIL after %.2fs, expected within 2 * DTIMEOUT" % elapsed)
+        if first.upstream_connections() != 1 or second.upstream_connections() != 1:
+            raise AssertionError("each route should be tried once: %d, %d"
+                                 % (first.upstream_connections(), second.upstream_connections()))
+        proc.check_alive()
+
+
+def test_dns_failover_sticky():
+    other = (1, 1, 1, 1)
+    with zroxy_lab.Lab() as lab:
+        first = lab.dns_server(mode="close", response_fn=_answer_with(other))
+        second = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start_routes(lab, ldns, [_local(first.port), _local(second.port)], dtimeout="2")
+        _expect_answer_from(ldns, "sticky0.test", 0x5501, UPSTREAM_IP, 3.0)
+
+        # Route 0 recovers; zroxy stays on route 1 until it fails.
+        first.set_mode("reply")
+        before = first.query_count()
+        for i in range(4):
+            _expect_answer_from(ldns, "sticky%d.test" % (i + 1), 0x5502 + i, UPSTREAM_IP, 3.0)
+        if first.query_count() != before:
+            raise AssertionError("zroxy went back to the recovered route 0")
+
+        # Route 1 fails; the next query moves back to route 0.
+        second.set_mode("close")
+        elapsed = _expect_answer_from(ldns, "sticky9.test", 0x5510, other, 3.0)
+        if elapsed > 0.75:
+            raise AssertionError("failover back to route 0 took %.2fs" % elapsed)
+        _expect_answer_from(ldns, "sticky10.test", 0x5511, other, 3.0)
+        proc.check_alive()
+
+
 def main():
     tests = [
         test_dns_forward_fragmented,
@@ -611,6 +767,12 @@ def main():
         test_dns_cache_and_coalescing,
         test_dns_cache_disabled,
         test_dns_tcp_fallback,
+        test_dns_failover_refused,
+        test_dns_failover_blackhole,
+        test_dns_failover_socks_down,
+        test_dns_via_direct_ignores_dsocks,
+        test_dns_failover_all_down,
+        test_dns_failover_sticky,
     ]
     failed = 0
     for test in tests:
