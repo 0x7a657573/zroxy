@@ -21,6 +21,15 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   busy used to overflow the queue, and the dropped clients waited about a
   second to retry.
 
+### Monitor
+
+- Print the `UpTime`, `Total*`, and `*Connection` values with fixed-width
+  formats instead of `%lu` and `%i`. On the 32-bit targets (`i686`, `armv7`,
+  `mips`, `mipsel`) `%lu` read half of each 64-bit counter, so `TotalRx` and
+  `TotalTx` were wrong there and the report was undefined behaviour. A
+  connection count above 2147483647 is no longer printed as a negative
+  number.
+
 ### Release
 
 - Pushing a version tag runs a GitHub Actions workflow. It checks the tag

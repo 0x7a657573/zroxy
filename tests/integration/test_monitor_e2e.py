@@ -142,6 +142,17 @@ def test_monitor_after_traffic():
             for field in fields:
                 _number(obj.get(field), "%s.%s" % (name, field))
 
+        # Every counter must be a plain non-negative JSON integer, and the
+        # uptime of a process started seconds ago must be small.
+        for name in ("SNI_Server", "DNS_Server"):
+            for field in COUNTERS:
+                if doc[name][field] < 0:
+                    raise AssertionError("%s.%s is negative: %r" % (name, field, doc[name]))
+            if doc[name]["UpTime"] > 60:
+                raise AssertionError("%s.UpTime is implausible: %r" % (name, doc[name]["UpTime"]))
+        if doc["CountOfOpenFile"] < 3:
+            raise AssertionError("CountOfOpenFile is implausible: %r" % doc["CountOfOpenFile"])
+
         sni = doc["SNI_Server"]
         dns = doc["DNS_Server"]
         if sni["TotalRx"] - base["SNI_Server"]["TotalRx"] != expected_rx:
