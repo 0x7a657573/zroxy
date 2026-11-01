@@ -295,6 +295,12 @@ Connection: close
 
 ```
 
+The response is `200 OK` with `Content-Type: application/json`, an exact
+`Content-Length`, `Cache-Control: no-store`, and `Connection: close`; header
+lines end with CRLF. The JSON report is limited to 16 KiB. If it ever does not
+fit, the monitor answers `500 Internal Server Error` with an empty body and
+logs the failure once.
+
 The monitor reads at most 4096 header bytes. `MONITORTIMEOUT` is one absolute
 deadline for completing the header; slow-drip input cannot extend it. Do not
 bind the monitor to `0.0.0.0` without a token and appropriate network access

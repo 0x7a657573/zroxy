@@ -29,6 +29,14 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   `TotalTx` were wrong there and the report was undefined behaviour. A
   connection count above 2147483647 is no longer printed as a negative
   number.
+- Send a well-formed HTTP response. Header lines end with CRLF instead of a
+  bare LF, `Connection` is `close` (it was `Closed`), and `Cache-Control:
+  no-store` is added. The error responses (400, 401, 404, 405) use CRLF and
+  `Connection: close` too.
+- Raise the report limit from 4096 bytes (8000 for the HTTP message) to 16 KiB.
+  A report that does not fit used to be dropped and the connection closed
+  with no reply; it is now answered with `500 Internal Server Error` and
+  logged once.
 
 ### Release
 

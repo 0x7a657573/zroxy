@@ -401,10 +401,10 @@ static bool content_length_matches(const char *response)
     if (!hdr)
         return false;
     declared = strtol(hdr + strlen("Content-Length:"), &end, 10);
-    body = strstr(response, "\n\n");
+    body = strstr(response, "\r\n\r\n");
     if (!body || declared < 0)
         return false;
-    body += 2;
+    body += 4;
     actual = strlen(body);
     if ((size_t)declared != actual)
     {
