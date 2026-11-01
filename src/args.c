@@ -191,7 +191,7 @@ static arg_option options[] =
 	{ "user", 'U', "NAME", required_argument, "after binding the ports, run as NAME (needs root at start)", OPTION_SECTION_GENERAL },
 	{ "group", 'G', "NAME", required_argument, "group to run as with USER (default: the user's primary group)", OPTION_SECTION_GENERAL },
 
-	{ "port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]", OPTION_SECTION_SNI },
+	{ "port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]; repeat to add more", OPTION_SECTION_SNI },
 	{ "socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI },
 	{ "sockspassfile", 'S', "PATH", required_argument, "read the SOCKS5 password from the first line of PATH (spec: USER@HOST[:PORT])", OPTION_SECTION_SNI },
 	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
@@ -1158,9 +1158,51 @@ static bool parse_socks(zroxy_t *ptr,char *str)
 	return true;
 }
 
+/* IPv4 text that validate_ip accepted, as a host-order number. */
+static uint32_t ip_value(const char *ip)
+{
+	unsigned int a = 0, b = 0, c = 0, d = 0;
+
+	(void)sscanf(ip, "%u.%u.%u.%u", &a, &b, &c, &d);
+	return (a << 24) | (b << 16) | (c << 8) | d;
+}
+
+/*
+ * True when binding port would fail because other listens on the same local
+ * port: the same address, or either one is the wildcard. Port 0 asks for any
+ * free port, so two of them never collide.
+ */
+static bool listener_conflict(const lport_t *port,const lport_t *other)
+{
+	uint32_t a = ip_value(port->bindip);
+	uint32_t b = ip_value(other->bindip);
+
+	if (port->local_port == 0 || port->local_port != other->local_port)
+		return false;
+	return a == b || a == 0 || b == 0;
+}
+
+static void free_port_list(lport_t *p)
+{
+	while (p)
+	{
+		lport_t *next = (lport_t*)p->next;
+		free(p);
+		p = next;
+	}
+}
+
+/*
+ * Parse a comma list of listeners and append it to ptr->ports, after the ones
+ * from earlier PORT lines or -p options. All or nothing: the entries go into a
+ * list of their own first, so a bad entry leaves ptr->ports as it was.
+ */
 static bool parse_ports(zroxy_t *ptr,char *str)
 {
-	lport_t *perv = NULL;
+	lport_t *head = NULL;
+	lport_t *tail = NULL;
+	lport_t *last;
+
 	do{
 		lport_t *port = (lport_t*)calloc(1, sizeof(lport_t));
 		char *xptr = str;
@@ -1170,7 +1212,7 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 		uint16_t remote_port;
 
 		if (!port)
-			return false;
+			goto fail;
 		str = strchr(str,',');
 		if(str)
 		{
@@ -1187,14 +1229,14 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 			{
 				log_error("invalid listener address");
 				free(port);
-				return false;
+				goto fail;
 			}
 			xptr = Iptr;
 		}
 		else if (!copy_bounded(port->bindip, sizeof(port->bindip), "0.0.0.0"))
 		{
 			free(port);
-			return false;
+			goto fail;
 		}
 
 		Pptr = strchr(xptr,'@');
@@ -1205,7 +1247,7 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 			    !parse_u16(Pptr, &remote_port, 0, 65535))
 			{
 				free(port);
-				return false;
+				goto fail;
 			}
 		}
 		else
@@ -1213,19 +1255,50 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 			if (!parse_u16(xptr, &local_port, 0, 65535))
 			{
 				free(port);
-				return false;
+				goto fail;
 			}
 			remote_port = local_port;
 		}
 
 		port->local_port = local_port;
 		port->remote_port = remote_port;
-		port->next = perv;
-		perv = port;
-		ptr->ports = port;
+
+		/*against the earlier lines and the entries of this one*/
+		for (last = ptr->ports; last; last = (lport_t*)last->next)
+			if (listener_conflict(port, last))
+				break;
+		for (lport_t *p = head; !last && p; p = (lport_t*)p->next)
+			if (listener_conflict(port, p))
+				last = p;
+		if (last)
+		{
+			log_error("listener %s:%u is already defined", port->bindip,
+			    (unsigned)port->local_port);
+			free(port);
+			goto fail;
+		}
+
+		if (tail)
+			tail->next = port;
+		else
+			head = port;
+		tail = port;
 
 	}while( str!=NULL );
+
+	if (ptr->ports)
+	{
+		for (last = ptr->ports; last->next; last = (lport_t*)last->next)
+			;
+		last->next = head;
+	}
+	else
+		ptr->ports = head;
 	return true;
+
+fail:
+	free_port_list(head);
+	return false;
 }
 
 void args_free_ports(zroxy_t *ptr)

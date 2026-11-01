@@ -979,6 +979,169 @@ static void test_config_minimal_cleanup_safe(void)
     free_settings(&cfg);
 }
 
+/* Write content to a temp file; path (a mkstemp template) gets the name. */
+static bool write_conf(char *path, const char *data)
+{
+    int fd = mkstemp(path);
+
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return false;
+    }
+    write_all_or_fail(fd, data);
+    close(fd);
+    return true;
+}
+
+static void expect_port(const lport_t *p, const char *ip, uint16_t local,
+                        uint16_t remote, const char *name)
+{
+    expect_true(p != NULL, name);
+    if (p)
+    {
+        expect_string(p->bindip, ip, name);
+        expect_u16(p->local_port, local, name);
+        expect_u16(p->remote_port, remote, name);
+    }
+}
+
+static size_t count_ports(const zroxy_t *cfg)
+{
+    size_t n = 0;
+    const lport_t *p;
+
+    for (p = cfg->ports; p; p = p->next)
+        n++;
+    return n;
+}
+
+static void test_repeated_port_lines_append(void)
+{
+    zroxy_t cfg = {0};
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+    const lport_t *p;
+
+    if (!write_conf(path, "PORT = 127.0.0.1:8080@80\nPORT = 127.0.0.1:8443@443,9000\n"))
+        return;
+    expect_true(args_parse_config(&cfg, path), "two PORT lines parse");
+    expect_int((int)count_ports(&cfg), 3, "two PORT lines give three listeners");
+    p = cfg.ports;
+    expect_port(p, "127.0.0.1", 8080, 80, "first PORT line first");
+    p = p ? p->next : NULL;
+    expect_port(p, "127.0.0.1", 8443, 443, "second PORT line, first entry");
+    p = p ? p->next : NULL;
+    expect_port(p, "0.0.0.0", 9000, 9000, "second PORT line, second entry");
+    unlink(path);
+    free_settings(&cfg);
+}
+
+static void test_repeated_cli_port_appends(void)
+{
+    zroxy_t cfg = {0};
+    char a0[] = "zroxy", a1[] = "-p", a2[] = "127.0.0.1:8080@80";
+    char a3[] = "--port", a4[] = "127.0.0.2:8080@81";
+    const char *argv[] = {a0, a1, a2, a3, a4};
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 5, argv), "two -p parse");
+    expect_int((int)count_ports(&cfg), 2, "two -p give two listeners");
+    expect_port(cfg.ports, "127.0.0.1", 8080, 80, "first -p first");
+    if (cfg.ports)
+        expect_port(cfg.ports->next, "127.0.0.2", 8080, 81, "second -p second");
+    free_settings(&cfg);
+}
+
+static void test_config_and_cli_ports_append(void)
+{
+    zroxy_t cfg = {0};
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+    char a0[] = "zroxy", a1[] = "-c", a3[] = "-p", a4[] = "127.0.0.1:9090";
+    const char *argv[] = {a0, a1, path, a3, a4};
+
+    if (!write_conf(path, "PORT = 127.0.0.1:8080\n"))
+        return;
+    reset_getopt();
+    expect_true(args_init(&cfg, 5, argv), "config and -p parse");
+    expect_int((int)count_ports(&cfg), 2, "config and -p give two listeners");
+    expect_port(cfg.ports, "127.0.0.1", 8080, 8080, "config listener first");
+    if (cfg.ports)
+        expect_port(cfg.ports->next, "127.0.0.1", 9090, 9090, "-p listener after it");
+    unlink(path);
+    free_settings(&cfg);
+}
+
+static bool one_port_arg(zroxy_t *cfg, const char *spec)
+{
+    char a0[] = "zroxy", a1[] = "-p";
+    char arg[128];
+    const char *argv[] = {a0, a1, arg};
+
+    snprintf(arg, sizeof(arg), "%s", spec);
+    reset_getopt();
+    return args_init(cfg, 3, argv);
+}
+
+static void test_duplicate_listener_rejected(void)
+{
+    const char *dups[] = {
+        "127.0.0.1:8080,127.0.0.1:8080@81",    /* same call */
+        "127.0.0.1:8080,127.000.000.001:8080", /* same address, other spelling */
+        "8080,127.0.0.1:8080",                 /* wildcard first */
+        "127.0.0.1:8080,8080",                 /* wildcard second */
+    };
+    zroxy_t cfg = {0};
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+    size_t i;
+
+    for (i = 0; i < sizeof(dups) / sizeof(dups[0]); i++)
+    {
+        memset(&cfg, 0, sizeof(cfg));
+        expect_true(!one_port_arg(&cfg, dups[i]), dups[i]);
+        free_settings(&cfg);
+    }
+
+    /* across two PORT lines */
+    memset(&cfg, 0, sizeof(cfg));
+    if (!write_conf(path, "PORT = 127.0.0.1:8080\nPORT = 0.0.0.0:8080\n"))
+        return;
+    expect_true(!args_parse_config(&cfg, path), "wildcard after specific across lines");
+    unlink(path);
+    free_settings(&cfg);
+
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(one_port_arg(&cfg, "127.0.0.1:8080,127.0.0.2:8080,127.0.0.1:8081,0,0"),
+                "other ip, other port and port 0 are not duplicates");
+    expect_int((int)count_ports(&cfg), 5, "five distinct listeners kept");
+    free_settings(&cfg);
+}
+
+static void test_port_failure_keeps_earlier_list(void)
+{
+    zroxy_t cfg = {0};
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+
+    /* a bad entry after good ones in the second line */
+    if (!write_conf(path, "PORT = 127.0.0.1:8080\nPORT = 127.0.0.1:8081,127.0.0.1:8082,bogus\n"))
+        return;
+    expect_true(!args_parse_config(&cfg, path), "bad entry in comma list fails");
+    expect_int((int)count_ports(&cfg), 1, "nothing of the failed list was added");
+    expect_port(cfg.ports, "127.0.0.1", 8080, 8080, "earlier listener kept");
+    unlink(path);
+    free_settings(&cfg);
+
+    /* a duplicate at the end of the second line */
+    memset(&cfg, 0, sizeof(cfg));
+    strcpy(path, "/tmp/zroxy_args_test_XXXXXX");
+    if (!write_conf(path, "PORT = 127.0.0.1:8080\nPORT = 127.0.0.1:8081,127.0.0.1:8080\n"))
+        return;
+    expect_true(!args_parse_config(&cfg, path), "duplicate at the end of a list fails");
+    expect_int((int)count_ports(&cfg), 1, "list intact after a rejected duplicate");
+    unlink(path);
+    free_settings(&cfg);
+}
+
 /* Write content to a fresh temp file with the given mode; path gets the name. */
 static void make_secret_file(char *path, const void *data, size_t n, mode_t mode)
 {
@@ -1350,6 +1513,11 @@ int main(void)
     test_dns_cache_and_ttl_ranges();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();
+    test_repeated_port_lines_append();
+    test_repeated_cli_port_appends();
+    test_config_and_cli_ports_append();
+    test_duplicate_listener_rejected();
+    test_port_failure_keeps_earlier_list();
     test_monitor_token_file();
     test_secret_file_contents();
     test_secret_file_permissions();
