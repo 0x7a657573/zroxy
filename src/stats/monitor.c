@@ -321,6 +321,28 @@ statistics_t *monitor_add_stat(mon_t *self,char *name)
 	return created;
 }
 
+bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx)
+{
+	mon_section_t *sec;
+	mon_section_t **tail;
+
+	if (!self || !name || !fn || strlen(name) >= sizeof(sec->name))
+		return false;
+	sec = calloc(1, sizeof(*sec));
+	if (!sec)
+		return false;
+	memcpy(sec->name, name, strlen(name) + 1);
+	sec->fn = fn;
+	sec->ctx = ctx;
+	/* Append, so the report lists sections in the order they were added. */
+	pthread_mutex_lock(&self->stats_lock);
+	for (tail = &self->sections; *tail; tail = &(*tail)->next)
+		;
+	*tail = sec;
+	pthread_mutex_unlock(&self->stats_lock);
+	return true;
+}
+
 static void *monitor_client_thread(void *arg);
 static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner);
 static void *monitor_accept_thread(void *vargp)
@@ -589,6 +611,8 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 	char *ptr = message;
 	char *end = message + MON_MAX_BODY;
 	statistics_t *stat = NULL;
+	mon_section_t *section;
+	bool sections_ok = true;
 	int open_files;
 	(void)data;
 	(void)len;
@@ -608,6 +632,21 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 		return;
 	}
 	
+	/* Sections are added while the monitor runs, so walk the list locked. */
+	pthread_mutex_lock(&owner->stats_lock);
+	for (section = owner->sections; section && sections_ok; section = section->next)
+	{
+		sections_ok = mon_append(&ptr, end, "\"%s\" : {\n", section->name) &&
+		              section->fn(section->ctx, &ptr, end) &&
+		              mon_append(&ptr, end, "\n},\n");
+	}
+	pthread_mutex_unlock(&owner->stats_lock);
+	if (!sections_ok)
+	{
+		mon_report_failed(fd, owner);
+		return;
+	}
+
 	statistics_t *sta = stat;
 	while(sta)
 	{

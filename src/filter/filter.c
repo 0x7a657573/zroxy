@@ -19,6 +19,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <ctype.h>
+#include <inttypes.h>
+#include <time.h>
 
 /* Open-addressing string set. cap is a power of two, at most half full. */
 typedef struct
@@ -300,6 +302,7 @@ void filter_reload(filter_t *self)
 	if (!fresh)
 	{
 		log_error("Reload filter failed; keeping previous list");
+		(void)__atomic_fetch_add(&self->reload_failures, 1u, __ATOMIC_RELAXED);
 		return;
 	}
 
@@ -310,6 +313,8 @@ void filter_reload(filter_t *self)
 
 	/* no reader can still hold old: the write lock waited for them */
 	set_free(old);
+	(void)__atomic_fetch_add(&self->reloads, 1u, __ATOMIC_RELAXED);
+	__atomic_store_n(&self->last_reload, (uint32_t)time(NULL), __ATOMIC_RELAXED);
 	log_info("Reload filter: %zu valid host loaded", fresh->total);
 }
 
@@ -664,4 +669,27 @@ size_t filter_count(filter_t *self)
 	n = self->set->total;
 	pthread_rwlock_unlock(&self->lock);
 	return n;
+}
+
+bool filter_stats_json(void *ctx, char **ptr, char *end)
+{
+	filter_t *self = ctx;
+	size_t left;
+	int n;
+
+	if (!self || !ptr || !*ptr || *ptr >= end)
+		return false;
+	left = (size_t)(end - *ptr);
+	n = snprintf(*ptr, left, "\"Entries\" : %zu ,\n"
+		"\"Reloads\" : %" PRIu32 " ,\n"
+		"\"ReloadFailures\" : %" PRIu32 " ,\n"
+		"\"LastReload\" : %" PRIu32,
+		filter_count(self),
+		__atomic_load_n(&self->reloads, __ATOMIC_RELAXED),
+		__atomic_load_n(&self->reload_failures, __ATOMIC_RELAXED),
+		__atomic_load_n(&self->last_reload, __ATOMIC_RELAXED));
+	if (n < 0 || (size_t)n >= left)
+		return false;
+	*ptr += n;
+	return true;
 }

@@ -53,6 +53,11 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   `CpuUserMs`, and `CpuSystemMs`. `Threads` and `RssBytes` are read from
   `/proc/self/status` and are omitted on other systems. `CountOfOpenFile`
   stays at the top level.
+- Add a `Whitelist` object, present when a whitelist file is configured, with
+  `Entries`, `Reloads`, `ReloadFailures`, and `LastReload` (unix time, `0`
+  when the list has not been reloaded since start). Reloads triggered by the
+  file watcher and by `SIGHUP` are both counted; a failed reload keeps the
+  previous list and counts as a failure.
 
 ### Release
 
