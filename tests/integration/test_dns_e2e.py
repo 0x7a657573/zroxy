@@ -725,14 +725,25 @@ def test_dns_failover_all_down():
         proc.check_alive()
 
 
+def _route_counters(mon_port):
+    dns = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"]["DNS_Server"]
+    return dns["ActiveUpstream"], dns["UpstreamSwitches"]
+
+
 def test_dns_failover_sticky():
     other = (1, 1, 1, 1)
     with zroxy_lab.Lab() as lab:
         first = lab.dns_server(mode="close", response_fn=_answer_with(other))
         second = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
         ldns = zroxy_lab.free_udp_port()
-        proc = _start_routes(lab, ldns, [_local(first.port), _local(second.port)], dtimeout="2")
+        mon = zroxy_lab.free_tcp_port()
+        proc = _start_routes(lab, ldns, [_local(first.port), _local(second.port)], dtimeout="2",
+                             extra=["-m", str(mon)])
+        if _route_counters(mon) != (0, 0):
+            raise AssertionError("unexpected counters at start: %r" % (_route_counters(mon),))
         _expect_answer_from(ldns, "sticky0.test", 0x5501, UPSTREAM_IP, 3.0)
+        if _route_counters(mon) != (1, 1):
+            raise AssertionError("expected route 1 after one switch, got %r" % (_route_counters(mon),))
 
         # Route 0 recovers; zroxy stays on route 1 until it fails.
         first.set_mode("reply")
@@ -741,6 +752,8 @@ def test_dns_failover_sticky():
             _expect_answer_from(ldns, "sticky%d.test" % (i + 1), 0x5502 + i, UPSTREAM_IP, 3.0)
         if first.query_count() != before:
             raise AssertionError("zroxy went back to the recovered route 0")
+        if _route_counters(mon) != (1, 1):
+            raise AssertionError("counters moved without a failure: %r" % (_route_counters(mon),))
 
         # Route 1 fails; the next query moves back to route 0.
         second.set_mode("close")
@@ -748,6 +761,9 @@ def test_dns_failover_sticky():
         if elapsed > 0.75:
             raise AssertionError("failover back to route 0 took %.2fs" % elapsed)
         _expect_answer_from(ldns, "sticky10.test", 0x5511, other, 3.0)
+        if _route_counters(mon) != (0, 2):
+            raise AssertionError("expected route 0 after two switches, got %r"
+                                 % (_route_counters(mon),))
         proc.check_alive()
 
 

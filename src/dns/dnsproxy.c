@@ -56,7 +56,9 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 		"\"QueueDropped\" : %" PRIu32 ",\n"
 		"\"UpstreamTimeouts\" : %" PRIu32 ",\n"
 		"\"UpstreamErrors\" : %" PRIu32 ",\n"
-		"\"ActiveUpstreams\" : %" PRIu32,
+		"\"ActiveUpstreams\" : %" PRIu32 ",\n"
+		"\"ActiveUpstream\" : %" PRIu32 ",\n"
+		"\"UpstreamSwitches\" : %" PRIu32,
 		cache.hits, cache.misses, cache.shared, cache.entries, cache.evicted,
 		__atomic_load_n(&dns->acl_dropped, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->rate_dropped, __ATOMIC_RELAXED),
@@ -65,7 +67,9 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 		__atomic_load_n(&dns->queue_dropped, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->upstream_timeouts, __ATOMIC_RELAXED),
 		__atomic_load_n(&dns->upstream_errors, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->active_upstreams, __ATOMIC_RELAXED));
+		__atomic_load_n(&dns->active_upstreams, __ATOMIC_RELAXED),
+		__atomic_load_n(&dns->active_route, __ATOMIC_RELAXED),
+		__atomic_load_n(&dns->route_switches, __ATOMIC_RELAXED));
 }
 
 static void close_fd(int *fd)

@@ -28,6 +28,10 @@ These notes describe the `2.0.0` release. Nothing here says the result is produc
   There is no automatic fallback to a direct connection. With a single
   route nothing changes: a fast error is retried once on the same server and
   a timeout is not retried.
+- The `DNS_Server` monitor object reports `ActiveUpstream` (index of the
+  active DNS route, 0-based, in configuration order) and `UpstreamSwitches`
+  (how often the active route moved). Not to be confused with the older
+  `ActiveUpstreams`, the number of open upstream connections.
 - A connect that fails immediately now counts as a failed attempt (retried
   once with one route) instead of leaving the query waiting until its
   deadline.
