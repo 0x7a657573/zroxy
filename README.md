@@ -323,7 +323,7 @@ The `Process` object describes the zroxy process:
 | `MaxOpenFiles` | Soft `RLIMIT_NOFILE`; `-1` when unlimited |
 | `Threads` | Thread count (Linux only; omitted elsewhere) |
 | `RssBytes` | Resident set size now (Linux only; omitted elsewhere) |
-| `PeakRssBytes` | Peak resident set size from `getrusage` |
+| `PeakRssBytes` | Peak resident set size: `VmHWM` on Linux, `getrusage` elsewhere |
 | `CpuUserMs`, `CpuSystemMs` | User and system CPU time used by the process, in milliseconds |
 
 When a whitelist file is configured (`-w`), the report has a `Whitelist`

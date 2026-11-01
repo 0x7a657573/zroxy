@@ -302,6 +302,9 @@ def test_monitor_process_object():
                 raise AssertionError("implausible Process.Threads: %r" % obj)
             if obj["RssBytes"] <= 0:
                 raise AssertionError("implausible Process.RssBytes: %r" % obj)
+            # Both come from one read of /proc/self/status.
+            if obj["PeakRssBytes"] < obj["RssBytes"]:
+                raise AssertionError("Process.PeakRssBytes below RssBytes: %r" % obj)
 
 
 def _sni_quiet(port):
