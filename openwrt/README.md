@@ -66,8 +66,8 @@ target; check startup and a real proxied connection on that router.
   written, and a disabled `dns` or `monitor` section writes nothing.
   The generated file is rewritten each time: edit UCI, not that file.
 - The start fails, with a message in `logread -e zroxy`, if a value contains a
-  line break, a boolean is not `0`/`1`/`yes`/`no`, a route has no `server`, or
-  more than 4 routes are enabled.
+  line break, a boolean is not `0`/`1`/`yes`/`no`, a route has no `server`,
+  more than 4 routes are enabled, or `dns` is enabled without an enabled route.
 - Secrets are never inline: `socks_pass_file`, `dsocks_pass_file` and
   `token_file` name a `chmod 600` file; zroxy warns about group or world
   access and refuses world-writable files. `socks` and `dsocks` hold at most

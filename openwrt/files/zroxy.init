@@ -204,6 +204,9 @@ generate_conf() {
 	if [ "$enabled" -eq 1 ]; then
 		zr_opt LDNS dns listen
 		config_foreach zr_route route
+		# zroxy exits at once without one, and procd would keep respawning it.
+		[ "$ZR_ROUTES" -gt 0 ] ||
+			zr_fail "DNS is enabled but no DNS route is; add a route section"
 		zr_opt DSOCKS dns dsocks
 		zr_opt DSOCKSPASSFILE dns dsocks_pass_file
 		zr_opt DTIMEOUT dns timeout
