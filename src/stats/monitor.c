@@ -24,12 +24,17 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <zroxy/net_io.h>
+#include <fcntl.h>
+#include <sys/resource.h>
 
 #define MON_MAX_WORKERS 32
 #define MON_MAX_HEADER 4096
 /* JSON body limit, and room in front of it for the response head. */
 #define MON_MAX_BODY 16384
 #define MON_HEAD_ROOM 256
+
+/* Set when the monitor starts, a few milliseconds after the process does. */
+static time_t mon_process_start;
 
 static pthread_mutex_t mon_worker_mu = PTHREAD_MUTEX_INITIALIZER;
 static int mon_workers = 0;
@@ -279,6 +284,8 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 		return NULL;
 	}
 	mon->state = NULL;
+	if (mon_process_start == 0)
+		time(&mon_process_start);
 	mon->fd = sockfd;
 	mon->Port = port;
 	mon->header_timeout = header_timeout_sec < 1 ? 5 : header_timeout_sec;
@@ -473,6 +480,97 @@ static bool mon_append(char **ptr, char *end, const char *fmt, ...)
 	return true;
 }
 
+#ifdef __linux__
+/*
+ * Reads the integer after "key" (for example "\nThreads:") in the status
+ * text. Returns -1 when the key is absent.
+ */
+static long long mon_status_value(const char *text, const char *key)
+{
+	const char *p = strstr(text, key);
+	char *tail = NULL;
+	long long v;
+
+	if (!p)
+		return -1;
+	p += strlen(key);
+	while (*p == ' ' || *p == '\t')
+		p++;
+	v = strtoll(p, &tail, 10);
+	if (tail == p)
+		return -1;
+	return v;
+}
+
+/* Threads and resident set size; -1 when /proc/self/status is unreadable. */
+static void mon_read_status(long long *threads, long long *rss_kib)
+{
+	char text[8192];
+	ssize_t n;
+	int fd;
+
+	*threads = -1;
+	*rss_kib = -1;
+	fd = open("/proc/self/status", O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return;
+	n = read(fd, text, sizeof(text) - 1);
+	close(fd);
+	if (n <= 0)
+		return;
+	text[n] = '\0';
+	*threads = mon_status_value(text, "\nThreads:");
+	*rss_kib = mon_status_value(text, "\nVmRSS:");
+}
+#endif
+
+static bool mon_process_json(char **ptr, char *end, int open_files)
+{
+	struct rlimit lim;
+	struct rusage ru;
+	long long max_files = -1;
+	long long cpu_user = 0;
+	long long cpu_sys = 0;
+	long long peak_kib = 0;
+	time_t now;
+	bool ok;
+
+	time(&now);
+	if (getrlimit(RLIMIT_NOFILE, &lim) == 0 && lim.rlim_cur != RLIM_INFINITY)
+		max_files = (long long)lim.rlim_cur;
+	if (getrusage(RUSAGE_SELF, &ru) == 0)
+	{
+		cpu_user = (long long)ru.ru_utime.tv_sec * 1000 + (long long)ru.ru_utime.tv_usec / 1000;
+		cpu_sys = (long long)ru.ru_stime.tv_sec * 1000 + (long long)ru.ru_stime.tv_usec / 1000;
+		peak_kib = (long long)ru.ru_maxrss;
+	}
+
+	ok = mon_append(ptr, end, "\"Process\" : {\n") &&
+	     mon_append(ptr, end, "\"Pid\" : %lld ,\n", (long long)getpid()) &&
+	     mon_append(ptr, end, "\"StartTime\" : %lld ,\n", (long long)mon_process_start) &&
+	     mon_append(ptr, end, "\"UpTime\" : %lld ,\n", (long long)(now - mon_process_start)) &&
+	     mon_append(ptr, end, "\"OpenFiles\" : %i ,\n", open_files) &&
+	     mon_append(ptr, end, "\"MaxOpenFiles\" : %lld ,\n", max_files);
+#ifdef __linux__
+	if (ok)
+	{
+		long long threads;
+		long long rss_kib;
+
+		mon_read_status(&threads, &rss_kib);
+		if (threads >= 0)
+			ok = mon_append(ptr, end, "\"Threads\" : %lld ,\n", threads);
+		if (ok && rss_kib >= 0)
+			ok = mon_append(ptr, end, "\"RssBytes\" : %lld ,\n", rss_kib * 1024);
+	}
+#endif
+	if (ok)
+		ok = mon_append(ptr, end, "\"PeakRssBytes\" : %lld ,\n", peak_kib * 1024) &&
+		     mon_append(ptr, end, "\"CpuUserMs\" : %lld ,\n", cpu_user) &&
+		     mon_append(ptr, end, "\"CpuSystemMs\" : %lld\n},\n", cpu_sys);
+	return ok;
+}
+
 static int mon_overflow_logged;
 
 /* Nothing has been written yet, so the client can still get a 500. */
@@ -491,6 +589,7 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 	char *ptr = message;
 	char *end = message + MON_MAX_BODY;
 	statistics_t *stat = NULL;
+	int open_files;
 	(void)data;
 	(void)len;
 
@@ -500,8 +599,10 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 	stat = owner->state;
 	pthread_mutex_unlock(&owner->stats_lock);
 
+	open_files = count_open_files();
 	if (!mon_append(&ptr, end, "{\n\"ZroxyVersion\" : \"%s\",\n", version) ||
-	    !mon_append(&ptr, end, "\"CountOfOpenFile\" : %i,\n", count_open_files()))
+	    !mon_append(&ptr, end, "\"CountOfOpenFile\" : %i,\n", open_files) ||
+	    !mon_process_json(&ptr, end, open_files))
 	{
 		mon_report_failed(fd, owner);
 		return;

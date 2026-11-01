@@ -207,11 +207,19 @@ def test_monitor_http_framing():
         if os.path.isdir(fd_dir):
             # Idle descriptors are stdin, stdout, stderr and the listener; the
             # report is built while the monitor's own client socket is open.
-            # The descriptor of the directory scan itself is not counted.
-            idle = len(os.listdir(fd_dir))
-            if got["json"]["CountOfOpenFile"] != idle + 1:
-                raise AssertionError("CountOfOpenFile %r, expected %d" % (
-                    got["json"]["CountOfOpenFile"], idle + 1))
+            # The descriptor of the directory scan itself is not counted. The
+            # readiness probe's connection may still be closing, so retry.
+            deadline = time.monotonic() + 3.0
+            while True:
+                reported = got["json"]["CountOfOpenFile"]
+                expected_fds = len(os.listdir(fd_dir)) + 1
+                if reported == expected_fds:
+                    break
+                if time.monotonic() > deadline:
+                    raise AssertionError(
+                        "CountOfOpenFile %r, expected %d" % (reported, expected_fds))
+                time.sleep(0.1)
+                got = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)
         headers = got["headers"]
         if headers.get("connection") != "close":
             raise AssertionError("Connection header is %r" % headers.get("connection"))
@@ -229,10 +237,49 @@ def test_monitor_http_framing():
             raise AssertionError("unexpected 404 response %r" % data)
 
 
+def test_monitor_process_object():
+    with zroxy_lab.Lab() as lab:
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
+        before = int(time.time())
+        doc = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"]
+        after = int(time.time())
+        obj = doc.get("Process")
+        if not isinstance(obj, dict):
+            raise AssertionError("missing Process object: %r" % doc)
+        linux = os.path.isdir("/proc/self")
+        keys = ["Pid", "StartTime", "UpTime", "OpenFiles", "MaxOpenFiles",
+                "PeakRssBytes", "CpuUserMs", "CpuSystemMs"]
+        if linux:
+            keys += ["Threads", "RssBytes"]
+        for key in keys:
+            _number(obj.get(key), "Process." + key)
+        if obj["Pid"] != proc.proc.pid:
+            raise AssertionError("Process.Pid %r != %r" % (obj["Pid"], proc.proc.pid))
+        if not (before - 30 <= obj["StartTime"] <= after):
+            raise AssertionError("implausible Process.StartTime %r" % obj["StartTime"])
+        if not (0 <= obj["UpTime"] <= 30):
+            raise AssertionError("implausible Process.UpTime %r" % obj["UpTime"])
+        if obj["OpenFiles"] != doc["CountOfOpenFile"]:
+            raise AssertionError("Process.OpenFiles differs from CountOfOpenFile: %r" % obj)
+        if obj["MaxOpenFiles"] <= obj["OpenFiles"] and obj["MaxOpenFiles"] != -1:
+            raise AssertionError("implausible Process.MaxOpenFiles: %r" % obj)
+        if obj["PeakRssBytes"] <= 0:
+            raise AssertionError("implausible Process.PeakRssBytes: %r" % obj)
+        for key in ("CpuUserMs", "CpuSystemMs"):
+            if obj[key] < 0:
+                raise AssertionError("negative Process.%s: %r" % (key, obj))
+        if linux:
+            if obj["Threads"] < 1:
+                raise AssertionError("implausible Process.Threads: %r" % obj)
+            if obj["RssBytes"] <= 0:
+                raise AssertionError("implausible Process.RssBytes: %r" % obj)
+
+
 def main():
     failed = 0
     for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error,
-                 test_monitor_http_framing):
+                 test_monitor_http_framing, test_monitor_process_object):
         try:
             test()
         except Exception:
