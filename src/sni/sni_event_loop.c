@@ -3,6 +3,7 @@
 #include "sni_event_loop.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <netdb.h>
@@ -77,6 +78,25 @@ enum {
 	SNI_ST_CONNECT,
 	SNI_ST_SOCKS,
 	SNI_ST_RELAY
+};
+
+/*
+ * Why a connection ended, set at the failure site and counted once by
+ * conn_kill. NONE is a normal end (EOF or reset from either side of a relay,
+ * listener shutdown) or an internal failure with no counter of its own.
+ */
+enum {
+	SNI_CLOSE_NONE = 0,
+	SNI_CLOSE_REFUSED,
+	SNI_CLOSE_NO_HOSTNAME,
+	SNI_CLOSE_BLOCKED,
+	SNI_CLOSE_UNSAFE,
+	SNI_CLOSE_RESOLVE,
+	SNI_CLOSE_SOCKS,
+	SNI_CLOSE_CONNECT,
+	SNI_CLOSE_HANDSHAKE_TIMEOUT,
+	SNI_CLOSE_IDLE_TIMEOUT,
+	SNI_CLOSE_STALL_TIMEOUT
 };
 
 enum {
@@ -633,7 +653,85 @@ static int shut_write(int fd)
 	return rc;
 }
 
-static void conn_kill(sni_engine *e, sni_conn *c)
+/*
+ * Counters for every listener, reported through the SNI_Server monitor
+ * object. Word-sized and updated with relaxed atomics: 64-bit atomics are not
+ * lock-free on every target.
+ */
+static struct {
+	uint32_t relayed;
+	uint32_t refused;
+	uint32_t no_hostname;
+	uint32_t blocked;
+	uint32_t unsafe;
+	uint32_t resolve;
+	uint32_t socks;
+	uint32_t connect;
+	uint32_t handshake_timeout;
+	uint32_t idle_timeout;
+	uint32_t stall_timeout;
+} g_sni_close;
+
+static void count_close(int reason)
+{
+	uint32_t *counter = NULL;
+
+	switch (reason) {
+	case SNI_CLOSE_REFUSED: counter = &g_sni_close.refused; break;
+	case SNI_CLOSE_NO_HOSTNAME: counter = &g_sni_close.no_hostname; break;
+	case SNI_CLOSE_BLOCKED: counter = &g_sni_close.blocked; break;
+	case SNI_CLOSE_UNSAFE: counter = &g_sni_close.unsafe; break;
+	case SNI_CLOSE_RESOLVE: counter = &g_sni_close.resolve; break;
+	case SNI_CLOSE_SOCKS: counter = &g_sni_close.socks; break;
+	case SNI_CLOSE_CONNECT: counter = &g_sni_close.connect; break;
+	case SNI_CLOSE_HANDSHAKE_TIMEOUT: counter = &g_sni_close.handshake_timeout; break;
+	case SNI_CLOSE_IDLE_TIMEOUT: counter = &g_sni_close.idle_timeout; break;
+	case SNI_CLOSE_STALL_TIMEOUT: counter = &g_sni_close.stall_timeout; break;
+	default: return;
+	}
+	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
+}
+
+bool sni_stats_json(void *ctx, char **ptr, char *end)
+{
+	int n;
+	size_t left;
+
+	(void)ctx;
+	if (!ptr || !*ptr || *ptr >= end)
+		return false;
+	left = (size_t)(end - *ptr);
+	n = snprintf(*ptr, left, ",\n\"ConnectionLimit\" : %d,\n"
+		"\"Relayed\" : %" PRIu32 ",\n"
+		"\"Refused\" : %" PRIu32 ",\n"
+		"\"NoHostname\" : %" PRIu32 ",\n"
+		"\"Blocked\" : %" PRIu32 ",\n"
+		"\"UnsafeDestination\" : %" PRIu32 ",\n"
+		"\"ResolveFailures\" : %" PRIu32 ",\n"
+		"\"SocksFailures\" : %" PRIu32 ",\n"
+		"\"ConnectFailures\" : %" PRIu32 ",\n"
+		"\"HandshakeTimeouts\" : %" PRIu32 ",\n"
+		"\"IdleTimeouts\" : %" PRIu32 ",\n"
+		"\"StallTimeouts\" : %" PRIu32,
+		sni_worker_limit(),
+		__atomic_load_n(&g_sni_close.relayed, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.refused, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.no_hostname, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.blocked, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.unsafe, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.resolve, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.socks, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.connect, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.handshake_timeout, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.idle_timeout, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.stall_timeout, __ATOMIC_RELAXED));
+	if (n < 0 || (size_t)n >= left)
+		return false;
+	*ptr += n;
+	return true;
+}
+
+static void conn_kill(sni_engine *e, sni_conn *c, int reason)
 {
 	if (!c || c->dead)
 		return;
@@ -647,6 +745,7 @@ static void conn_kill(sni_engine *e, sni_conn *c)
 	if (c->settled)
 		return;
 	c->settled = 1;
+	count_close(reason);
 	if (c->close_stats && c->cfg.sta)
 		stats_close_connection(c->cfg.sta, c->rx, c->tx);
 	if (c->slot_held) {
@@ -655,13 +754,13 @@ static void conn_kill(sni_engine *e, sni_conn *c)
 	}
 }
 
-static void conn_timeout(sni_engine *e, sni_conn *c)
+static void conn_timeout(sni_engine *e, sni_conn *c, int reason)
 {
 	if (c->host[0] != '\0')
 		log_trace("SNI timeout Host { %s }", c->host);
 	else
 		log_trace("TimeOut tid:%i", c->client_fd);
-	conn_kill(e, c);
+	conn_kill(e, c, reason);
 }
 
 static bool conn_arm(sni_engine *e, sni_conn *c)
@@ -775,12 +874,13 @@ static void enter_relay(sni_engine *e, sni_conn *c)
 {
 	int64_t now = net_mono_ms();
 	if (now < 0) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NONE);
 		return;
 	}
 	c->state = SNI_ST_RELAY;
+	(void)__atomic_fetch_add(&g_sni_close.relayed, 1u, __ATOMIC_RELAXED);
 	if (c->hello_len > SNI_RELAY_CAP) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NONE);
 		return;
 	}
 	if (c->hello_len > 0) {
@@ -957,23 +1057,23 @@ static void socks_pump(sni_engine *e, sni_conn *c)
 			int wr = write_some(c->up_fd, c->socks_out, c->socks_out_len,
 					&c->socks_out_off, NULL);
 			if (wr < 0) {
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
 			if (c->socks_out_off < c->socks_out_len)
 				break;
 			if (c->socks_phase == SP_GREET || c->socks_phase == SP_AUTH) {
 				if (!socks_expect(c, 2, c->socks_phase)) {
-					conn_kill(e, c);
+					conn_kill(e, c, SNI_CLOSE_SOCKS);
 					return;
 				}
 			} else if (c->socks_phase == SP_REQ) {
 				if (!socks_expect(c, 4, SP_REP_HDR)) {
-					conn_kill(e, c);
+					conn_kill(e, c, SNI_CLOSE_SOCKS);
 					return;
 				}
 			} else {
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
 			continue;
@@ -983,14 +1083,14 @@ static void socks_pump(sni_engine *e, sni_conn *c)
 			if (rr == 0)
 				break;
 			if (rr < 0) {
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
 			if (c->socks_in_len < c->socks_need)
 				break;
 			if (!socks_on_recv(e, c)) {
 				if (!c->dead)
-					conn_kill(e, c);
+					conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
 			if (c->dead || c->state != SNI_ST_SOCKS)
@@ -1000,14 +1100,14 @@ static void socks_pump(sni_engine *e, sni_conn *c)
 		break;
 	}
 	if (!c->dead && c->state == SNI_ST_SOCKS && !conn_arm(e, c))
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NONE);
 }
 
 static void socks_begin(sni_engine *e, sni_conn *c)
 {
 	c->state = SNI_ST_SOCKS;
 	if (!socks_queue_greet(c)) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_SOCKS);
 		return;
 	}
 	socks_pump(e, c);
@@ -1072,7 +1172,7 @@ static void try_connect(sni_engine *e, sni_conn *c)
 		int rc;
 		int64_t now = net_mono_ms();
 		if (now < 0 || now >= c->connect_deadline) {
-			conn_kill(e, c);
+			conn_kill(e, c, now < 0 ? SNI_CLOSE_NONE : SNI_CLOSE_HANDSHAKE_TIMEOUT);
 			return;
 		}
 		fd = socket(fam, SOCK_STREAM, IPPROTO_TCP);
@@ -1099,7 +1199,7 @@ static void try_connect(sni_engine *e, sni_conn *c)
 			c->up_tag.fd = fd;
 			c->state = SNI_ST_CONNECT;
 			if (!conn_arm(e, c))
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_NONE);
 			return;
 		}
 		close(fd);
@@ -1107,7 +1207,7 @@ static void try_connect(sni_engine *e, sni_conn *c)
 	}
 	if (!c->dead) {
 		log_error("net_connect Error : Connect Failed");
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_CONNECT);
 	}
 }
 
@@ -1116,7 +1216,7 @@ static void connect_pump(sni_engine *e, sni_conn *c, uint32_t ev)
 	int err = 0;
 	socklen_t sl = (socklen_t)sizeof(err);
 	if (getsockopt(c->up_fd, SOL_SOCKET, SO_ERROR, &err, &sl) != 0) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_CONNECT);
 		return;
 	}
 	if ((err == 0 || err == EISCONN) && (ev & SNI_EV_OUT) != 0) {
@@ -1126,7 +1226,7 @@ static void connect_pump(sni_engine *e, sni_conn *c, uint32_t ev)
 	if (err == EINPROGRESS || err == EALREADY ||
 			(err == 0 && (ev & SNI_EV_OUT) == 0)) {
 		if (!conn_arm(e, c))
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NONE);
 		return;
 	}
 	drop_watched(e, &c->up_fd, &c->up_interest, &c->up_tag);
@@ -1138,7 +1238,7 @@ static void start_connect(sni_engine *e, sni_conn *c)
 {
 	int64_t now = net_mono_ms();
 	if (now < 0) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NONE);
 		return;
 	}
 	c->connect_deadline = now + (int64_t)c->io_ms;
@@ -1152,7 +1252,7 @@ static void submit_resolve(sni_engine *e, sni_conn *c, const char *host, uint16_
 	int64_t now = net_mono_ms();
 	int rc;
 	if (now < 0 || !e->sink) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_RESOLVE);
 		return;
 	}
 	c->resolve_deadline = now + (int64_t)c->io_ms;
@@ -1161,13 +1261,13 @@ static void submit_resolve(sni_engine *e, sni_conn *c, const char *host, uint16_
 			AF_INET, c->resolve_deadline, &slot, &req);
 	if (rc != SNI_SUBMIT_OK) {
 		log_trace("resolve_overflow");
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_RESOLVE);
 		return;
 	}
 	c->resolve_slot = slot;
 	c->pending_req_id = req;
 	if (!conn_arm(e, c))
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NONE);
 }
 
 static void begin_upstream(sni_engine *e, sni_conn *c)
@@ -1177,13 +1277,13 @@ static void begin_upstream(sni_engine *e, sni_conn *c)
 	int st;
 	if (c->cfg.Socks) {
 		if (!c->cfg.Socks->host || c->cfg.Socks->host[0] == '\0') {
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_SOCKS);
 			return;
 		}
 		st = sni_resolver_copy_upstream(c->cfg.Socks->host, c->cfg.Socks->port, got, &n);
 		if (st != SNI_UP_READY || !install_addrs(c, got, n)) {
 			log_trace("socks_unresolved");
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_RESOLVE);
 			return;
 		}
 		start_connect(e, c);
@@ -1237,12 +1337,12 @@ static void apply_resolve(sni_engine *e, resolve_slot *slot)
 		return;
 	if (err != 0 || count == 0) {
 		log_error("%s -> %s\n", c->host, gai_strerror(err));
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_RESOLVE);
 		return;
 	}
 	if (!install_checked(c, addrs, count, port)) {
 		log_trace("SNI address rejected");
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_UNSAFE);
 		return;
 	}
 	start_connect(e, c);
@@ -1278,17 +1378,17 @@ static bool host_ready(sni_engine *e, sni_conn *c)
 	if (!net_get_host(c->hello, c->hello_len, raw, (uint16_t)ZROXY_MAX_HOSTNAME))
 		return false;
 	if (!sni_resolver_normalize(raw, norm, sizeof(norm)) || !copy_host(c->host, norm)) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 		return true;
 	}
 	if (c->cfg.wlist && filter_match(c->cfg.wlist, c->host) == false) {
 		log_trace("SNI filter Host { %s }", c->host);
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_BLOCKED);
 		return true;
 	}
 	if (net_is_ip_literal(c->host)) {
 		log_trace("SNI we can't support IP address");
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 		return true;
 	}
 	log_trace("SNI start Host { %s } ", c->host);
@@ -1304,7 +1404,7 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 		int rr;
 		if (c->hello_len >= SNI_HELLO_CAP) {
 			log_error("Host Buffer OverFlow");
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 			return;
 		}
 		before = c->hello_len;
@@ -1312,21 +1412,21 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 		if (rr == 0)
 			break;
 		if (rr < 0) {
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 			return;
 		}
 		note_client_read(c->hello_len - before);
 		c->last_hello = net_mono_ms();
 		if (c->hello_len >= SNI_HELLO_CAP) {
 			log_error("Host Buffer OverFlow");
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 			return;
 		}
 		if (host_ready(e, c))
 			return;
 	}
 	if (!c->dead && !conn_arm(e, c))
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NONE);
 }
 
 static uint32_t relay_budget(void)
@@ -1351,7 +1451,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			uint32_t before = c->c2u_off;
 			wr = write_some(c->up_fd, c->c2u, c->c2u_len, &c->c2u_off, &c->tx);
 			if (wr < 0) {
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_NONE);
 				return;
 			}
 			if (c->c2u_off > before) {
@@ -1367,7 +1467,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			uint32_t before = c->u2c_off;
 			wr = write_some(c->client_fd, c->u2c, c->u2c_len, &c->u2c_off, &c->rx);
 			if (wr < 0) {
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_NONE);
 				return;
 			}
 			if (c->u2c_off > before) {
@@ -1386,7 +1486,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			if (rr == -2) {
 				c->client_eof = 1;
 			} else if (rr < 0) {
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_NONE);
 				return;
 			} else if (rr == 1) {
 				progress = 1;
@@ -1401,7 +1501,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			if (rr == -2) {
 				c->up_eof = 1;
 			} else if (rr < 0) {
-				conn_kill(e, c);
+				conn_kill(e, c, SNI_CLOSE_NONE);
 				return;
 			} else if (rr == 1) {
 				progress = 1;
@@ -1422,7 +1522,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		}
 		if (!c->dead && c->client_eof && c->up_eof &&
 				c->c2u_off == c->c2u_len && c->u2c_off == c->u2c_len) {
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NONE);
 			return;
 		}
 		if (progress)
@@ -1440,7 +1540,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		}
 	}
 	if (!c->dead && !conn_arm(e, c))
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_NONE);
 }
 
 static void pump(sni_engine *e, sni_conn *c, int fd, uint32_t ev)
@@ -1452,7 +1552,7 @@ static void pump(sni_engine *e, sni_conn *c, int fd, uint32_t ev)
 	}
 	if (c->state == SNI_ST_RESOLVE || c->state == SNI_ST_CONNECT) {
 		if (fd == c->client_fd && (ev & (SNI_EV_ERR | SNI_EV_HUP)) != 0) {
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NONE);
 			return;
 		}
 		if (c->state == SNI_ST_CONNECT && fd == c->up_fd &&
@@ -1474,7 +1574,7 @@ static bool conn_start(sni_engine *e, sni_conn *c)
 	c->next = e->head;
 	e->head = c;
 	if (!conn_arm(e, c)) {
-		conn_kill(e, c);
+		conn_kill(e, c, SNI_CLOSE_REFUSED);
 		return false;
 	}
 	return true;
@@ -1496,17 +1596,20 @@ static void accept_clients(sni_engine *e)
 			break;
 		}
 		if (!set_nb_cloexec(fd)) {
+			count_close(SNI_CLOSE_REFUSED);
 			close(fd);
 			continue;
 		}
 		if (!sni_worker_acquire()) {
 			log_error("refusing SNI connection");
+			count_close(SNI_CLOSE_REFUSED);
 			close(fd);
 			continue;
 		}
 		c = conn_new(e, fd);
 		if (!c) {
 			log_error("malloc failed for sni connection");
+			count_close(SNI_CLOSE_REFUSED);
 			sni_worker_release();
 			close(fd);
 			continue;
@@ -1630,17 +1733,17 @@ static void expire_conns(sni_engine *e)
 				if (c->c2u_by == 0)
 					c->c2u_by = now + (int64_t)c->io_ms;
 				if (now >= c->c2u_by)
-					conn_timeout(e, c);
+					conn_timeout(e, c, SNI_CLOSE_STALL_TIMEOUT);
 			}
 			if (!c->dead && c->u2c_off < c->u2c_len) {
 				if (c->u2c_by == 0)
 					c->u2c_by = now + (int64_t)c->io_ms;
 				if (now >= c->u2c_by)
-					conn_timeout(e, c);
+					conn_timeout(e, c, SNI_CLOSE_STALL_TIMEOUT);
 			}
 			if (!c->dead && c->c2u_off == c->c2u_len && c->u2c_off == c->u2c_len &&
 					!c->touched && now >= c->idle_at)
-				conn_timeout(e, c);
+				conn_timeout(e, c, SNI_CLOSE_IDLE_TIMEOUT);
 			continue;
 		}
 		if (c->state == SNI_ST_HELLO) {
@@ -1654,7 +1757,7 @@ static void expire_conns(sni_engine *e)
 			due = c->deadline;
 		}
 		if (now >= due)
-			conn_timeout(e, c);
+			conn_timeout(e, c, SNI_CLOSE_HANDSHAKE_TIMEOUT);
 	}
 }
 
@@ -1692,7 +1795,7 @@ static void sni_engine_run(sni_engine *e)
 	{
 		sni_conn *c;
 		for (c = e->head; c != NULL; c = c->next)
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NONE);
 	}
 	reap(e);
 	if (e->sink && e->sink_interest != 0) {
@@ -1718,7 +1821,7 @@ static void sni_engine_deinit(sni_engine *e)
 	while (c) {
 		sni_conn *next = c->next;
 		if (!c->dead)
-			conn_kill(e, c);
+			conn_kill(e, c, SNI_CLOSE_NONE);
 		free(c);
 		c = next;
 	}

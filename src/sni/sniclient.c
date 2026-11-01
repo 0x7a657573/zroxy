@@ -31,6 +31,11 @@ bool sni_worker_acquire(void)
 	return ok;
 }
 
+int sni_worker_limit(void)
+{
+	return SNI_MAX_WORKERS;
+}
+
 void sni_worker_release(void)
 {
 	pthread_mutex_lock(&sni_worker_mu);

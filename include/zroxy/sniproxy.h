@@ -51,6 +51,14 @@ sni_listener *sniproxy_start(SniServer_t *Sni);
 void sniproxy_stop(sni_listener *ls);
 bool sni_worker_acquire(void);
 void sni_worker_release(void);
+/* The connection cap shared by every listener. */
+int sni_worker_limit(void);
+
+/*
+ * stats_extra_fn for the SNI_Server monitor object: appends the connection
+ * limit and the counters that say how connections ended.
+ */
+bool sni_stats_json(void *ctx, char **ptr, char *end);
 
 
 

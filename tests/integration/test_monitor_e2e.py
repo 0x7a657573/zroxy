@@ -3,7 +3,9 @@
 
 import os
 import re
+import socket
 import sys
+import threading
 import time
 import traceback
 
@@ -46,6 +48,21 @@ def _expected_version():
     if not m:
         raise AssertionError("version not found in %s" % path)
     return m.group(1)
+
+
+SNI_CLOSE_KEYS = (
+    "Relayed",
+    "Refused",
+    "NoHostname",
+    "Blocked",
+    "UnsafeDestination",
+    "ResolveFailures",
+    "SocksFailures",
+    "ConnectFailures",
+    "HandshakeTimeouts",
+    "IdleTimeouts",
+    "StallTimeouts",
+)
 
 
 def _dns_reply(query):
@@ -276,10 +293,125 @@ def test_monitor_process_object():
                 raise AssertionError("implausible Process.RssBytes: %r" % obj)
 
 
+def _sni_quiet(port):
+    """First report with no SNI connection open (the readiness probe has gone)."""
+    return _wait_doc(port, lambda doc: doc["SNI_Server"]["ActiveConnection"] == 0, 3.0)["json"]["SNI_Server"]
+
+
+def _sni_delta(port, base, expect, timeout=4.0):
+    """Wait until SNI_Server counters moved by exactly `expect` (others unchanged)."""
+    def settled(doc):
+        sni = doc["SNI_Server"]
+        return (sni["ActiveConnection"] == 0 and
+                all(sni[k] - base[k] == expect.get(k, 0) for k in SNI_CLOSE_KEYS))
+    try:
+        return _wait_doc(port, settled, timeout)["json"]["SNI_Server"]
+    except AssertionError as exc:
+        raise AssertionError("expected SNI deltas %r from %r: %s" % (expect, base, exc))
+
+
+def test_sni_close_reasons():
+    hello = zroxy_lab.client_hello("localhost")
+    with zroxy_lab.Lab() as lab:
+        up = lab.tcp_server(response=zroxy_lab.HTTP_OK, read_exact=len(hello))
+        wl = lab.write("white.txt", "localhost\n")
+        sni_port = zroxy_lab.free_tcp_port()
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(
+            ["-l", "0", "-o", "2", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
+             "-m", str(mon_port), "-w", wl],
+            tcp_ports=[sni_port, mon_port],
+        )
+        base = _sni_quiet(mon_port)
+        for key in SNI_CLOSE_KEYS:
+            _number(base.get(key), "SNI_Server." + key)
+        if base["ConnectionLimit"] != 1024:
+            raise AssertionError("ConnectionLimit is %r" % base["ConnectionLimit"])
+
+        data, closed = zroxy_lab.tcp_exchange("127.0.0.1", sni_port, hello, timeout=4.0)
+        if data != zroxy_lab.HTTP_OK or not closed:
+            raise AssertionError("relay failed: %r" % data)
+        _sni_delta(mon_port, base, {"Relayed": 1})
+        base = _sni_quiet(mon_port)
+
+        # A name outside the whitelist.
+        other = zroxy_lab.client_hello("blocked.example")
+        data, closed = zroxy_lab.tcp_exchange("127.0.0.1", sni_port, other, timeout=4.0)
+        if data != b"" or not closed:
+            raise AssertionError("blocked name was not closed: %r" % data)
+        _sni_delta(mon_port, base, {"Blocked": 1})
+        base = _sni_quiet(mon_port)
+
+        # Bytes that are neither a ClientHello nor an HTTP request, then EOF.
+        junk = b"\x00\x01\x02 not a hello\r\n"
+        data, closed = zroxy_lab.tcp_exchange("127.0.0.1", sni_port, junk, timeout=1.0)
+        if data != b"":
+            raise AssertionError("junk got a reply: %r" % data)
+        # And a client that connects and leaves without sending anything.
+        sock = socket.create_connection(("127.0.0.1", sni_port), timeout=2.0)
+        sock.close()
+        _sni_delta(mon_port, base, {"NoHostname": 2})
+        proc.check_alive()
+
+
+def test_sni_connect_failure_and_handshake_timeout():
+    hello = zroxy_lab.client_hello("localhost")
+    with zroxy_lab.Lab() as lab:
+        dead_port = zroxy_lab.free_tcp_port()
+        sni_port = zroxy_lab.free_tcp_port()
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(
+            ["-l", "0", "-o", "1", "-p", "127.0.0.1:%s@%s" % (sni_port, dead_port),
+             "-m", str(mon_port)],
+            tcp_ports=[sni_port, mon_port],
+        )
+        base = _sni_quiet(mon_port)
+        data, closed = zroxy_lab.tcp_exchange("127.0.0.1", sni_port, hello, timeout=4.0)
+        if data != b"" or not closed:
+            raise AssertionError("connect failure was not closed: %r" % data)
+        _sni_delta(mon_port, base, {"ConnectFailures": 1})
+        base = _sni_quiet(mon_port)
+
+        # A client that never sends its hello is dropped after SNITIMEOUT.
+        sock = socket.create_connection(("127.0.0.1", sni_port), timeout=2.0)
+        try:
+            _sni_delta(mon_port, base, {"HandshakeTimeouts": 1}, timeout=5.0)
+        finally:
+            sock.close()
+        proc.check_alive()
+
+
+def test_sni_idle_timeout():
+    hello = zroxy_lab.client_hello("localhost")
+    with zroxy_lab.Lab() as lab:
+        hold = threading.Event()
+        up = lab.tcp_server(response=b"", read_exact=len(hello), hold=hold)
+        sni_port = zroxy_lab.free_tcp_port()
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(
+            ["-l", "0", "-o", "5", "-I", "1", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
+             "-m", str(mon_port)],
+            tcp_ports=[sni_port, mon_port],
+        )
+        base = _sni_quiet(mon_port)
+        sock = socket.create_connection(("127.0.0.1", sni_port), timeout=2.0)
+        try:
+            sock.sendall(hello)
+            # The upstream accepts the hello and then stays silent: the relay
+            # is established and idles out after SNIIDLETIMEOUT, not SNITIMEOUT.
+            _sni_delta(mon_port, base, {"Relayed": 1, "IdleTimeouts": 1}, timeout=4.0)
+        finally:
+            sock.close()
+            hold.set()
+        proc.check_alive()
+
+
 def main():
     failed = 0
     for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error,
-                 test_monitor_http_framing, test_monitor_process_object):
+                 test_monitor_http_framing, test_monitor_process_object,
+                 test_sni_close_reasons, test_sni_connect_failure_and_handshake_timeout,
+                 test_sni_idle_timeout):
         try:
             test()
         except Exception:
