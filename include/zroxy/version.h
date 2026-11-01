@@ -8,7 +8,16 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "1.4.1"
+#define version	 "2.0.0"
+/*
+* sni : refuse loopback and other unsafe resolved destinations
+* sni : refuse to run as an open proxy unless OPENPROXY is set
+* args : read secrets from files and wipe them after use
+* priv : drop privileges after startup, confine the OpenWrt service
+* args : append repeated PORT lines, bound config file nesting
+* tests : add libFuzzer harnesses for every untrusted-input parser
+*/
+//#define version	 "1.4.1"
 /*
 * dns : replace the FIFO worker pool with one bounded DNS event loop
 * dns : dial resolved hostnames on the configured port

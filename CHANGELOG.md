@@ -1,8 +1,23 @@
 # Changelog
 
-These notes describe the `1.4.1` release. Nothing here says the result is production-ready.
+These notes describe the `2.0.0` release. Nothing here says the result is production-ready.
 
-## Unreleased
+## 2.0.0 - 2026-11-01
+
+### Breaking
+
+Existing configurations may stop starting or behave differently. Check each
+point before upgrading; details are in the sections below.
+
+- A config with `PORT` and no `WHITE` no longer starts. Set a whitelist, or
+  add `OPENPROXY = yes` to keep the old open behaviour.
+- Client-supplied names that resolve to loopback (127.0.0.0/8, `::1`) are
+  refused. Add `ALLOWLOOPBACK = yes` when the upstream is on the same host.
+- Repeated `PORT` lines and `-p` options append instead of replacing the
+  earlier listeners, listeners keep the order they are written in, and a
+  duplicate listener is a start-up error.
+- On OpenWrt the service runs as user `zroxy` inside a procd jail. The
+  whitelist file and its directory must be readable by that user.
 
 ### Security
 
