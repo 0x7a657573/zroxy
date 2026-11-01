@@ -216,8 +216,25 @@ sequenceDiagram
     M-->>M: return 0
 ```
 
+### Dropping privileges
+
+`args_validate` resolves `USER` and `GROUP` (`getpwnam_r`, `getgrnam_r`)
+while the process is still single-threaded and stores the target ids. `main`
+calls `priv_drop` after the last listener starts and before
+`wait_for_shutdown`, so every bind and every file read happened as the
+starting user. The listener, DNS, monitor, whitelist-watcher and resolver
+threads are already running at that point; this is correct because glibc and
+musl implement `setuid`/`setgid`/`setgroups` for the whole process (they
+signal every thread to make the same syscall). `priv_drop` still reads each
+task's `Uid:`/`Gid:` lines from `/proc/self/task` and fails if one differs.
+`priv_harden` then sets `no_new_privs`, and non-dumpable after a drop. `/proc/self/fd` and
+`/proc/self/status`, which the monitor reads, stay accessible to the process
+itself when it is non-dumpable.
+
 ### Startup failure semantics
 
+- A `USER` or `GROUP` that does not exist, `GROUP` without `USER`, a non-root
+  start with a different `USER`, or a failed privilege drop returns `1`.
 - Invalid CLI/configuration input returns `1` before services start.
 - DNS options without `LDNS` return `1`; `LDNS` without an upstream `DNS` also
   returns `1`. A whitelist without `SNIP` logs a warning and uses `0.0.0.0`.

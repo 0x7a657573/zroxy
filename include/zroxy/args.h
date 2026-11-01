@@ -9,6 +9,7 @@
 #define ARGS_H_
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/types.h>
 #include <zroxy/sniproxy.h>
 #include <zroxy/dnsserver.h>
 
@@ -32,6 +33,11 @@ typedef struct
 	bool		allow_loopback;
 	bool		deny_private;
 	bool		open_proxy;
+	char		*run_user;
+	char		*run_group;
+	bool		drop_priv;	/* set by args_validate: switch to drop_uid/drop_gid */
+	uid_t		drop_uid;
+	gid_t		drop_gid;
 }zroxy_t;
 
 bool args_init(zroxy_t *pgp,int argc, const char **argv);

@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <pwd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -1184,6 +1185,130 @@ static void test_monitor_header_absolute_deadline(const char *logpath)
     stop_child(pid);
 }
 
+/* Reads the whole /proc/PID/status; false when unreadable. */
+static bool read_proc_status(pid_t pid, char *text, size_t cap)
+{
+    char path[64];
+    FILE *fp;
+    size_t n;
+
+    snprintf(path, sizeof(path), "/proc/%ld/status", (long)pid);
+    fp = fopen(path, "r");
+    if (!fp)
+        return false;
+    n = fread(text, 1, cap - 1, fp);
+    fclose(fp);
+    text[n] = '\0';
+    return n > 0;
+}
+
+static void test_run_as_other_user_refused(const char *logpath)
+{
+    char *argv[] = {ZROXY_BIN, "-m", "18998", "--user", "root", NULL};
+
+    if (geteuid() == 0)
+    {
+        fprintf(stderr, "SKIP: non-root USER refusal needs a non-root test run\n");
+        return;
+    }
+    test_exit_code_log(argv, logpath, "non-root start with another USER exits 1", "needs zroxy to start as root");
+}
+
+/* The same user is a no-op, but the process still gets hardened and the monitor still works. */
+static void test_run_as_current_user(const char *logpath)
+{
+    struct passwd *me = getpwuid(geteuid());
+    uint16_t port = 0;
+    char port_text[8];
+    char *argv[6];
+    pid_t pid;
+    char response[8192];
+    char status[8192];
+    size_t n = 0;
+    int before = failures;
+    char req[] = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+
+    if (!me || geteuid() == 0)
+    {
+        fprintf(stderr, "SKIP: same-user check needs a non-root test run\n");
+        return;
+    }
+    expect_true(reserve_port(&port), "reserve USER monitor port");
+    snprintf(port_text, sizeof(port_text), "%u", port);
+    argv[0] = ZROXY_BIN;
+    argv[1] = "-U";
+    argv[2] = me->pw_name;
+    argv[3] = "-m";
+    argv[4] = port_text;
+    argv[5] = NULL;
+    pid = spawn_child(argv, logpath);
+    expect_true(pid > 0, "start with USER set to the current user");
+    if (pid <= 0)
+        return;
+
+    expect_true(http_exchange(port, req, response, sizeof(response), &n), "monitor answers after hardening");
+    expect_true(strncmp(response, "HTTP/1.1 200", 12) == 0, "monitor is 200 after hardening");
+    /* a dropped (non-dumpable) process still reads its own /proc/self; the root test below covers that */
+    expect_true(strstr(response, "\"RssBytes\"") != NULL, "monitor still reads /proc/self/status");
+    expect_true(strstr(response, "\"OpenFiles\" : -1") == NULL, "monitor still counts /proc/self/fd");
+    if (read_proc_status(pid, status, sizeof(status)))
+        expect_true(strstr(status, "NoNewPrivs:\t1") != NULL, "no_new_privs is set");
+    if (failures != before)
+        dump_log(logpath);
+    stop_child(pid);
+}
+
+/* Root path: start as root with USER, then read the credentials back from /proc. */
+static void test_drop_privileges_as_root(const char *logpath)
+{
+    const char *names[] = {"nobody", "daemon", NULL};
+    struct passwd *pw = NULL;
+    uint16_t port = 0;
+    char port_text[8];
+    char *argv[6];
+    char status[8192];
+    char want[64];
+    pid_t pid;
+    int before = failures;
+    int i;
+
+    if (geteuid() != 0)
+    {
+        fprintf(stderr, "SKIP: privilege drop needs a root test run\n");
+        return;
+    }
+    for (i = 0; names[i] && !pw; i++)
+        pw = getpwnam(names[i]);
+    if (!pw)
+    {
+        fprintf(stderr, "SKIP: no unprivileged user to drop to\n");
+        return;
+    }
+    expect_true(reserve_port(&port), "reserve drop monitor port");
+    snprintf(port_text, sizeof(port_text), "%u", port);
+    argv[0] = ZROXY_BIN;
+    argv[1] = "--user";
+    argv[2] = pw->pw_name;
+    argv[3] = "-m";
+    argv[4] = port_text;
+    argv[5] = NULL;
+    pid = spawn_child(argv, logpath);
+    expect_true(pid > 0, "start as root with USER");
+    if (pid <= 0)
+        return;
+    for (i = 0; i < 50 && !log_has(logpath, "running as"); i++)
+        usleep(100000);
+    expect_true(log_has(logpath, "running as"), "zroxy reports the drop");
+    snprintf(want, sizeof(want), "\nUid:\t%lu\t%lu\t%lu\t%lu", (unsigned long)pw->pw_uid,
+        (unsigned long)pw->pw_uid, (unsigned long)pw->pw_uid, (unsigned long)pw->pw_uid);
+    expect_true(read_proc_status(pid, status, sizeof(status)), "read status of the dropped process");
+    expect_true(strstr(status, want) != NULL, "all four uids are the target user");
+    expect_true(strstr(status, "\nGroups:\t\n") != NULL, "no supplementary groups remain");
+    if (failures != before)
+        dump_log(logpath);
+    stop_child(pid);
+}
+
 int main(void)
 {
     char logpath[] = "/tmp/zroxy-verify-XXXXXX";
@@ -1221,6 +1346,10 @@ int main(void)
     test_monitor_auth_and_path(logpath);
     test_monitor_token_file(logpath);
     test_token_file_world_writable_refused(logpath);
+    test_phase = "privilege drop";
+    test_run_as_other_user_refused(logpath);
+    test_run_as_current_user(logpath);
+    test_drop_privileges_as_root(logpath);
     test_phase = "slow monitor clients";
     test_monitor_slow_clients(logpath);
     test_phase = "header deadline";

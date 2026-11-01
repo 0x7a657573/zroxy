@@ -66,6 +66,20 @@ target; check startup and a real proxied connection on that router.
   `SOCKSPASSFILE`, `DSOCKSPASSFILE` or `MONITORTOKENFILE` at a `chmod 600`
   file; zroxy warns about group or world access and refuses world-writable
   files.
+- zroxy starts as root, binds its ports, then drops to the `zroxy` user the
+  package creates (`USERID` in the package Makefile). `-U zroxy` is passed
+  first, so `USER` or `GROUP` in `zroxy.conf` overrides it. The whitelist file
+  and its directory must be readable by that user; the config file and the
+  secret files are read before the drop and may stay root-only (`chmod 600`).
+- The init script also sets `no_new_privs` and runs zroxy in a procd jail
+  (`procd_add_jail zroxy log procfs`) that mounts read-only the config file,
+  the secret files named in it, the whitelist's directory, `/etc/passwd`,
+  `/etc/group`, `/etc/hosts` and the resolver files. Set
+  `uci set zroxy.main.jail='0'` and reload to run without the jail, for
+  example if a name lookup fails inside it. The jail, the user creation and
+  the privilege drop under procd have not been tested on a device. If the
+  resolver file is replaced rather than rewritten, the jail may keep seeing
+  the old one until zroxy restarts.
 - Both files are package conffiles and are included in the normal configuration
   backup used by sysupgrade. After a firmware upgrade, confirm that the zroxy
   package is installed for the new release before trying to start it.

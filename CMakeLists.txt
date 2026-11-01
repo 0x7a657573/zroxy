@@ -41,6 +41,10 @@ zroxy_add_module(zroxy_log
     SOURCES src/log/log.c src/log/loglock.c
     DEPS Threads::Threads)
 
+zroxy_add_module(zroxy_priv
+    SOURCES src/priv/priv.c
+    DEPS zroxy_log)
+
 zroxy_add_module(zroxy_net
     SOURCES src/net/net.c src/net/net_io.c src/net/socks.c
     DEPS zroxy_log)
@@ -94,7 +98,7 @@ zroxy_add_module(zroxy_args
 # ---------------------------------------------------------------------------
 add_executable(zroxy src/main.c)
 target_link_libraries(zroxy PRIVATE
-    zroxy_args zroxy_sni zroxy_dns zroxy_monitor zroxy_filter zroxy_log
+    zroxy_args zroxy_priv zroxy_sni zroxy_dns zroxy_monitor zroxy_filter zroxy_log
     zroxy_build_options)
 
 install(TARGETS zroxy RUNTIME DESTINATION bin)
