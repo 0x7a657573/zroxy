@@ -230,6 +230,11 @@ CUR=dns; opt enabled 1
 sec route; opt enabled 1
 run_fail route_without_server "no server"
 
+shipped_defaults
+CUR=dns; opt enabled 1
+CUR=cfg1; opt enabled 0
+run_fail dns_without_route "no DNS route"
+
 # --- static checks and optional parse check --------------------------------
 if sh -n "$INIT"; then echo "ok   sh -n"; else echo "FAIL sh -n"; FAILS=$((FAILS + 1)); fi
 if command -v shellcheck >/dev/null 2>&1; then
