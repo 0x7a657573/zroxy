@@ -62,6 +62,10 @@ target; check startup and a real proxied connection on that router.
 - `/etc/zroxy/zroxy.conf` contains all zroxy settings, including any SOCKS5
   credentials. It is always passed with `-c`; the process working directory is
   irrelevant. Keep credentials readable only by root if you add them.
+  To keep a SOCKS5 password or monitor token out of this file, point
+  `SOCKSPASSFILE`, `DSOCKSPASSFILE` or `MONITORTOKENFILE` at a `chmod 600`
+  file; zroxy warns about group or world access and refuses world-writable
+  files.
 - Both files are package conffiles and are included in the normal configuration
   backup used by sysupgrade. After a firmware upgrade, confirm that the zroxy
   package is installed for the new release before trying to start it.

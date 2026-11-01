@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <zroxy/args.h>
@@ -67,6 +68,9 @@ static void free_settings(zroxy_t *cfg)
     free(cfg->monitorPort);
     free(cfg->monitor_token);
     free(cfg->WhitePath);
+    free(cfg->monitor_token_file);
+    free(cfg->socks_pass_file);
+    free(cfg->dsocks_pass_file);
     memset(cfg, 0, sizeof(*cfg));
 }
 
@@ -971,6 +975,241 @@ static void test_config_minimal_cleanup_safe(void)
     free_settings(&cfg);
 }
 
+/* Write content to a fresh temp file with the given mode; path gets the name. */
+static void make_secret_file(char *path, const void *data, size_t n, mode_t mode)
+{
+    int fd = mkstemp(path);
+    if (fd < 0)
+    {
+        fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+        failures++;
+        return;
+    }
+    if (n > 0 && write(fd, data, n) != (ssize_t)n)
+    {
+        fprintf(stderr, "FAIL: secret file write failed\n");
+        failures++;
+    }
+    fchmod(fd, mode);
+    close(fd);
+}
+
+/* Parse "zroxy OPT VALUE [OPT VALUE]" then validate; returns validate's result. */
+static bool init_validate(zroxy_t *cfg, const char *o1, const char *v1, const char *o2, const char *v2)
+{
+    char a0[] = "zroxy";
+    char b1[64], b2[512], b3[64], b4[512];
+    const char *argv[5];
+    int argc = 0;
+    argv[argc++] = a0;
+    snprintf(b1, sizeof(b1), "%s", o1);
+    snprintf(b2, sizeof(b2), "%s", v1);
+    argv[argc++] = b1;
+    argv[argc++] = b2;
+    if (o2)
+    {
+        snprintf(b3, sizeof(b3), "%s", o2);
+        snprintf(b4, sizeof(b4), "%s", v2);
+        argv[argc++] = b3;
+        argv[argc++] = b4;
+    }
+    reset_getopt();
+    if (!args_init(cfg, argc, argv))
+        return false;
+    return args_validate(cfg);
+}
+
+static void test_monitor_token_file(void)
+{
+    char path[] = "/tmp/zroxy_secret_XXXXXX";
+    zroxy_t cfg = {0};
+
+    make_secret_file(path, "s3cret-token\r\n", 14, 0600);
+    expect_true(init_validate(&cfg, "--monitortokenfile", path, "-m", "8123"), "token file validates");
+    expect_string(cfg.monitor_token, "s3cret-token", "token file CR LF stripped");
+    expect_true(cfg.monitor_token_file == NULL, "token file path released");
+    free_settings(&cfg);
+
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-K", path, "-k", "inline"), "token inline and file rejected");
+    free_settings(&cfg);
+    unlink(path);
+
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-K", "/tmp/zroxy-no-such-secret", "-m", "8123"), "missing token file rejected");
+    free_settings(&cfg);
+}
+
+static void test_secret_file_contents(void)
+{
+    char path[] = "/tmp/zroxy_secret_XXXXXX";
+    char longbuf[400];
+    zroxy_t cfg = {0};
+
+    make_secret_file(path, "first\nsecond\n", 13, 0600);
+    expect_true(init_validate(&cfg, "-K", path, "-m", "8123"), "only the first line is used");
+    expect_string(cfg.monitor_token, "first", "first line value");
+    free_settings(&cfg);
+    unlink(path);
+
+    strcpy(path, "/tmp/zroxy_secret_XXXXXX");
+    make_secret_file(path, "", 0, 0600);
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-K", path, "-m", "8123"), "empty token file rejected");
+    free_settings(&cfg);
+    unlink(path);
+
+    strcpy(path, "/tmp/zroxy_secret_XXXXXX");
+    make_secret_file(path, "\r\nlater\n", 8, 0600);
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-K", path, "-m", "8123"), "blank first line rejected");
+    free_settings(&cfg);
+    unlink(path);
+
+    memset(longbuf, 'a', 257);
+    longbuf[257] = '\n';
+    strcpy(path, "/tmp/zroxy_secret_XXXXXX");
+    make_secret_file(path, longbuf, 258, 0600);
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-K", path, "-m", "8123"), "257 byte token rejected");
+    free_settings(&cfg);
+    unlink(path);
+
+    longbuf[256] = '\n';
+    strcpy(path, "/tmp/zroxy_secret_XXXXXX");
+    make_secret_file(path, longbuf, 257, 0600);
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(init_validate(&cfg, "-K", path, "-m", "8123"), "256 byte token accepted");
+    free_settings(&cfg);
+    unlink(path);
+}
+
+static void test_secret_file_permissions(void)
+{
+    char path[] = "/tmp/zroxy_secret_XXXXXX";
+    char dirpath[] = "/tmp/zroxy_secret_dir_XXXXXX";
+    zroxy_t cfg = {0};
+
+    make_secret_file(path, "tok\n", 4, 0666);
+    expect_true(!init_validate(&cfg, "-K", path, "-m", "8123"), "world-writable secret file refused");
+    free_settings(&cfg);
+    chmod(path, 0644);
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(init_validate(&cfg, "-K", path, "-m", "8123"), "world-readable secret file only warns");
+    free_settings(&cfg);
+    chmod(path, 0620);
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(init_validate(&cfg, "-K", path, "-m", "8123"), "group-writable secret file only warns");
+    free_settings(&cfg);
+    unlink(path);
+
+    if (mkdtemp(dirpath))
+    {
+        memset(&cfg, 0, sizeof(cfg));
+        expect_true(!init_validate(&cfg, "-K", dirpath, "-m", "8123"), "directory as secret file refused");
+        free_settings(&cfg);
+        rmdir(dirpath);
+    }
+}
+
+static void test_socks_pass_file(void)
+{
+    char path[] = "/tmp/zroxy_secret_XXXXXX";
+    zroxy_t cfg = {0};
+
+    make_secret_file(path, "p@ss:word\n", 10, 0600);
+    expect_true(init_validate(&cfg, "--sockspassfile", path, "-s", "alice@127.0.0.1:1081"), "socks pass file validates");
+    expect_true(cfg.socks != NULL, "socks parsed with pass file");
+    if (cfg.socks)
+    {
+        expect_string(cfg.socks->user, "alice", "socks user with pass file");
+        expect_string(cfg.socks->pass, "p@ss:word", "socks pass loaded from file");
+    }
+    free_settings(&cfg);
+
+    /* option order must not matter */
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(init_validate(&cfg, "-s", "alice@127.0.0.1", "-S", path), "socks pass file after the spec");
+    free_settings(&cfg);
+
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-S", path, "-s", "alice:inline@127.0.0.1"), "socks inline and file rejected");
+    free_settings(&cfg);
+
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-S", path, "-s", "127.0.0.1:1080"), "socks pass file without a user rejected");
+    free_settings(&cfg);
+
+    memset(&cfg, 0, sizeof(cfg));
+    expect_true(!init_validate(&cfg, "-S", path, "-m", "8123"), "socks pass file without socks rejected");
+    free_settings(&cfg);
+
+    memset(&cfg, 0, sizeof(cfg));
+    /* validate fails on the missing LDNS, after the secret files are loaded */
+    init_validate(&cfg, "-X", path, "-x", "bob@127.0.0.1");
+    expect_true(cfg.dnsserver && cfg.dnsserver->Socks, "dns socks parsed with pass file");
+    if (cfg.dnsserver && cfg.dnsserver->Socks)
+        expect_string(cfg.dnsserver->Socks->pass, "p@ss:word", "dns socks pass loaded from file");
+    free_settings(&cfg);
+    unlink(path);
+
+    {
+        char longbuf[300];
+        memset(longbuf, 'b', 256);
+        longbuf[256] = '\n';
+        strcpy(path, "/tmp/zroxy_secret_XXXXXX");
+        make_secret_file(path, longbuf, 257, 0600);
+        memset(&cfg, 0, sizeof(cfg));
+        expect_true(!init_validate(&cfg, "-S", path, "-s", "alice@127.0.0.1"), "256 byte socks password rejected");
+        free_settings(&cfg);
+        unlink(path);
+    }
+}
+
+static void test_config_secret_files(void)
+{
+    char secret[] = "/tmp/zroxy_secret_XXXXXX";
+    char conf[] = "/tmp/zroxy_secret_conf_XXXXXX";
+    char text[512];
+    zroxy_t cfg = {0};
+
+    make_secret_file(secret, "tok123\n", 7, 0600);
+    snprintf(text, sizeof(text), "MONITOR = 8123\nMONITORTOKENFILE = %s\nSOCKS = u@127.0.0.1\nSOCKSPASSFILE = %s\n", secret, secret);
+    make_secret_file(conf, text, strlen(text), 0644);
+    expect_true(args_parse_config(&cfg, conf), "config with secret files parses");
+    expect_true(args_validate(&cfg), "config with secret files validates");
+    expect_string(cfg.monitor_token, "tok123", "config token file value");
+    if (cfg.socks)
+        expect_string(cfg.socks->pass, "tok123", "config socks pass file value");
+    free_settings(&cfg);
+    unlink(conf);
+    unlink(secret);
+}
+
+static void test_argv_scrub(void)
+{
+    zroxy_t cfg = {0};
+    char a0[] = "zroxy";
+    char a1[] = "-k";
+    char a2[] = "topsecret";
+    char a3[] = "-s";
+    char a4[] = "u:hunter2@127.0.0.1:1080";
+    char a5[] = "-d";
+    char a6[] = "127.0.0.1:5353";
+    const char *argv[] = {a0, a1, a2, a3, a4, a5, a6};
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 7, argv), "args_init with inline secrets");
+    args_scrub_argv();
+    expect_true(a2[0] == '\0' && a2[4] == '\0', "inline token wiped from argv");
+    expect_true(a4[0] == '\0' && a4[3] == '\0' && a4[8] == '\0', "inline socks spec wiped from argv");
+    expect_string(a6, "127.0.0.1", "other arguments untouched");
+    expect_string(cfg.monitor_token, "topsecret", "token survives the argv wipe");
+    if (cfg.socks)
+        expect_string(cfg.socks->pass, "hunter2", "socks pass survives the argv wipe");
+    free_settings(&cfg);
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -1000,6 +1239,12 @@ int main(void)
     test_dns_cache_and_ttl_ranges();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();
+    test_monitor_token_file();
+    test_secret_file_contents();
+    test_secret_file_permissions();
+    test_socks_pass_file();
+    test_config_secret_files();
+    test_argv_scrub();
 
     return failures == 0 ? 0 : 1;
 }

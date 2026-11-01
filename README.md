@@ -167,8 +167,10 @@ use the key names in the last column.
 | `-c`, `--config` | path | Configuration file | — |
 | `-p`, `--port` | listeners | SNI listener definitions | `PORT` |
 | `-s`, `--socks` | host:port | SOCKS5 for SNI upstreams | `SOCKS` |
+| `-S`, `--sockspassfile` | path | Read the SOCKS5 password from the first line of a file; the `SOCKS` spec then has the form `user@host[:port]` | `SOCKSPASSFILE` |
 | `-m`, `--monitor` | `[ip:]port` | HTTP monitor listener | `MONITOR` |
 | `-k`, `--monitortoken` | token | Bearer token for the monitor | `MONITORTOKEN` |
+| `-K`, `--monitortokenfile` | path | Read the Bearer token from the first line of a file (max 256 bytes) | `MONITORTOKENFILE` |
 | `-a`, `--monitortimeout` | seconds | Incomplete monitor-header timeout | `MONITORTIMEOUT` |
 | `-o`, `--snitimeout` | seconds | SNI handshake, connect, and write-stall timeout | `SNITIMEOUT` |
 | `-I`, `--sniidletimeout` | `1..86400` | Close a relay with no traffic after this many seconds (default 300) | `SNIIDLETIMEOUT` |
@@ -179,6 +181,7 @@ use the key names in the last column.
 | `-d`, `--ldns` | bind:port | Local DNS listener (UDP and TCP) | `LDNS` |
 | `-u`, `--dns` | host[:port] | Upstream DNS server | `DNS` |
 | `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP | `DSOCKS` |
+| `-X`, `--dsockspassfile` | path | Read the DNS SOCKS5 password from the first line of a file; the `DSOCKS` spec then has the form `user@host[:port]` | `DSOCKSPASSFILE` |
 | `-t`, `--dtimeout` | seconds | DNS upstream timeout | `DTIMEOUT` |
 | `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
 | `-e`, `--dcache` | `0..65536` | DNS answer cache entries; `0` disables cache; counters are in the monitor | `DCACHE` |
@@ -187,6 +190,21 @@ use the key names in the last column.
 | `-R`, `--drate` | `0..100000` | Per-source DNS queries per second; `0` disables | `DRATE` |
 | `-C`, `--dnsconnections` | `1..96` | Maximum concurrent nonblocking TCP connections to the DNS upstream | `DNSCONNECTIONS` |
 | `-l`, `--log` | `0..5` | Log level | `LOG` |
+
+### Keeping secrets out of `ps`
+
+A SOCKS password or monitor token given with `-s`, `-x` or `-k` is visible to
+every local user in `/proc/PID/cmdline`. zroxy logs a warning, overwrites
+those arguments after parsing as a best effort, and prefers the file forms:
+`SOCKSPASSFILE`, `DSOCKSPASSFILE` and `MONITORTOKENFILE` read the first line
+of a file (trailing CR/LF removed, not empty, at most 255 bytes for a
+password and 256 for a token). Setting both the inline value and the file for
+the same secret is an error, and a password file needs a user in the spec
+(`SOCKS = alice@127.0.0.1:1080`). Secret files must be regular files and are
+refused when world-writable; group or world access logs a warning, so use
+`chmod 600`. A config file that holds a secret gets the same warning. The
+files are read once at startup, and the copies of the secrets in memory are
+wiped when freed.
 
 `LDNS` is the opt-in switch for the local DNS service. `DNS`, `DSOCKS`,
 `DTIMEOUT`, and `SNIP` require `LDNS`; when `LDNS` is set, an upstream `DNS`

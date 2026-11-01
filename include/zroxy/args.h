@@ -21,6 +21,9 @@ typedef struct
 	uint16_t	*monitorPort;
 	char		monitor_bind[ZROXY_MAX_IP_TEXT];
 	char		*monitor_token;
+	char		*monitor_token_file;
+	char		*socks_pass_file;
+	char		*dsocks_pass_file;
 	int			monitor_header_timeout;
 	char 		*WhitePath;
 	dnshost_t	*dnsserver;
@@ -36,6 +39,9 @@ bool args_validate(zroxy_t *pgp);
 void args_print_usage(void);
 void args_free_ports(zroxy_t *ptr);
 void args_free_dns(zroxy_t *ptr);
+void args_free_socks(zroxy_t *ptr);
+void args_free_monitor_token(zroxy_t *ptr);
+void args_scrub_argv(void);
 
 
 #endif /* ARGS_H_ */

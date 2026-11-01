@@ -15,6 +15,7 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 - `DRATE` can bound UDP work per source IP before it enters the DNS FIFO. It is not a complete abuse defense: source spoofing, the fixed-slot collision policy, and TCP's separate bounded path remain relevant. Rate drops are silent to the sender and visible as `RateDropped` in the monitor.
 - Forwarding copies the original client bytes after the hostname is taken from SNI or `Host`. The proxy does not re-encode that stream.
 - Config and SOCKS usernames are process memory. Passwords are not written to the log on the SOCKS handshake path. Config failures log the key, not the value.
+- A SOCKS password or monitor token on the command line is readable by every local user through `/proc/PID/cmdline` and `ps`. zroxy warns and overwrites the arguments after parsing (best effort: there is a short window at startup, and the SOCKS spec is cleared whole). Use `SOCKSPASSFILE`, `DSOCKSPASSFILE` and `MONITORTOKENFILE` instead. Those files must be regular files, are refused when world-writable and warned about when group or world accessible (so is a config file that contains a secret). Secret copies are wiped when freed; stdio buffers and the kernel's page cache are not.
 
 ## Parser and I/O controls
 

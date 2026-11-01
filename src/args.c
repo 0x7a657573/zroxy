@@ -19,8 +19,25 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <zroxy/config.h>
 
 #define ARGS_MAX_IDENT 255
+#define ARGS_MAX_TOKEN 256
+
+/* Secret option values on the command line, wiped by args_scrub_argv. */
+#define ARGS_MAX_ARGV_SECRETS 16
+static struct { char *ptr; size_t len; } argv_secrets[ARGS_MAX_ARGV_SECRETS];
+static size_t argv_secret_count;
+
+static void free_secret(char *s)
+{
+	if (s)
+		zroxy_wipe(s, strlen(s));
+	free(s);
+}
 
 static bool parse_u16(const char *str, uint16_t *out, uint16_t minv, uint16_t maxv)
 {
@@ -98,7 +115,7 @@ static void free_sockshost(sockshost_t *socks)
 		return;
 	free(socks->host);
 	free(socks->user);
-	free(socks->pass);
+	free_secret(socks->pass);
 	free(socks);
 }
 
@@ -109,6 +126,7 @@ static bool parse_ports(zroxy_t *ptr,char *str);
 static bool parse_socks(zroxy_t *ptr,char *str);
 static bool parse_monitor(zroxy_t *ptr,char *str);
 static bool parse_monitor_token(zroxy_t *ptr,char *str);
+static bool parse_secret_path(char **slot,char *str);
 static bool parse_monitor_timeout(zroxy_t *ptr,char *str);
 static bool parse_whitelist(zroxy_t *ptr,char *str);
 static bool parse_dns_server(zroxy_t *ptr,char *str);
@@ -171,6 +189,7 @@ static arg_option options[] =
 
 	{ "port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]", OPTION_SECTION_SNI },
 	{ "socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI },
+	{ "sockspassfile", 'S', "PATH", required_argument, "read the SOCKS5 password from the first line of PATH (spec: USER@HOST[:PORT])", OPTION_SECTION_SNI },
 	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
 	{ "sniidletimeout", 'I', "SECONDS", required_argument, "close a relay idle this long, 1..86400 (default: 300)", OPTION_SECTION_SNI },
 	{ "allowloopback", 'L', "yes|no", required_argument, "let client-supplied names reach loopback upstreams (default: no)", OPTION_SECTION_SNI },
@@ -181,6 +200,7 @@ static arg_option options[] =
 	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS },
 	{ "dns", 'u', "HOST[:PORT]", required_argument, "set the upstream DNS server (default port: 53)", OPTION_SECTION_DNS },
 	{ "dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS },
+	{ "dsockspassfile", 'X', "PATH", required_argument, "read the DNS SOCKS5 password from the first line of PATH", OPTION_SECTION_DNS },
 	{ "dtimeout", 't', "SECONDS", required_argument, "DNS upstream timeout (default: 5)", OPTION_SECTION_DNS },
 	{ "snip", 'i', "IPv4", required_argument, "synthetic address for whitelisted DNS names", OPTION_SECTION_DNS },
 	{ "dcache", 'e', "ENTRIES", required_argument, "DNS answer cache size, 0 disables (default: 2048)", OPTION_SECTION_DNS },
@@ -191,6 +211,7 @@ static arg_option options[] =
 
 	{ "monitor", 'm', "[BIND-IP:]PORT", required_argument, "enable the HTTP monitor (default bind: 127.0.0.1)", OPTION_SECTION_MONITOR },
 	{ "monitortoken", 'k', "TOKEN", required_argument, "require Bearer TOKEN for the monitor", OPTION_SECTION_MONITOR },
+	{ "monitortokenfile", 'K', "PATH", required_argument, "read the monitor Bearer token from the first line of PATH", OPTION_SECTION_MONITOR },
 	{ "monitortimeout", 'a', "SECONDS", required_argument, "incomplete-header timeout, 1..60 (default: 5)", OPTION_SECTION_MONITOR },
 
 	{ 0 }
@@ -241,6 +262,188 @@ void args_print_usage(void)
 	printf("  A configured service must start successfully; unconfigured services are skipped.\n");
 }
 
+/* True when a SOCKS spec carries a password: a ':' before the first '@'. */
+static bool socks_spec_has_pass(const char *spec)
+{
+	const char *at = spec ? strchr(spec, '@') : NULL;
+	const char *colon;
+	if (!at)
+		return false;
+	colon = memchr(spec, ':', (size_t)(at - spec));
+	return colon != NULL;
+}
+
+/*
+ * A secret given on the command line is visible to every local user in
+ * /proc/PID/cmdline until args_scrub_argv runs. Warn and remember where
+ * the bytes are; the string is not touched here because tests and other
+ * callers may pass read-only arguments.
+ */
+static void note_cli_secret(int key, char *arg)
+{
+	if (!arg || arg[0] == '\0')
+		return;
+	if (key != 'k' && !socks_spec_has_pass(arg))
+		return;
+	if (key == 'k')
+		log_warn("monitor token on the command line is visible to other local users; use MONITORTOKENFILE (--monitortokenfile)");
+	else if (key == 's')
+		log_warn("SOCKS password on the command line is visible to other local users; use SOCKSPASSFILE (--sockspassfile)");
+	else
+		log_warn("DNS SOCKS password on the command line is visible to other local users; use DSOCKSPASSFILE (--dsockspassfile)");
+	if (argv_secret_count < ARGS_MAX_ARGV_SECRETS)
+	{
+		argv_secrets[argv_secret_count].ptr = arg;
+		argv_secrets[argv_secret_count].len = strlen(arg);
+		argv_secret_count++;
+	}
+}
+
+/*
+ * Best effort: overwrite the secret option values that args_init saw on
+ * the command line, so /proc/PID/cmdline and ps stop showing them. Call it
+ * from main with the real argv, after args_init. Everything the parser
+ * keeps was copied already. A SOCKS spec is cleared whole, host included.
+ */
+void args_scrub_argv(void)
+{
+	for (size_t i = 0; i < argv_secret_count; i++)
+		zroxy_wipe(argv_secrets[i].ptr, argv_secrets[i].len);
+	argv_secret_count = 0;
+}
+
+/* Warn about loose permissions on an open file that holds a secret. */
+static void warn_secret_mode(const struct stat *st, const char *path, const char *what)
+{
+	if (st->st_mode & 077)
+		log_warn("%s %s is accessible by group or others (mode %04o); chmod 600 it", what, path, (unsigned)(st->st_mode & 07777));
+}
+
+/*
+ * Read the first line of a secret file: trailing CR/LF stripped, never
+ * empty, at most maxlen bytes. The permission check uses the open
+ * descriptor. Returns a malloc'd string or NULL (error already logged).
+ */
+static char *read_secret_file(const char *path, size_t maxlen, const char *what)
+{
+	char buf[ARGS_MAX_TOKEN + 3];
+	size_t cap = maxlen + 2;
+	size_t n = 0;
+	size_t len;
+	struct stat st;
+	char *out = NULL;
+	int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK);
+
+	if (fd < 0)
+	{
+		log_error("cannot open %s file %s", what, path);
+		return NULL;
+	}
+	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
+	{
+		log_error("%s file %s is not a regular file", what, path);
+		goto done;
+	}
+	if (st.st_mode & S_IWOTH)
+	{
+		log_error("%s file %s is world-writable (mode %04o); refusing it", what, path, (unsigned)(st.st_mode & 07777));
+		goto done;
+	}
+	warn_secret_mode(&st, path, what);
+	while (n < cap)
+	{
+		ssize_t r = read(fd, buf + n, cap - n);
+		if (r < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			log_error("cannot read %s file %s", what, path);
+			goto done;
+		}
+		if (r == 0)
+			break;
+		n += (size_t)r;
+	}
+	len = n;
+	for (size_t i = 0; i < n; i++)
+	{
+		if (buf[i] == '\n')
+		{
+			len = i;
+			break;
+		}
+	}
+	while (len > 0 && buf[len - 1] == '\r')
+		len--;
+	if (len == 0)
+	{
+		log_error("%s file %s is empty", what, path);
+		goto done;
+	}
+	if (len > maxlen || memchr(buf, '\0', len))
+	{
+		log_error("%s file %s has an invalid or too long first line (max %zu)", what, path, maxlen);
+		goto done;
+	}
+	out = malloc(len + 1);
+	if (out)
+	{
+		memcpy(out, buf, len);
+		out[len] = '\0';
+	}
+done:
+	zroxy_wipe(buf, sizeof(buf));
+	close(fd);
+	return out;
+}
+
+static bool load_socks_pass_file(sockshost_t *socks, char **path, const char *what)
+{
+	bool ok = false;
+	if (!*path)
+		return true;
+	if (!socks)
+		log_error("%s file is set but there is no matching SOCKS server", what);
+	else if (!socks->user)
+		log_error("%s file needs a user in the SOCKS spec (USER@HOST[:PORT])", what);
+	else if (socks->pass)
+		log_error("%s is set both inline and as a file; use one", what);
+	else
+	{
+		socks->pass = read_secret_file(*path, ARGS_MAX_IDENT, what);
+		ok = socks->pass != NULL;
+	}
+	free(*path);
+	*path = NULL;
+	return ok;
+}
+
+static bool load_secret_files(zroxy_t *ptr)
+{
+	bool ok = true;
+	if (!load_socks_pass_file(ptr->socks, &ptr->socks_pass_file, "SOCKS password"))
+		ok = false;
+	if (!load_socks_pass_file(ptr->dnsserver ? ptr->dnsserver->Socks : NULL, &ptr->dsocks_pass_file, "DNS SOCKS password"))
+		ok = false;
+	if (ptr->monitor_token_file)
+	{
+		if (ptr->monitor_token)
+		{
+			log_error("monitor token is set both inline and as a file; use one");
+			ok = false;
+		}
+		else
+		{
+			ptr->monitor_token = read_secret_file(ptr->monitor_token_file, ARGS_MAX_TOKEN, "monitor token");
+			if (!ptr->monitor_token)
+				ok = false;
+		}
+		free(ptr->monitor_token_file);
+		ptr->monitor_token_file = NULL;
+	}
+	return ok;
+}
+
 bool args_init(zroxy_t *pgp,int argc, const char **argv)
 {
 	pgp->snitimeout = 30;
@@ -250,7 +453,11 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 	pgp->open_proxy = false;
 	pgp->monitor_header_timeout = 5;
 	pgp->monitor_bind[0] = '\0';
+	argv_secret_count = 0;
 	pgp->monitor_token = NULL;
+	pgp->monitor_token_file = NULL;
+	pgp->socks_pass_file = NULL;
+	pgp->dsocks_pass_file = NULL;
 	pgp->ports = NULL;
 	pgp->socks = NULL;
 	pgp->monitorPort = NULL;
@@ -296,7 +503,9 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 		int key = getopt_long(argc, (char **)argv, optstring, x_options, &option_index);
 		if (key == -1)
             break;
-		
+
+		if (key == 's' || key == 'x' || key == 'k')
+			note_cli_secret(key, optarg);
 		if(parse_opt(key, optarg, pgp)!=0)
 		{
 			log_error("error invalid option or value");
@@ -313,6 +522,8 @@ bool args_validate(zroxy_t *ptr)
 
 	if (!ptr)
 		return true;
+	if (!load_secret_files(ptr))
+		return false;
 	if (ptr->ports && !ptr->WhitePath)
 	{
 		if (!ptr->open_proxy)
@@ -360,6 +571,9 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 's': if (!parse_socks(setting,arg)) return -1; break;
 		case 'm': if (!parse_monitor(setting,arg)) return -1; break;
 		case 'k': if (!parse_monitor_token(setting,arg)) return -1; break;
+		case 'K': if (!parse_secret_path(&setting->monitor_token_file,arg)) return -1; break;
+		case 'S': if (!parse_secret_path(&setting->socks_pass_file,arg)) return -1; break;
+		case 'X': if (!parse_secret_path(&setting->dsocks_pass_file,arg)) return -1; break;
 		case 'a': if (!parse_monitor_timeout(setting,arg)) return -1; break;
 		case 'w': if (!parse_whitelist(setting,arg)) return -1; break;
 		case 'd': if (!parse_dns_server(setting,arg)) return -1; break;
@@ -469,7 +683,9 @@ static bool config_key_chars(const char *key)
 bool args_parse_config(zroxy_t *ptr,char *str)
 {
 	FILE *ConfigFile;
+	int cfd;
 	bool ret_status = true;
+	bool secret_seen = false;
 	size_t len = 0;
 	char *line = NULL;
 	ssize_t read;
@@ -479,9 +695,12 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 	while(*str==' ') str++; /*remove space*/
 	if (*str == '\0')
 		return false;
-	ConfigFile  = fopen(str, "r"); // read only
+	cfd = open(str, O_RDONLY | O_CLOEXEC);
+	ConfigFile = cfd >= 0 ? fdopen(cfd, "r") : NULL;
 	if(ConfigFile==NULL)
 	{
+		if (cfd >= 0)
+			close(cfd);
 		log_error("config file not found");
 		return false;
 	}
@@ -524,6 +743,15 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 			break;
 		}
 
+		if (!secret_seen && (ckey == 'k' ||
+		    ((ckey == 's' || ckey == 'x') && socks_spec_has_pass(fix_val))))
+		{
+			struct stat st;
+			secret_seen = true;
+			if (fstat(cfd, &st) == 0)
+				warn_secret_mode(&st, str, "config file with a secret:");
+		}
+
 		if(parse_opt(ckey, fix_val, ptr)!=0)
 		{
 			log_error("error invalid value in config for key %s", fix_key);
@@ -532,6 +760,8 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 		}
 	}
 
+	if (line)
+		zroxy_wipe(line, len);
 	free(line);
 	fclose(ConfigFile);
 	return ret_status;
@@ -584,11 +814,21 @@ static bool parse_monitor(zroxy_t *ptr,char *str)
 
 static bool parse_monitor_token(zroxy_t *ptr,char *str)
 {
-	char *token = dup_bounded(str, 256);
+	char *token = dup_bounded(str, ARGS_MAX_TOKEN);
 	if (!token)
 		return false;
-	free(ptr->monitor_token);
+	free_secret(ptr->monitor_token);
 	ptr->monitor_token = token;
+	return true;
+}
+
+static bool parse_secret_path(char **slot,char *str)
+{
+	char *path = dup_bounded(str, ZROXY_MAX_CONFIG_VALUE);
+	if (!path)
+		return false;
+	free(*slot);
+	*slot = path;
 	return true;
 }
 
@@ -779,7 +1019,7 @@ static bool fill_sockshost(sockshost_t *socks, char *str)
 			if (!user || !pass)
 			{
 				free(user);
-				free(pass);
+				free_secret(pass);
 				return false;
 			}
 		}
@@ -798,7 +1038,7 @@ static bool fill_sockshost(sockshost_t *socks, char *str)
 		if (!parse_u16(endname, &port, 1, 65535))
 		{
 			free(user);
-			free(pass);
+			free_secret(pass);
 			return false;
 		}
 	}
@@ -806,7 +1046,7 @@ static bool fill_sockshost(sockshost_t *socks, char *str)
 	if (!host)
 	{
 		free(user);
-		free(pass);
+		free_secret(pass);
 		return false;
 	}
 
@@ -914,16 +1154,25 @@ void args_free_ports(zroxy_t *ptr)
 	ptr->ports = NULL;
 }
 
+void args_free_socks(zroxy_t *ptr)
+{
+	free_sockshost(ptr->socks);
+	ptr->socks = NULL;
+}
+
+void args_free_monitor_token(zroxy_t *ptr)
+{
+	free_secret(ptr->monitor_token);
+	ptr->monitor_token = NULL;
+}
+
 void args_free_dns(zroxy_t *ptr)
 {
 	if(ptr->dnsserver)
 	{
 		if(ptr->dnsserver->Socks)
 		{
-			free(ptr->dnsserver->Socks->host);
-			free(ptr->dnsserver->Socks->user);
-			free(ptr->dnsserver->Socks->pass);
-			free(ptr->dnsserver->Socks);
+			free_sockshost(ptr->dnsserver->Socks);
 		}
 		free(ptr->dnsserver->acl);
 		free(ptr->dnsserver);
