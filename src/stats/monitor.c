@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <zroxy/monitor.h>
+#include <zroxy/config.h>
 #include <zroxy/log.h>
 #include <zroxy/net.h>
 #include <inttypes.h>
@@ -231,6 +232,13 @@ static char *mon_dup_token(const char *src)
 	return out;
 }
 
+static void mon_free_token(char *token)
+{
+	if (token)
+		zroxy_wipe(token, strlen(token));
+	free(token);
+}
+
 static void *monitor_accept_thread(void *vargp);
 static int count_open_files(void);
 
@@ -279,7 +287,7 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	{
 		log_error("monitor mutex init failed");
 		close(sockfd);
-		free(mon->token);
+		mon_free_token(mon->token);
 		free(mon);
 		return NULL;
 	}
@@ -297,7 +305,7 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 		log_error("monitor thread create failed");
 		close(sockfd);
 		pthread_mutex_destroy(&mon->stats_lock);
-		free(mon->token);
+		mon_free_token(mon->token);
 		free(mon);
 		return NULL;
 	}

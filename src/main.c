@@ -70,7 +70,9 @@ int main(int argc, const char **argv)
 	sigaddset(&sigs, SIGHUP);
 	pthread_sigmask(SIG_BLOCK, &sigs, NULL);
 
-	if(args_init(&prg_setting,argc,argv)==false)
+	bool args_ok = args_init(&prg_setting,argc,argv);
+	args_scrub_argv();
+	if(args_ok==false)
 	{
 		args_print_usage();
 		return 1;
@@ -101,6 +103,7 @@ int main(int argc, const char **argv)
 		const char *bind_ip = prg_setting.monitor_bind[0] ? prg_setting.monitor_bind : "127.0.0.1";
 		log_info("enable monitor on %s:%i", bind_ip, *prg_setting.monitorPort);
 		monitor = monitor_init(*prg_setting.monitorPort, bind_ip, prg_setting.monitor_token, prg_setting.monitor_header_timeout);
+		args_free_monitor_token(&prg_setting); /*monitor keeps its own copy*/
 		if (!monitor)
 		{
 			log_error("monitor failed to start");
@@ -196,6 +199,8 @@ out:
 	dnsserver_stop(dns);
 	args_free_ports(&prg_setting);
 	args_free_dns(&prg_setting);
+	args_free_socks(&prg_setting);
+	args_free_monitor_token(&prg_setting);
 	if (rc == 0)
 		log_info("zroxy stopped");
 	return rc;

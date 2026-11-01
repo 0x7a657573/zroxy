@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -893,9 +894,99 @@ static void test_monitor_auth_and_path(const char *logpath)
     expect_true(http_exchange(port, ok, response, sizeof(response), &n), "authorized request returns a body");
     expect_true(content_length_matches(response), "authorized monitor Content-Length matches the JSON body");
     expect_true(!log_has_sanitizer(logpath), "authenticated monitor stays free of sanitizer reports");
+    {
+        char path[64];
+        char cmdline[1024];
+        ssize_t got = -1;
+        int cfd;
+        snprintf(path, sizeof(path), "/proc/%d/cmdline", (int)pid);
+        cfd = open(path, O_RDONLY);
+        if (cfd >= 0)
+        {
+            got = read(cfd, cmdline, sizeof(cmdline) - 1);
+            close(cfd);
+        }
+        if (got >= 0)
+        {
+            bool leaked = false;
+            cmdline[got] = '\0';
+            for (ssize_t off = 0; off < got; off += (ssize_t)strlen(cmdline + off) + 1)
+                if (strstr(cmdline + off, "secret"))
+                    leaked = true;
+            expect_true(!leaked, "inline monitor token is gone from /proc cmdline");
+        }
+    }
     if (failures != before)
         dump_log(logpath);
     stop_child(pid);
+}
+
+static void test_monitor_token_file(const char *logpath)
+{
+    uint16_t port = 0;
+    char port_text[8];
+    char tokfile[] = "/tmp/zroxy_token_XXXXXX";
+    char *argv[6];
+    pid_t pid;
+    char response[8192];
+    size_t n = 0;
+    int before = failures;
+    int tfd = mkstemp(tokfile);
+    char wrong[] = "GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer nope\r\n\r\n";
+    char ok[] = "GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer filesecret\r\n\r\n";
+
+    expect_true(tfd >= 0, "create monitor token file");
+    if (tfd < 0)
+        return;
+    expect_true(write(tfd, "filesecret\r\n", 12) == 12, "write monitor token file");
+    expect_true(fchmod(tfd, 0600) == 0, "restrict monitor token file");
+    close(tfd);
+    expect_true(reserve_port(&port), "reserve token file monitor port");
+    snprintf(port_text, sizeof(port_text), "%u", port);
+    argv[0] = ZROXY_BIN;
+    argv[1] = "--monitortokenfile";
+    argv[2] = tokfile;
+    argv[3] = "-m";
+    argv[4] = port_text;
+    argv[5] = NULL;
+    pid = spawn_child(argv, logpath);
+    expect_true(pid > 0, "start monitor with a token file");
+    if (pid <= 0)
+    {
+        unlink(tokfile);
+        return;
+    }
+
+    expect_true(http_exchange(port, wrong, response, sizeof(response), &n), "wrong token against token file returns a response");
+    expect_true(strncmp(response, "HTTP/1.1 401", 12) == 0, "wrong token against token file is 401");
+    expect_true(http_exchange(port, ok, response, sizeof(response), &n), "token from file returns a response");
+    expect_true(strncmp(response, "HTTP/1.1 200", 12) == 0, "token from file is accepted");
+    if (failures != before)
+        dump_log(logpath);
+    stop_child(pid);
+    unlink(tokfile);
+}
+
+static void test_token_file_world_writable_refused(const char *logpath)
+{
+    char tokfile[] = "/tmp/zroxy_token_XXXXXX";
+    char *argv[6];
+    int tfd = mkstemp(tokfile);
+
+    expect_true(tfd >= 0, "create world-writable token file");
+    if (tfd < 0)
+        return;
+    expect_true(write(tfd, "tok\n", 4) == 4, "write world-writable token file");
+    expect_true(fchmod(tfd, 0666) == 0, "loosen token file");
+    close(tfd);
+    argv[0] = ZROXY_BIN;
+    argv[1] = "-K";
+    argv[2] = tokfile;
+    argv[3] = "-m";
+    argv[4] = "18999";
+    argv[5] = NULL;
+    test_exit_code_log(argv, logpath, "world-writable token file is refused", "world-writable");
+    unlink(tokfile);
 }
 
 static void test_monitor_slow_clients(const char *logpath)
@@ -1128,6 +1219,8 @@ int main(void)
     test_monitor_explicit_bind(logpath);
     test_phase = "monitor authentication";
     test_monitor_auth_and_path(logpath);
+    test_monitor_token_file(logpath);
+    test_token_file_world_writable_refused(logpath);
     test_phase = "slow monitor clients";
     test_monitor_slow_clients(logpath);
     test_phase = "header deadline";

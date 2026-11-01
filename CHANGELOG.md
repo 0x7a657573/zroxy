@@ -4,6 +4,23 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
 
 ## Unreleased
 
+### Security
+
+- Add `SOCKSPASSFILE` / `--sockspassfile` (`-S`), `DSOCKSPASSFILE` /
+  `--dsockspassfile` (`-X`) and `MONITORTOKENFILE` / `--monitortokenfile`
+  (`-K`) to read the SOCKS5 password (SNI and DNS) and the monitor Bearer
+  token from the first line of a file, so they stay out of `ps` and
+  `/proc/PID/cmdline`. Trailing CR/LF is stripped; empty or over-long
+  values (255 bytes for a password, 256 for a token) are rejected; setting
+  both the inline secret and the file is an error; a password file needs a
+  user in the spec (`USER@HOST`). Secret files must be regular files and are
+  refused when world-writable; group or world access logs a warning, as
+  does a config file that holds a secret.
+- Warn when a SOCKS password or monitor token is given on the command line,
+  and overwrite those arguments after parsing (best effort).
+- Wipe SOCKS passwords, monitor tokens and the config-line buffer when they
+  are freed.
+
 ### SNI
 
 - Breaking: refuse to start when SNI listeners (`PORT`) are configured
