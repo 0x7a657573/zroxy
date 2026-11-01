@@ -448,6 +448,23 @@ static bool load_secret_files(zroxy_t *ptr)
 	return ok;
 }
 
+/*
+ * The config files being read, outermost first: a file that names itself or
+ * an ancestor, or a chain deeper than ARGS_MAX_CONFIG_DEPTH, would recurse
+ * until the stack ran out. Files are told apart by device and inode of the
+ * descriptor that was opened, so a symlink or another path to the same file
+ * is caught too. Parsing is single threaded and finishes before any worker
+ * starts.
+ */
+#define ARGS_MAX_CONFIG_DEPTH 8
+
+static struct
+{
+	dev_t dev;
+	ino_t ino;
+} config_chain[ARGS_MAX_CONFIG_DEPTH];
+static unsigned config_depth;
+
 bool args_init(zroxy_t *pgp,int argc, const char **argv)
 {
 	pgp->snitimeout = 30;
@@ -463,6 +480,7 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 	pgp->monitor_header_timeout = 5;
 	pgp->monitor_bind[0] = '\0';
 	argv_secret_count = 0;
+	config_depth = 0;
 	pgp->monitor_token = NULL;
 	pgp->monitor_token_file = NULL;
 	pgp->socks_pass_file = NULL;
@@ -769,7 +787,9 @@ static bool config_key_chars(const char *key)
 bool args_parse_config(zroxy_t *ptr,char *str)
 {
 	FILE *ConfigFile;
+	struct stat st;
 	int cfd;
+	unsigned i;
 	bool ret_status = true;
 	bool secret_seen = false;
 	size_t len = 0;
@@ -790,6 +810,30 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 		log_error("config file not found");
 		return false;
 	}
+	if (fstat(cfd, &st) != 0)
+	{
+		log_error("config file not readable");
+		fclose(ConfigFile);
+		return false;
+	}
+	if (config_depth >= ARGS_MAX_CONFIG_DEPTH)
+	{
+		log_error("config files nested more than %d deep", ARGS_MAX_CONFIG_DEPTH);
+		fclose(ConfigFile);
+		return false;
+	}
+	for (i = 0; i < config_depth; i++)
+	{
+		if (config_chain[i].dev == st.st_dev && config_chain[i].ino == st.st_ino)
+		{
+			log_error("config file includes itself: %s", str);
+			fclose(ConfigFile);
+			return false;
+		}
+	}
+	config_chain[config_depth].dev = st.st_dev;
+	config_chain[config_depth].ino = st.st_ino;
+	config_depth++;
 
 	/*read and load config from file*/
 	while ((read = getline(&line, &len, ConfigFile)) != -1)
@@ -832,7 +876,6 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 		if (!secret_seen && (ckey == 'k' ||
 		    ((ckey == 's' || ckey == 'x') && socks_spec_has_pass(fix_val))))
 		{
-			struct stat st;
 			secret_seen = true;
 			if (fstat(cfd, &st) == 0)
 				warn_secret_mode(&st, str, "config file with a secret:");
@@ -850,6 +893,7 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 		zroxy_wipe(line, len);
 	free(line);
 	fclose(ConfigFile);
+	config_depth--;
 	return ret_status;
 }
 
