@@ -51,8 +51,9 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
 - Add a `Process` object to the report with `Pid`, `StartTime`, `UpTime`,
   `OpenFiles`, `MaxOpenFiles`, `Threads`, `RssBytes`, `PeakRssBytes`,
   `CpuUserMs`, and `CpuSystemMs`. `Threads` and `RssBytes` are read from
-  `/proc/self/status` and are omitted on other systems. `CountOfOpenFile`
-  stays at the top level.
+  `/proc/self/status` and are omitted on other systems. `PeakRssBytes` is
+  `VmHWM` on Linux and `getrusage` elsewhere. `CountOfOpenFile` stays at the
+  top level.
 - Add a `Whitelist` object, present when a whitelist file is configured, with
   `Entries`, `Reloads`, `ReloadFailures`, and `LastReload` (unix time, `0`
   when the list has not been reloaded since start). Reloads triggered by the

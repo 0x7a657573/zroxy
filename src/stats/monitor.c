@@ -524,8 +524,8 @@ static long long mon_status_value(const char *text, const char *key)
 	return v;
 }
 
-/* Threads and resident set size; -1 when /proc/self/status is unreadable. */
-static void mon_read_status(long long *threads, long long *rss_kib)
+/* Threads and current/peak resident set size; -1 when unreadable. */
+static void mon_read_status(long long *threads, long long *rss_kib, long long *hwm_kib)
 {
 	char text[8192];
 	ssize_t n;
@@ -533,6 +533,7 @@ static void mon_read_status(long long *threads, long long *rss_kib)
 
 	*threads = -1;
 	*rss_kib = -1;
+	*hwm_kib = -1;
 	fd = open("/proc/self/status", O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
 		return;
@@ -543,6 +544,7 @@ static void mon_read_status(long long *threads, long long *rss_kib)
 	text[n] = '\0';
 	*threads = mon_status_value(text, "\nThreads:");
 	*rss_kib = mon_status_value(text, "\nVmRSS:");
+	*hwm_kib = mon_status_value(text, "\nVmHWM:");
 }
 #endif
 
@@ -578,8 +580,15 @@ static bool mon_process_json(char **ptr, char *end, int open_files)
 	{
 		long long threads;
 		long long rss_kib;
+		long long hwm_kib;
 
-		mon_read_status(&threads, &rss_kib);
+		mon_read_status(&threads, &rss_kib, &hwm_kib);
+		/*
+		 * ru_maxrss survives exec, so it can hold the parent's peak;
+		 * VmHWM belongs to this process image only.
+		 */
+		if (hwm_kib >= 0)
+			peak_kib = hwm_kib;
 		if (threads >= 0)
 			ok = mon_append(ptr, end, "\"Threads\" : %lld ,\n", threads);
 		if (ok && rss_kib >= 0)
