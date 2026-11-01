@@ -746,6 +746,8 @@ sequenceDiagram
             S-->>W: counter snapshot
         end
         W-->>C: JSON response and close
+    else report exceeds 16 KiB
+        W-->>C: empty 500 response, logged once
     end
     W->>W: close fd and release worker slot
 ```
@@ -753,6 +755,13 @@ sequenceDiagram
 The monitor accepts only `GET /` with HTTP/1.0 or HTTP/1.1. A configured
 Bearer token is required before counters are emitted. Without a token, anyone
 who can reach the monitor socket can read the counters.
+
+The JSON is formatted into one 16 KiB stack buffer. The response head is built
+in reserved space in front of the body, so the head and body leave in a single
+write. All head lines end with CRLF and carry `Connection: close`; the 200
+response also carries `Cache-Control: no-store`. If a statistics object or an
+extra hook cannot append, nothing has been sent yet, so the worker answers an
+empty 500 and logs the overflow once.
 
 The monitor uses two lock levels:
 

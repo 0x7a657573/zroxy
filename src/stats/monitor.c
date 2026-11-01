@@ -27,6 +27,9 @@
 
 #define MON_MAX_WORKERS 32
 #define MON_MAX_HEADER 4096
+/* JSON body limit, and room in front of it for the response head. */
+#define MON_MAX_BODY 16384
+#define MON_HEAD_ROOM 256
 
 static pthread_mutex_t mon_worker_mu = PTHREAD_MUTEX_INITIALIZER;
 static int mon_workers = 0;
@@ -196,8 +199,10 @@ static void mon_send_empty(int fd, int code, int timeout_sec)
 		text = "404 Not Found";
 	else if (code == 405)
 		text = "405 Method Not Allowed";
+	else if (code == 500)
+		text = "500 Internal Server Error";
 	n = snprintf(msg, sizeof(msg),
-		"HTTP/1.1 %s\nContent-Length: 0\nConnection: Closed\n\n", text);
+		"HTTP/1.1 %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", text);
 	if (n < 0 || (size_t)n >= sizeof(msg))
 		return;
 	ms = net_timeout_ms(timeout_sec);
@@ -468,11 +473,23 @@ static bool mon_append(char **ptr, char *end, const char *fmt, ...)
 	return true;
 }
 
+static int mon_overflow_logged;
+
+/* Nothing has been written yet, so the client can still get a 500. */
+static void mon_report_failed(int fd, mon_t *owner)
+{
+	if (!__atomic_exchange_n(&mon_overflow_logged, 1, __ATOMIC_RELAXED))
+		log_error("monitor report does not fit in %d bytes", MON_MAX_BODY);
+	mon_send_empty(fd, 500, owner->header_timeout);
+}
+
 static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 {
-	char message[4096];
+	/* The head is built in front of the body so one write sends both. */
+	char response[MON_HEAD_ROOM + MON_MAX_BODY];
+	char *message = response + MON_HEAD_ROOM;
 	char *ptr = message;
-	char *end = message + sizeof(message);
+	char *end = message + MON_MAX_BODY;
 	statistics_t *stat = NULL;
 	(void)data;
 	(void)len;
@@ -483,10 +500,12 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 	stat = owner->state;
 	pthread_mutex_unlock(&owner->stats_lock);
 
-	memset(message, 0, sizeof(message));
 	if (!mon_append(&ptr, end, "{\n\"ZroxyVersion\" : \"%s\",\n", version) ||
 	    !mon_append(&ptr, end, "\"CountOfOpenFile\" : %i,\n", count_open_files()))
+	{
+		mon_report_failed(fd, owner);
 		return;
+	}
 	
 	statistics_t *sta = stat;
 	while(sta)
@@ -518,27 +537,37 @@ static void monitor_send_report(int fd,uint8_t *data,int len,mon_t *owner)
 			ok = mon_append(&ptr, end, "\n},\n");
 		pthread_mutex_unlock(&sta->Lock);
 		if (!ok)
+		{
+			mon_report_failed(fd, owner);
 			return;
+		}
 
 		sta = (statistics_t*)sta->next;
 	}
 
 	if (ptr - message < 2)
+	{
+		mon_report_failed(fd, owner);
 		return;
+	}
 	memcpy(ptr - 2, "\n}", 3);
 
 	{
-		char httpMessage[8000];
-		int body_len = (int)(ptr - message);
-		int slen;
-		if (body_len < 0)
+		char head[MON_HEAD_ROOM];
+		size_t body_len = (size_t)(ptr - message);
+		int hlen;
+
+		hlen = snprintf(head, sizeof(head),
+			"HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\n"
+			"Content-Length: %zu\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+			body_len);
+		if (hlen < 0 || (size_t)hlen >= sizeof(head))
+		{
+			mon_report_failed(fd, owner);
 			return;
-		slen = snprintf(httpMessage, sizeof(httpMessage),
-			"HTTP/1.1 200 OK\nContent-Type: application/json; charset=UTF-8\nContent-Length: %i\nConnection: Closed\n\n%s",
-			body_len, message);
-		if (slen < 0 || (size_t)slen >= sizeof(httpMessage))
-			return;
-		net_write_all_ms(fd, httpMessage, (size_t)slen,
+		}
+		memcpy(message - hlen, head, (size_t)hlen);
+		net_write_all_ms(fd, message - hlen, (size_t)hlen + body_len,
 			net_timeout_ms(owner->header_timeout));
 	}
 }

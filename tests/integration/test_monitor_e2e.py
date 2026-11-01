@@ -198,9 +198,32 @@ def test_dns_timeout_is_not_also_an_error():
         proc.check_alive()
 
 
+def test_monitor_http_framing():
+    with zroxy_lab.Lab() as lab:
+        mon_port = zroxy_lab.free_tcp_port()
+        lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
+        got = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)
+        headers = got["headers"]
+        if headers.get("connection") != "close":
+            raise AssertionError("Connection header is %r" % headers.get("connection"))
+        if headers.get("cache-control") != "no-store":
+            raise AssertionError("Cache-Control header is %r" % headers.get("cache-control"))
+        if not headers.get("content-type", "").startswith("application/json"):
+            raise AssertionError("Content-Type header is %r" % headers.get("content-type"))
+        if not got["closed"]:
+            raise AssertionError("monitor did not close the connection")
+        data, closed = zroxy_lab.tcp_exchange(
+            "127.0.0.1", mon_port, b"GET /nope HTTP/1.1\r\nHost: x\r\n\r\n", timeout=2.0)
+        expected = (b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n")
+        if data != expected or not closed:
+            raise AssertionError("unexpected 404 response %r" % data)
+
+
 def main():
     failed = 0
-    for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error):
+    for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error,
+                 test_monitor_http_framing):
         try:
             test()
         except Exception:

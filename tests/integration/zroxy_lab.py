@@ -416,18 +416,22 @@ def fetch_monitor(port, timeout=3.0):
             if len(buf) > 1024 * 1024:
                 break
         raw = bytes(buf)
-        sep = raw.find(b"\n\n")
+        sep = raw.find(b"\r\n\r\n")
         if sep < 0:
-            raise LabError("monitor response has no header terminator: %r" % raw[:200])
+            raise LabError("monitor response has no CRLF header terminator: %r" % raw[:200])
         head = raw[:sep].decode("iso-8859-1", "replace")
-        body = raw[sep + 2:]
-        status = head.split("\n", 1)[0]
-        if not status.startswith("HTTP/1.1 200"):
+        body = raw[sep + 4:]
+        if "\n" in head.replace("\r\n", ""):
+            raise LabError("monitor header has a bare LF: %r" % head)
+        lines = head.split("\r\n")
+        status = lines[0]
+        if status != "HTTP/1.1 200 OK":
             raise LabError("monitor status %r" % status)
-        length = None
-        for line in head.split("\n"):
-            if line.lower().startswith("content-length:"):
-                length = int(line.split(":", 1)[1].strip())
+        headers = {}
+        for line in lines[1:]:
+            name, _, value = line.partition(":")
+            headers[name.strip().lower()] = value.strip()
+        length = int(headers["content-length"]) if "content-length" in headers else None
         if length is not None and length != len(body):
             raise LabError(
                 "monitor Content-Length %s does not match body %s" % (length, len(body))
@@ -436,7 +440,7 @@ def fetch_monitor(port, timeout=3.0):
             doc = json.loads(body.decode("utf-8"))
         except ValueError as exc:
             raise LabError("monitor body is not JSON: %r" % body[:300]) from exc
-        return {"raw": raw, "closed": closed, "json": doc}
+        return {"raw": raw, "closed": closed, "json": doc, "headers": headers}
     finally:
         sock.close()
 
