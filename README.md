@@ -164,7 +164,7 @@ use the key names in the last column.
 
 | Option | Argument | Description | Config key |
 | --- | --- | --- | --- |
-| `-c`, `--config` | path | Configuration file | — |
+| `-c`, `--config` | path | Configuration file; a file may load another with `CONFIG`, up to 8 files deep, and a file that is already being read is an error | `CONFIG` |
 | `-p`, `--port` | listeners | SNI listener definitions | `PORT` |
 | `-s`, `--socks` | host:port | SOCKS5 for SNI upstreams | `SOCKS` |
 | `-S`, `--sockspassfile` | path | Read the SOCKS5 password from the first line of a file; the `SOCKS` spec then has the form `user@host[:port]` | `SOCKSPASSFILE` |

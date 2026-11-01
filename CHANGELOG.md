@@ -127,6 +127,12 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   uses (or the reverse), is rejected when the config is parsed instead of
   failing later in `bind`. A list with a bad entry is rejected whole and
   leaves the earlier listeners unchanged.
+- A config file that names itself with the `config` key (or A names B names
+  A) no longer recurses until the stack overflows. zroxy refuses a file that
+  is already being read, matched by device and inode so symlinks and other
+  paths to it count, and refuses a chain of more than 8 config files. Both
+  are start-up errors. The same file included twice one after the other is
+  still fine.
 
 ### Tests
 

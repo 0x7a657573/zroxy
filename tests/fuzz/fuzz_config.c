@@ -3,12 +3,14 @@
  * (src/filter/filter.c), fed the same input as a file.
  *
  * The input is written to a memfd and opened by its /proc path, which is how
- * both parsers take their input. Inputs that name the "config" key (it loads
- * another file, and a file that names itself recurses without bound) or the
- * "help" key (it prints usage and calls exit) are skipped.
+ * both parsers take their input. The memfd is always dup'ed to descriptor
+ * FUZZ_FD, so an input can name itself as "config = /proc/self/fd/100" and
+ * reach the include-cycle check. Inputs that name the "help" key (it prints
+ * usage and calls exit) are skipped.
  */
 #define _GNU_SOURCE
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -25,6 +27,7 @@
 
 #define MAX_FILE (64u * 1024u)
 #define MAX_LINES 64u
+#define FUZZ_FD 100	/* where make_file leaves the input; seeds name it */
 
 bool args_parse_config(zroxy_t *ptr, char *str);	/* not in args.h */
 
@@ -64,6 +67,15 @@ static int make_file(const uint8_t *data, size_t size, char *path, size_t cap)
 		}
 		done += (size_t)n;
 	}
+	/* a fixed, high descriptor, so a seed can name its own file */
+	{
+		int high = fcntl(fd, F_DUPFD_CLOEXEC, FUZZ_FD);
+
+		close(fd);
+		fd = high;
+	}
+	if (fd < 0)
+		return -1;
 	snprintf(path, cap, "/proc/self/fd/%d", fd);
 	return fd;
 }
@@ -144,7 +156,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	fuzz_init_once();
 	if (size > MAX_FILE)
 		size = MAX_FILE;
-	if (count_icase(data, size, "config") || count_icase(data, size, "help"))
+	if (count_icase(data, size, "help"))
 		return 0;
 	in = fuzz_dup(data, size);
 	fd = make_file(in, size, path, sizeof(path));

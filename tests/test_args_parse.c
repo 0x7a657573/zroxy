@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <limits.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1142,6 +1143,176 @@ static void test_port_failure_keeps_earlier_list(void)
     free_settings(&cfg);
 }
 
+/*
+ * Make count files dir/f0 .. dir/f(count-1) in a fresh temp directory. File
+ * i names file i+1 with the config key; the last one holds a listener, or
+ * names file last_to when that is not negative.
+ */
+static bool make_chain(char *dir, int count, int last_to)
+{
+    char path[PATH_MAX];
+    int i;
+
+    if (!mkdtemp(dir))
+    {
+        fprintf(stderr, "FAIL: mkdtemp failed: %s\n", strerror(errno));
+        failures++;
+        return false;
+    }
+    for (i = 0; i < count; i++)
+    {
+        char data[PATH_MAX + 32];
+        int fd;
+
+        snprintf(path, sizeof(path), "%s/f%d", dir, i);
+        if (i + 1 < count)
+            snprintf(data, sizeof(data), "config = %s/f%d\n", dir, i + 1);
+        else if (last_to >= 0)
+            snprintf(data, sizeof(data), "config = %s/f%d\n", dir, last_to);
+        else
+            snprintf(data, sizeof(data), "PORT = 127.0.0.1:8080\n");
+        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: open %s failed: %s\n", path, strerror(errno));
+            failures++;
+            return false;
+        }
+        write_all_or_fail(fd, data);
+        close(fd);
+    }
+    return true;
+}
+
+static void drop_chain(const char *dir, int count)
+{
+    char path[PATH_MAX];
+    int i;
+
+    for (i = 0; i < count; i++)
+    {
+        snprintf(path, sizeof(path), "%s/f%d", dir, i);
+        unlink(path);
+    }
+    rmdir(dir);
+}
+
+/* Parse dir/f0; true when it was accepted. */
+static bool parse_chain(const char *dir, zroxy_t *cfg)
+{
+    char path[PATH_MAX];
+
+    snprintf(path, sizeof(path), "%s/f0", dir);
+    return args_parse_config(cfg, path);
+}
+
+static void test_config_includes_itself(void)
+{
+    zroxy_t cfg = {0};
+    char dir[] = "/tmp/zroxy_args_dir_XXXXXX";
+
+    if (!make_chain(dir, 1, 0))
+        return;
+    expect_true(!parse_chain(dir, &cfg), "config naming itself is rejected");
+    free_settings(&cfg);
+    drop_chain(dir, 1);
+}
+
+static void test_config_include_cycle(void)
+{
+    zroxy_t cfg = {0};
+    char dir[] = "/tmp/zroxy_args_dir_XXXXXX";
+    char link[PATH_MAX];
+
+    if (!make_chain(dir, 2, 0))
+        return;
+    expect_true(!parse_chain(dir, &cfg), "A -> B -> A is rejected");
+    free_settings(&cfg);
+
+    /* the same file by another name is the same file */
+    snprintf(link, sizeof(link), "%s/alias", dir);
+    if (symlink("f0", link) == 0)
+    {
+        char path[PATH_MAX];
+        int fd;
+
+        snprintf(path, sizeof(path), "%s/f1", dir);
+        fd = open(path, O_WRONLY | O_TRUNC);
+        if (fd >= 0)
+        {
+            char data[PATH_MAX + 32];
+
+            snprintf(data, sizeof(data), "config = %s\n", link);
+            write_all_or_fail(fd, data);
+            close(fd);
+            memset(&cfg, 0, sizeof(cfg));
+            expect_true(!parse_chain(dir, &cfg), "cycle through a symlink is rejected");
+            free_settings(&cfg);
+        }
+        unlink(link);
+    }
+    drop_chain(dir, 2);
+}
+
+static void test_config_include_depth(void)
+{
+    zroxy_t cfg = {0};
+    char ok[] = "/tmp/zroxy_args_dir_XXXXXX";
+    char deep[] = "/tmp/zroxy_args_dir_XXXXXX";
+    char good[] = "/tmp/zroxy_args_test_XXXXXX";
+    const int limit = 8;
+
+    if (!make_chain(ok, limit, -1))
+        return;
+    expect_true(parse_chain(ok, &cfg), "a chain at the depth limit is accepted");
+    expect_int((int)count_ports(&cfg), 1, "the last file of the chain was read");
+    free_settings(&cfg);
+
+    if (make_chain(deep, limit + 1, -1))
+    {
+        expect_true(!parse_chain(deep, &cfg), "a chain over the depth limit is rejected");
+        free_settings(&cfg);
+    }
+
+    /* nothing is left over from the rejected chain */
+    expect_true(parse_chain(ok, &cfg), "the chain at the limit still works after a rejection");
+    free_settings(&cfg);
+    if (write_conf(good, "PORT = 127.0.0.1:8081\n"))
+    {
+        char a0[] = "zroxy", a1[] = "-c";
+        const char *argv[] = {a0, a1, good};
+
+        reset_getopt();
+        expect_true(args_init(&cfg, 3, argv), "args_init with a valid config after a rejection");
+        expect_int((int)count_ports(&cfg), 1, "valid config read after a rejection");
+        unlink(good);
+        free_settings(&cfg);
+    }
+    drop_chain(ok, limit);
+    drop_chain(deep, limit + 1);
+}
+
+static void test_config_include_twice_in_a_row(void)
+{
+    zroxy_t cfg = {0};
+    char inner[] = "/tmp/zroxy_args_test_XXXXXX";
+    char outer[] = "/tmp/zroxy_args_test_XXXXXX";
+    char data[PATH_MAX + 64];
+
+    /* the same file included twice, one after the other, is not a cycle */
+    if (!write_conf(inner, "SNITIMEOUT = 40\n"))
+        return;
+    snprintf(data, sizeof(data), "config = %s\nconfig = %s\n", inner, inner);
+    if (write_conf(outer, data))
+    {
+        expect_true(args_parse_config(&cfg, outer), "the same file included twice in a row");
+        expect_int((int)cfg.snitimeout, 40, "included value was read");
+        unlink(outer);
+    }
+    unlink(inner);
+    free_settings(&cfg);
+}
+
 /* Write content to a fresh temp file with the given mode; path gets the name. */
 static void make_secret_file(char *path, const void *data, size_t n, mode_t mode)
 {
@@ -1518,6 +1689,10 @@ int main(void)
     test_config_and_cli_ports_append();
     test_duplicate_listener_rejected();
     test_port_failure_keeps_earlier_list();
+    test_config_includes_itself();
+    test_config_include_cycle();
+    test_config_include_depth();
+    test_config_include_twice_in_a_row();
     test_monitor_token_file();
     test_secret_file_contents();
     test_secret_file_permissions();
