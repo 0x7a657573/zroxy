@@ -568,9 +568,9 @@ static void upstream_fail(dns_event_t *event, dns_upstream_t *upstream)
 
 static bool queue_socks_request(dns_event_t *event, dns_upstream_t *upstream)
 {
-	const char *host = event->dns->upstream.ip;
+	const char *host = event->dns->routes[0].upstream.ip;
 	size_t hlen = strlen(host);
-	uint16_t port = htons(event->dns->upstream.port);
+	uint16_t port = htons(event->dns->routes[0].upstream.port);
 	if (hlen == 0 || hlen > 255 || hlen + 7 > sizeof(upstream->out))
 		return false;
 	upstream->out[0] = 5;
@@ -589,7 +589,7 @@ static bool queue_socks_request(dns_event_t *event, dns_upstream_t *upstream)
 
 static bool queue_socks_auth(dns_event_t *event, dns_upstream_t *upstream)
 {
-	sockshost_t *socks = event->dns->socks;
+	sockshost_t *socks = event->dns->routes[0].socks;
 	size_t ulen;
 	size_t plen;
 	if (!socks || !socks->user || !socks->pass)
@@ -626,7 +626,7 @@ static bool upstream_queue_query(dns_upstream_t *upstream)
 
 static void upstream_connected(dns_event_t *event, dns_upstream_t *upstream)
 {
-	if (event->dns->socks) {
+	if (event->dns->routes[0].socks) {
 		static const uint8_t hello[] = { 5, 2, 0, 2 };
 		memcpy(upstream->out, hello, sizeof(hello));
 		upstream->out_len = sizeof(hello);
@@ -645,9 +645,9 @@ static bool upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_requ
 	int fd;
 	int rc;
 	int one = 1;
-	if (!event->upstream_ready || (event->dns->socks && !event->socks_ready))
+	if (!event->upstream_ready || (event->dns->routes[0].socks && !event->socks_ready))
 		return false;
-	if (event->dns->socks) {
+	if (event->dns->routes[0].socks) {
 		addr = (const struct sockaddr *)&event->socks_addr;
 		len = event->socks_len;
 	} else {
@@ -1019,8 +1019,8 @@ static void pull_udp(dns_event_t *event)
 
 static bool resolution_submit(dns_event_t *event, unsigned role)
 {
-	const char *host = role == 1 ? event->dns->upstream.ip : event->dns->socks->host;
-	uint16_t port = role == 1 ? event->dns->upstream.port : event->dns->socks->port;
+	const char *host = role == 1 ? event->dns->routes[0].upstream.ip : event->dns->routes[0].socks->host;
+	uint16_t port = role == 1 ? event->dns->routes[0].upstream.port : event->dns->routes[0].socks->port;
 	int *slot = role == 1 ? &event->upstream_slot : &event->socks_slot;
 	uint64_t *req = role == 1 ? &event->upstream_req : &event->socks_req;
 	int64_t *next = role == 1 ? &event->upstream_resolve_at_ms : &event->socks_resolve_at_ms;
@@ -1049,7 +1049,7 @@ static void resolution_tick(dns_event_t *event, int64_t now)
 	if (!event->upstream_literal && event->upstream_slot < 0 &&
 			now >= event->upstream_resolve_at_ms)
 		(void)resolution_submit(event, 1);
-	if (event->dns->socks && !event->socks_literal && event->socks_slot < 0 &&
+	if (event->dns->routes[0].socks && !event->socks_literal && event->socks_slot < 0 &&
 			now >= event->socks_resolve_at_ms)
 		(void)resolution_submit(event, 2);
 }
@@ -1098,7 +1098,7 @@ static void resolver_drain(dns_event_t *event)
 			/* The resolver returns addresses without a port; apply the configured one. */
 			struct sockaddr_storage resolved = slot->addresses[0].address;
 			((struct sockaddr_in *)&resolved)->sin_port = htons(slot->connection_index == 1 ?
-				event->dns->upstream.port : event->dns->socks->port);
+				event->dns->routes[0].upstream.port : event->dns->routes[0].socks->port);
 			changed = !*ready || *len != slot->addresses[0].length ||
 				memcmp(addr, &resolved, *len) != 0;
 			*addr = resolved;
@@ -1109,7 +1109,7 @@ static void resolver_drain(dns_event_t *event)
 			*next = now + DNS_RESOLVE_REFRESH_MS;
 		} else {
 			log_error("dns resolver failed for %s; retrying",
-				slot->connection_index == 1 ? event->dns->upstream.ip : event->dns->socks->host);
+				slot->connection_index == 1 ? event->dns->routes[0].upstream.ip : event->dns->routes[0].socks->host);
 			*next = now + DNS_RESOLVE_RETRY_MS;
 		}
 		sni_resolver_release(slot->index, slot->req_id);
@@ -1258,7 +1258,7 @@ bool dns_event_loop_start(dnsserver_t *dns)
 	event->upstream_resolve_at_ms = mono_now();
 	event->socks_resolve_at_ms = event->upstream_resolve_at_ms;
 	(void)resolution_submit(event, 1);
-	if (dns->socks)
+	if (dns->routes[0].socks)
 		(void)resolution_submit(event, 2);
 	dns->event_loop = event;
 	if (pthread_create(&event->thread, NULL, event_main, event) != 0) {

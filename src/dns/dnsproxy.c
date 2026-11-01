@@ -124,7 +124,16 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	memcpy(dns->listen_addr, conf->Local.ip, strlen(conf->Local.ip) + 1);
 	snprintf(dns->listen_port, sizeof(dns->listen_port), "%u",
 		(unsigned)conf->Local.port);
-	dns->socks = conf->Socks;
+	if (conf->route_count == 0 || conf->route_count > DNS_ROUTES_MAX) {
+		localdns_free(dns);
+		return NULL;
+	}
+	dns->route_count = conf->route_count;
+	for (unsigned i = 0; i < conf->route_count; i++) {
+		dns->routes[i] = conf->routes[i];
+		dns->routes[i].socks = conf->routes[i].direct ? NULL :
+			conf->routes[i].socks ? conf->routes[i].socks : conf->Socks;
+	}
 	if (conf->acl_set) {
 		dns->acl = malloc(conf->acl_count * sizeof(*dns->acl));
 		if (!dns->acl) {
@@ -159,7 +168,6 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 			return NULL;
 		}
 	}
-	dns->upstream = conf->Remote;
 	dns->Stat = conf->Stat;
 	dns->whitelist = conf->whitelist;
 	memcpy(dns->sni_ip, conf->sni_ip, sizeof(dns->sni_ip));

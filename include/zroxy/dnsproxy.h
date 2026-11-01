@@ -52,8 +52,8 @@ typedef struct dnsserver
 	int			  wake[2];
 	void		  *event_loop;
 
-	dnsStream_t   upstream;
-	sockshost_t	  *socks;
+	dns_route_t	  routes[DNS_ROUTES_MAX];
+	unsigned	  route_count;
 	uint32_t	  timeout;
 	uint32_t	  local_ttl;
 	uint16_t	  upstream_connections;
