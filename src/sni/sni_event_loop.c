@@ -607,7 +607,6 @@ static int read_some(int fd, uint8_t *buf, uint32_t cap, uint32_t *len)
 	} while (n < 0 && errno == EINTR);
 	if (n < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			note_eagain();
 			return 0;
 		}
 		return -1;
