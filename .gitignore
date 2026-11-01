@@ -8,3 +8,5 @@ HARDENING_AUDIT.md
 __pycache__/
 *.py[cod]
 .pytest_cache/
+/build-release/
+/dist/

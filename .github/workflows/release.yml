@@ -1,0 +1,141 @@
+name: release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+  # Dry run: builds and tests everything, uploads workflow artifacts, never publishes.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^#define[[:space:]]*version[[:space:]]*"\([^"]*\)".*/\1/p' \
+            include/zroxy/version.h | head -n 1)
+          [ -n "$version" ] || { echo "cannot read version.h" >&2; exit 1; }
+          if [ "$REF_TYPE" = tag ] && [ "$REF_NAME" != "$version" ]; then
+            echo "tag $REF_NAME does not match version.h ($version)" >&2
+            exit 1
+          fi
+          scripts/release-notes.sh "$version" > /dev/null
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: cmake -S . -B build
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64}
+          - {arch: i686,    qemu: qemu-i386}
+          - {arch: aarch64, qemu: qemu-aarch64}
+          - {arch: armv7,   qemu: qemu-arm}
+          - {arch: mips,    qemu: qemu-mips -cpu 24Kc}
+          - {arch: mipsel,  qemu: qemu-mipsel -cpu 24Kc}
+          - {arch: riscv64, qemu: qemu-riscv64}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install qemu-user
+        if: matrix.qemu
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user
+      - name: Build
+        run: scripts/release-build.sh "${{ matrix.arch }}"
+      - name: Smoke test
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          QEMU: ${{ matrix.qemu }}
+        run: |
+          name="zroxy-$VERSION-linux-$ARCH"
+          tar -xzf "dist/$name.tar.gz" -C "$RUNNER_TEMP"
+          bin="$RUNNER_TEMP/$name/zroxy"
+          file "$bin"
+          file "$bin" | grep -Eq 'statically linked|static-pie linked'
+          # $QEMU is empty for the native build and intentionally word-split.
+          # shellcheck disable=SC2086
+          out=$($QEMU "$bin" -h)
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -Fxq "zroxy v$VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zroxy-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [verify, test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: zroxy-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums and notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS && cat SHA256SUMS)
+          scripts/release-notes.sh "$VERSION" > notes.md
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=
+          case "$TAG" in *-*) flags=--prerelease ;; esac
+          # shellcheck disable=SC2086
+          gh release create "$TAG" dist/* \
+            --title "zroxy $TAG" --notes-file notes.md --verify-tag $flags
