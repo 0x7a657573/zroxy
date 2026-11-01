@@ -301,6 +301,34 @@ lines end with CRLF. The JSON report is limited to 16 KiB. If it ever does not
 fit, the monitor answers `500 Internal Server Error` with an empty body and
 logs the failure once.
 
+The report is one JSON object. `ZroxyVersion` and `CountOfOpenFile` come
+first, then the `Process` object, then one object per enabled service
+(`DNS_Server`, `SNI_Server`). Keys are only ever added; existing keys keep
+their names and meaning.
+
+| Key | Meaning |
+| --- | --- |
+| `ZroxyVersion` | Version string |
+| `CountOfOpenFile` | Open file descriptors of the process, not counting the one used to count them |
+
+The `Process` object describes the zroxy process:
+
+| Key | Meaning |
+| --- | --- |
+| `Pid` | Process id |
+| `StartTime` | Unix time at which the monitor started, a few milliseconds after the process |
+| `UpTime` | Seconds since `StartTime` |
+| `OpenFiles` | Same value as `CountOfOpenFile` |
+| `MaxOpenFiles` | Soft `RLIMIT_NOFILE`; `-1` when unlimited |
+| `Threads` | Thread count (Linux only; omitted elsewhere) |
+| `RssBytes` | Resident set size now (Linux only; omitted elsewhere) |
+| `PeakRssBytes` | Peak resident set size from `getrusage` |
+| `CpuUserMs`, `CpuSystemMs` | User and system CPU time used by the process, in milliseconds |
+
+`DNS_Server` and `SNI_Server` each carry `UpTime`, `MaxConnection`,
+`ActiveConnection`, `TotalConnection`, `TotalRx`, and `TotalTx`. The DNS
+counters are listed in the DNS section.
+
 The monitor reads at most 4096 header bytes. `MONITORTIMEOUT` is one absolute
 deadline for completing the header; slow-drip input cannot extend it. Do not
 bind the monitor to `0.0.0.0` without a token and appropriate network access

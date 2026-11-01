@@ -42,6 +42,11 @@ These notes describe the `1.4.1` release. Nothing here says the result is produc
   one too high. It now excludes that descriptor; the monitor client's own
   connection is still counted. A failure to open the directory is logged with
   `log_error` instead of written to stderr.
+- Add a `Process` object to the report with `Pid`, `StartTime`, `UpTime`,
+  `OpenFiles`, `MaxOpenFiles`, `Threads`, `RssBytes`, `PeakRssBytes`,
+  `CpuUserMs`, and `CpuSystemMs`. `Threads` and `RssBytes` are read from
+  `/proc/self/status` and are omitted on other systems. `CountOfOpenFile`
+  stays at the top level.
 
 ### Release
 

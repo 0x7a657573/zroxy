@@ -741,6 +741,7 @@ sequenceDiagram
     else GET / authorized
         W->>L: snapshot statistics-list head
         L-->>W: list pointer
+        W->>W: process object: getrlimit, getrusage, /proc/self/status
         loop each statistics object
             W->>S: copy counters under object mutex
             S-->>W: counter snapshot
@@ -755,6 +756,12 @@ sequenceDiagram
 The monitor accepts only `GET /` with HTTP/1.0 or HTTP/1.1. A configured
 Bearer token is required before counters are emitted. Without a token, anyone
 who can reach the monitor socket can read the counters.
+
+The report starts with the version, `CountOfOpenFile`, and the `Process`
+object. `Process` is not a statistics object: the worker fills it on each
+request from `getpid`, `getrlimit`, `getrusage`, and (on Linux) one bounded
+read of `/proc/self/status` into a stack buffer. It takes no lock and
+allocates nothing. Statistics objects follow.
 
 The JSON is formatted into one 16 KiB stack buffer. The response head is built
 in reserved space in front of the body, so the head and body leave in a single
