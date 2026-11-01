@@ -335,7 +335,7 @@ def proxy_timeout(args, lab, hello, failures):
     upstream = lab.tcp_server(mode="blackhole", read_exact=len(hello), hold_timeout=3.0)
     port = zroxy_lab.free_tcp_port()
     proc = lab.zroxy(
-        ["-l", "3", "-o", "1", "-p", "127.0.0.1:%s@%s" % (port, upstream.port)],
+        ["-l", "3", "-o", "1", "-O", "yes", "-p", "127.0.0.1:%s@%s" % (port, upstream.port)],
         tcp_ports=[port],
     )
 
@@ -497,6 +497,7 @@ def run(args):
             [
                 "-l", "3",
                 "-o", str(relay_timeout),
+                "-O", "yes",
                 "-p", "127.0.0.1:%s@%s" % (sni_port, upstream.port),
                 "-m", str(mon_port),
                 "-d", "127.0.0.1:%s" % ldns,

@@ -175,6 +175,7 @@ use the key names in the last column.
 | `-L`, `--allowloopback` | `yes`/`no` | Let names from clients resolve to loopback (127.0.0.0/8, `::1`) upstreams; default `no`, for tests and local backends only | `ALLOWLOOPBACK` |
 | `-P`, `--denyprivate` | `yes`/`no` | Also refuse names that resolve to private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); default `no` | `DENYPRIVATE` |
 | `-w`, `--white` | path | Whitelist file | `WHITE` |
+| `-O`, `--openproxy` | `yes`/`no` | Allow SNI listeners to forward every host name when no whitelist is set; default `no`, in which case startup fails if listeners are configured without `WHITE`. Ignored when a whitelist is set. Does not affect DNS-only setups | `OPENPROXY` |
 | `-d`, `--ldns` | bind:port | Local DNS listener (UDP and TCP) | `LDNS` |
 | `-u`, `--dns` | host[:port] | Upstream DNS server | `DNS` |
 | `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP | `DSOCKS` |

@@ -25,7 +25,7 @@ def test_sni_direct():
         upstream = lab.tcp_server(response=zroxy_lab.HTTP_OK, read_exact=len(hello))
         sni_port = zroxy_lab.free_tcp_port()
         proc = lab.zroxy(
-            ["-l", "0", "-o", "2", "-L", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, upstream.port)],
+            ["-l", "0", "-o", "2", "-L", "yes", "-O", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, upstream.port)],
             tcp_ports=[sni_port],
         )
         _exchange(sni_port, hello)
@@ -51,6 +51,7 @@ def test_sni_socks5():
             [
                 "-l", "0",
                 "-o", "3",
+                "-O", "yes",
                 "-p", "127.0.0.1:%s@%s" % (sni_port, upstream.port),
                 "-s", "127.0.0.1:%s" % socks.port,
             ],

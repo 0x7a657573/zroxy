@@ -111,6 +111,7 @@ def test_monitor_after_traffic():
                 "-o", "2",
                 "-p", "127.0.0.1:%s@%s" % (sni_port, tcp_up.port),
                 "-L", "yes",
+                "-O", "yes",
                 "-m", str(mon_port),
                 "-d", "127.0.0.1:%s" % ldns,
                 "-u", "127.0.0.1:%s" % dns_up.port,
@@ -392,7 +393,7 @@ def test_sni_connect_failure_and_handshake_timeout():
         sni_port = zroxy_lab.free_tcp_port()
         mon_port = zroxy_lab.free_tcp_port()
         proc = lab.zroxy(
-            ["-l", "0", "-o", "1", "-L", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, dead_port),
+            ["-l", "0", "-o", "1", "-L", "yes", "-O", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, dead_port),
              "-m", str(mon_port)],
             tcp_ports=[sni_port, mon_port],
         )
@@ -419,7 +420,7 @@ def test_sni_loopback_refused_by_default():
         sni_port = zroxy_lab.free_tcp_port()
         mon_port = zroxy_lab.free_tcp_port()
         proc = lab.zroxy(
-            ["-l", "0", "-o", "2", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
+            ["-l", "0", "-o", "2", "-O", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
              "-m", str(mon_port)],
             tcp_ports=[sni_port, mon_port],
         )
@@ -439,7 +440,7 @@ def test_sni_idle_timeout():
         sni_port = zroxy_lab.free_tcp_port()
         mon_port = zroxy_lab.free_tcp_port()
         proc = lab.zroxy(
-            ["-l", "0", "-o", "5", "-I", "1", "-L", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
+            ["-l", "0", "-o", "5", "-I", "1", "-L", "yes", "-O", "yes", "-p", "127.0.0.1:%s@%s" % (sni_port, up.port),
              "-m", str(mon_port)],
             tcp_ports=[sni_port, mon_port],
         )

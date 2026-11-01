@@ -384,6 +384,12 @@ static void test_invalid_configuration(const char *logpath)
     test_exit_code(argv_ip, logpath, "non-IP bind address exits 1");
 }
 
+static void test_open_proxy_requires_opt_in(const char *logpath)
+{
+    char *argv[] = {ZROXY_BIN, "-p", "127.0.0.1:0@80", NULL};
+    test_exit_code_log(argv, logpath, "SNI listener without whitelist or OPENPROXY exits 1", "OPENPROXY");
+}
+
 static void test_dns_requires_listener(const char *logpath)
 {
     char *argv[] = {ZROXY_BIN, "-u", "127.0.0.1:9", NULL};
@@ -601,7 +607,7 @@ static void test_sigpipe_does_not_kill_process(const char *logpath)
     pid_t pid;
     char spec[64];
     char timeout[] = "2";
-    char *argv[8];
+    char *argv[10];
     struct pollfd pfd;
     char request[] = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
     char extra[] = "MORE";
@@ -621,7 +627,9 @@ static void test_sigpipe_does_not_kill_process(const char *logpath)
     argv[4] = spec;
     argv[5] = "-L";
     argv[6] = "yes";
-    argv[7] = NULL;
+    argv[7] = "-O";
+    argv[8] = "yes";
+    argv[9] = NULL;
     pid = spawn_child(argv, logpath);
     expect_true(pid > 0, "start SNI listener");
     if (pid <= 0)
@@ -767,7 +775,7 @@ static void test_occupied_service_ports(const char *logpath)
     char sni_spec[64];
     char mon_text[8];
     char *dns_argv[6];
-    char *sni_argv[4];
+    char *sni_argv[6];
     char *mon_argv[4];
 
     udp = bind_udp_loopback(&udp_port);
@@ -793,7 +801,9 @@ static void test_occupied_service_ports(const char *logpath)
         sni_argv[0] = ZROXY_BIN;
         sni_argv[1] = "-p";
         sni_argv[2] = sni_spec;
-        sni_argv[3] = NULL;
+        sni_argv[3] = "-O";
+        sni_argv[4] = "yes";
+        sni_argv[5] = NULL;
         test_exit_code_log(sni_argv, logpath, "occupied sni port exits 1", "can not listen");
         close(sni);
     }
@@ -1104,6 +1114,8 @@ int main(void)
     test_missing_whitelist(logpath);
     test_phase = "invalid configuration";
     test_invalid_configuration(logpath);
+    test_phase = "open proxy opt-in";
+    test_open_proxy_requires_opt_in(logpath);
     test_phase = "DNS configuration validation";
     test_dns_requires_listener(logpath);
     test_phase = "absent services";

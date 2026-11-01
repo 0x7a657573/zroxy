@@ -28,6 +28,7 @@ typedef struct
 	int			sniidletimeout;
 	bool		allow_loopback;
 	bool		deny_private;
+	bool		open_proxy;
 }zroxy_t;
 
 bool args_init(zroxy_t *pgp,int argc, const char **argv);
