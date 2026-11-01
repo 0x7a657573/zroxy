@@ -39,6 +39,8 @@ DNS_COUNTERS = COUNTERS + (
     "UpstreamTimeouts",
     "UpstreamErrors",
     "ActiveUpstreams",
+    "ActiveUpstream",
+    "UpstreamSwitches",
 )
 
 

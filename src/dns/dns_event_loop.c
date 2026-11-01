@@ -588,6 +588,8 @@ static void route_failed(dns_event_t *event, unsigned route)
 	unsigned count = event->dns->route_count;
 	if (count > 1 && route == event->active) {
 		event->active = (route + 1) % count;
+		__atomic_store_n(&event->dns->active_route, event->active, __ATOMIC_RELAXED);
+		(void)__atomic_fetch_add(&event->dns->route_switches, 1u, __ATOMIC_RELAXED);
 		log_debug("dns route %u failed; using route %u", route, event->active);
 	}
 }

@@ -491,8 +491,10 @@ If the TCP port cannot be bound, zroxy logs it and keeps serving UDP.
 
 The `DNS_Server` monitor object adds `CacheHits`, `CacheMisses`, `CacheShared`,
 `CacheEntries`, `CacheEvictions`, `AclDropped`, `RateDropped`, `TcpRefused`,
-`TcpActive`, `QueueDropped`, `UpstreamTimeouts`, `UpstreamErrors`, and
-`ActiveUpstreams`. `QueueStaleDropped` and `QueueFull` are still reported for
+`TcpActive`, `QueueDropped`, `UpstreamTimeouts`, `UpstreamErrors`,
+`ActiveUpstreams` (open upstream TCP connections), `ActiveUpstream` (index of
+the active DNS route, 0-based, in configuration order) and `UpstreamSwitches`
+(how many times the active route moved). `QueueStaleDropped` and `QueueFull` are still reported for
 compatibility but are always 0. These counters are detached before the DNS
 service is freed during shutdown.
 
