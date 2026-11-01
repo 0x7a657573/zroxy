@@ -2,6 +2,35 @@
 
 These notes describe the `1.4.1` release. Nothing here says the result is production-ready.
 
+## Unreleased
+
+### SNI
+
+- Add `SNIIDLETIMEOUT` / `--sniidletimeout` (`-I`), 1 to 86400 seconds,
+  default 300, to close a relay that carries no traffic. Before, an
+  established relay was closed after `SNITIMEOUT` (default 30 s) of silence,
+  so quiet long-lived connections such as HTTP/2, WebSocket, and push
+  channels had to reconnect. Handshake, resolve, connect, SOCKS, and
+  write-stall deadlines still use `SNITIMEOUT`.
+- Accept an HTTP `Host` header whose name is not capitalized (`host:`), whose
+  value is followed by tabs or trailing whitespace, or that carries a
+  `:port` suffix. These requests used to be closed. The remote port still
+  comes from the listener configuration.
+- Raise the listen backlog of the SNI and monitor listeners from 10 to
+  `SOMAXCONN`. A burst of connections that arrived while the event loop was
+  busy used to overflow the queue, and the dropped clients waited about a
+  second to retry.
+
+### Release
+
+- Pushing a version tag runs a GitHub Actions workflow. It checks the tag
+  against `version.h` and this file, runs the default test suite, builds
+  static musl binaries for `x86_64`, `i686`, `aarch64`, `armv7`, `mips`,
+  `mipsel`, and `riscv64`, runs each one's `-h` under qemu-user, and
+  publishes them with `SHA256SUMS` and a build provenance attestation. The
+  release notes come from this file's section for the tag, so rename
+  `## Unreleased` to `## X.Y.Z - date` before tagging.
+
 ## 1.4.1 - 2026-10-31
 
 ### DNS
