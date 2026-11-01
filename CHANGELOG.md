@@ -2,6 +2,20 @@
 
 These notes describe the `2.0.0` release. Nothing here says the result is production-ready.
 
+## Unreleased
+
+### DNS
+
+- `DNS` / `--dns` (`-u`) can be given up to four times; every line or option
+  is one route and they are kept in the order written. A route is an
+  upstream `HOST[:PORT]`, optionally followed by `via SOCKS-SPEC` (its own
+  SOCKS5 proxy, same syntax as `DSOCKS`, so a password may contain commas)
+  or `via direct` (never use `DSOCKS`). A route with neither goes through
+  the global `DSOCKS` if one is set. A fifth route, an exact duplicate, or
+  a bad `via` is a start-up error and leaves the earlier routes alone.
+  Before, a second `DNS` replaced the first. The forwarder still uses only
+  the first route; failover between routes follows.
+
 ## 2.0.0 - 2026-11-01
 
 ### Breaking

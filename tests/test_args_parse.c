@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <zroxy/dnsproxy.h>
 #include <pwd.h>
 #include <grp.h>
 
@@ -469,7 +470,7 @@ static void test_cli_accepts_long_dns_hostname(void)
     expect_true(args_init(&cfg, 3, argv), "args_init long DNS hostname");
     expect_true(cfg.dnsserver != NULL, "long DNS hostname allocated");
     if (cfg.dnsserver)
-        expect_string(cfg.dnsserver->Remote.ip, "long.dns.example.test", "long DNS hostname stored");
+        expect_string(cfg.dnsserver->routes[0].upstream.ip, "long.dns.example.test", "long DNS hostname stored");
     free_settings(&cfg);
 }
 
@@ -491,7 +492,7 @@ static void test_dns_option_order_and_last_listener_wins(void)
     if (cfg.dnsserver)
     {
         expect_int((int)cfg.dnsserver->timeout, 2, "DNS timeout survives LDNS");
-        expect_string(cfg.dnsserver->Remote.ip, "1.1.1.1", "DNS upstream after LDNS");
+        expect_string(cfg.dnsserver->routes[0].upstream.ip, "1.1.1.1", "DNS upstream after LDNS");
     }
     free_settings(&cfg);
 
@@ -1655,6 +1656,228 @@ static void test_run_identity(void)
     }
 }
 
+static bool cli_dns_args(zroxy_t *cfg, const char *a, const char *b, const char *c)
+{
+    char a0[] = "zroxy", u1[] = "-u", u2[] = "-u", u3[] = "-u";
+    char v1[256], v2[256], v3[256];
+    const char *argv[8];
+    int argc = 0;
+
+    argv[argc++] = a0;
+    snprintf(v1, sizeof(v1), "%s", a);
+    argv[argc++] = u1;
+    argv[argc++] = v1;
+    if (b)
+    {
+        snprintf(v2, sizeof(v2), "%s", b);
+        argv[argc++] = u2;
+        argv[argc++] = v2;
+    }
+    if (c)
+    {
+        snprintf(v3, sizeof(v3), "%s", c);
+        argv[argc++] = u3;
+        argv[argc++] = v3;
+    }
+    reset_getopt();
+    return args_init(cfg, argc, argv);
+}
+
+static void test_dns_routes_append(void)
+{
+    zroxy_t cfg = {0};
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+
+    if (!write_conf(path, "LDNS = 127.0.0.1:5353\nDNS = 8.8.8.8\nDNS = 1.1.1.1:5353\n"))
+        return;
+    expect_true(args_parse_config(&cfg, path), "two DNS lines parse");
+    expect_true(cfg.dnsserver != NULL, "two DNS lines allocate dns");
+    if (cfg.dnsserver)
+    {
+        expect_int((int)cfg.dnsserver->route_count, 2, "two DNS lines give two routes");
+        expect_string(cfg.dnsserver->routes[0].upstream.ip, "8.8.8.8", "first route kept");
+        expect_u16(cfg.dnsserver->routes[0].upstream.port, 53, "first route default port");
+        expect_string(cfg.dnsserver->routes[1].upstream.ip, "1.1.1.1", "second route appended");
+        expect_u16(cfg.dnsserver->routes[1].upstream.port, 5353, "second route port");
+        expect_true(cfg.dnsserver->routes[1].socks == NULL && !cfg.dnsserver->routes[1].direct,
+            "plain route has no own socks");
+    }
+    unlink(path);
+    free_settings(&cfg);
+
+    {
+        zroxy_t two = {0};
+        expect_true(cli_dns_args(&two, "8.8.8.8", "9.9.9.9:54", NULL), "-u twice parses");
+        if (two.dnsserver)
+        {
+            expect_int((int)two.dnsserver->route_count, 2, "-u twice gives two routes");
+            expect_string(two.dnsserver->routes[1].upstream.ip, "9.9.9.9", "second -u appended");
+            expect_u16(two.dnsserver->routes[1].upstream.port, 54, "second -u port");
+        }
+        free_settings(&two);
+    }
+
+    {
+        zroxy_t mix = {0};
+        char cpath[] = "/tmp/zroxy_args_test_XXXXXX";
+        char a0[] = "zroxy", a1[] = "-c", a3[] = "-u", a4[] = "9.9.9.9";
+        const char *argv[] = {a0, a1, cpath, a3, a4};
+
+        if (write_conf(cpath, "DNS = 8.8.8.8\n"))
+        {
+            reset_getopt();
+            expect_true(args_init(&mix, 5, argv), "config and -u parse");
+            if (mix.dnsserver)
+            {
+                expect_int((int)mix.dnsserver->route_count, 2, "config and -u give two routes");
+                expect_string(mix.dnsserver->routes[0].upstream.ip, "8.8.8.8", "config route first");
+                expect_string(mix.dnsserver->routes[1].upstream.ip, "9.9.9.9", "-u route after it");
+            }
+            unlink(cpath);
+        }
+        free_settings(&mix);
+    }
+}
+
+static void test_dns_route_via(void)
+{
+    zroxy_t cfg = {0};
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+
+    if (!write_conf(path,
+            "DNS = 8.8.8.8 via bob:p,w@127.0.0.1:9050\n"
+            "DNS = 8.8.4.4:5300   via   127.0.0.1\n"
+            "DNS = 1.1.1.1 via direct\n"
+            "DNS = 9.9.9.9 via Direct\n"))
+        return;
+    expect_true(args_parse_config(&cfg, path), "via lines parse");
+    if (cfg.dnsserver && cfg.dnsserver->route_count == 4)
+    {
+        const dns_route_t *r = cfg.dnsserver->routes;
+        expect_string(r[0].upstream.ip, "8.8.8.8", "via route host");
+        expect_u16(r[0].upstream.port, 53, "via route default port");
+        expect_true(r[0].socks != NULL && !r[0].direct, "via route has socks");
+        if (r[0].socks)
+        {
+            expect_string(r[0].socks->host, "127.0.0.1", "via socks host");
+            expect_u16(r[0].socks->port, 9050, "via socks port");
+            expect_string(r[0].socks->user, "bob", "via socks user");
+            expect_string(r[0].socks->pass, "p,w", "via socks password may contain a comma");
+        }
+        expect_string(r[1].upstream.ip, "8.8.4.4", "second via host");
+        expect_u16(r[1].upstream.port, 5300, "second via port");
+        if (r[1].socks)
+        {
+            expect_u16(r[1].socks->port, 1080, "via socks default port");
+            expect_true(r[1].socks->user == NULL, "via socks without user");
+        }
+        else
+            expect_true(false, "second via route has socks");
+        expect_true(r[2].direct && r[2].socks == NULL, "via direct");
+        expect_true(r[3].direct && r[3].socks == NULL, "via direct is case insensitive");
+    }
+    else
+        expect_true(false, "four via routes parsed");
+    unlink(path);
+    free_settings(&cfg);
+}
+
+static void test_dns_route_limits_and_errors(void)
+{
+    zroxy_t cfg = {0};
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+
+    /* four routes fit; a fifth is an error and leaves the four intact */
+    if (write_conf(path, "DNS = 1.1.1.1\nDNS = 1.0.0.1\nDNS = 8.8.8.8\nDNS = 8.8.4.4\nDNS = 9.9.9.9\n"))
+    {
+        expect_true(!args_parse_config(&cfg, path), "fifth DNS route rejected");
+        expect_int((int)(cfg.dnsserver ? cfg.dnsserver->route_count : 0), DNS_ROUTES_MAX,
+            "four routes survive a rejected fifth");
+        unlink(path);
+    }
+    free_settings(&cfg);
+
+    {
+        zroxy_t dup = {0};
+        expect_true(!cli_dns_args(&dup, "8.8.8.8", "8.8.8.8:53", NULL), "duplicate route rejected");
+        expect_int((int)(dup.dnsserver ? dup.dnsserver->route_count : 0), 1, "duplicate not appended");
+        free_settings(&dup);
+    }
+    {
+        zroxy_t dup = {0};
+        expect_true(!cli_dns_args(&dup, "8.8.8.8 via 127.0.0.1:1", "8.8.8.8 via 127.0.0.1:1", NULL),
+            "duplicate via route rejected");
+        free_settings(&dup);
+    }
+    {
+        /* the same server reached another way is a different route */
+        zroxy_t ok = {0};
+        expect_true(cli_dns_args(&ok, "8.8.8.8", "8.8.8.8 via 127.0.0.1:1", "8.8.8.8 via direct"),
+            "same server by different paths accepted");
+        expect_int((int)(ok.dnsserver ? ok.dnsserver->route_count : 0), 3, "three paths to one server");
+        free_settings(&ok);
+    }
+    {
+        const char *bad[] = {
+            "8.8.8.8 via", "8.8.8.8 via   ", "8.8.8.8 via :1080", "8.8.8.8 via host:0",
+            "8.8.8.8 via host:99999", "8.8.8.8 junk", "8.8.8.8 via 127.0.0.1 extra:1:1",
+            "8.8.8.8:0 via direct", "8.8.8.8:x",
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+        {
+            zroxy_t keep = {0};
+            char label[96];
+
+            snprintf(label, sizeof(label), "bad route \"%s\" rejected", bad[i]);
+            expect_true(!cli_dns_args(&keep, "1.1.1.1 via direct", bad[i], NULL), label);
+            snprintf(label, sizeof(label), "bad route \"%s\" keeps the earlier route", bad[i]);
+            expect_int((int)(keep.dnsserver ? keep.dnsserver->route_count : 0), 1, label);
+            if (keep.dnsserver)
+                expect_true(keep.dnsserver->routes[0].direct, "earlier route intact after a bad one");
+            free_settings(&keep);
+        }
+    }
+}
+
+static void test_dns_global_dsocks_only_for_plain_routes(void)
+{
+    zroxy_t cfg = {0};
+    dnsserver_t *dns;
+    char path[] = "/tmp/zroxy_args_test_XXXXXX";
+
+    if (!write_conf(path,
+            "LDNS = 127.0.0.1:5353\n"
+            "DSOCKS = 127.0.0.1:9050\n"
+            "DNS = 8.8.8.8\n"
+            "DNS = 8.8.4.4 via 127.0.0.1:9999\n"
+            "DNS = 1.1.1.1 via direct\n"))
+        return;
+    expect_true(args_parse_config(&cfg, path), "dsocks with mixed routes parses");
+    if (!cfg.dnsserver || cfg.dnsserver->route_count != 3 || !cfg.dnsserver->Socks)
+    {
+        expect_true(false, "dsocks and three routes present");
+        unlink(path);
+        free_settings(&cfg);
+        return;
+    }
+    expect_true(cfg.dnsserver->routes[0].socks == NULL, "plain route stores no socks of its own");
+    dns = localdns_init_config(cfg.dnsserver);
+    expect_true(dns != NULL, "server config from mixed routes");
+    if (dns)
+    {
+        expect_int((int)dns->route_count, 3, "server copies the routes");
+        expect_true(dns->routes[0].socks == cfg.dnsserver->Socks, "plain route uses the global DSOCKS");
+        expect_true(dns->routes[1].socks == cfg.dnsserver->routes[1].socks &&
+            dns->routes[1].socks != cfg.dnsserver->Socks, "via route keeps its own proxy");
+        expect_true(dns->routes[2].socks == NULL, "direct route ignores DSOCKS");
+        localdns_free(dns);
+    }
+    unlink(path);
+    free_settings(&cfg);
+}
+
 int main(void)
 {
     log_set_quiet(1);
@@ -1700,6 +1923,10 @@ int main(void)
     test_config_secret_files();
     test_argv_scrub();
     test_run_identity();
+    test_dns_routes_append();
+    test_dns_route_via();
+    test_dns_route_limits_and_errors();
+    test_dns_global_dsocks_only_for_plain_routes();
 
     return failures == 0 ? 0 : 1;
 }

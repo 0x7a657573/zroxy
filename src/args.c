@@ -133,6 +133,8 @@ static bool parse_monitor_timeout(zroxy_t *ptr,char *str);
 static bool parse_whitelist(zroxy_t *ptr,char *str);
 static bool parse_dns_server(zroxy_t *ptr,char *str);
 static bool parse_dns_upstream(zroxy_t *ptr,char *str);
+static char *find_dns_via(char *str);
+static char *ltrim(char *s);
 static bool parse_dns_socks(zroxy_t *ptr,char *str);
 bool args_parse_config(zroxy_t *ptr,char *str);
 static bool parse_sni_ip(zroxy_t *ptr,char *str);
@@ -202,8 +204,8 @@ static arg_option options[] =
 	{ "openproxy", 'O', "yes|no", required_argument, "allow SNI listeners to forward every host name when no whitelist is set (default: no)", OPTION_SECTION_SNI },
 
 	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS },
-	{ "dns", 'u', "HOST[:PORT]", required_argument, "set the upstream DNS server (default port: 53)", OPTION_SECTION_DNS },
-	{ "dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS },
+	{ "dns", 'u', "SPEC", required_argument, "upstream DNS route: HOST[:PORT] [via SOCKS-SPEC|direct] (default port: 53); repeat for up to 4 routes", OPTION_SECTION_DNS },
+	{ "dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS routes without via/direct: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS },
 	{ "dsockspassfile", 'X', "PATH", required_argument, "read the DNS SOCKS5 password from the first line of PATH", OPTION_SECTION_DNS },
 	{ "dtimeout", 't', "SECONDS", required_argument, "DNS upstream timeout (default: 5)", OPTION_SECTION_DNS },
 	{ "snip", 'i', "IPv4", required_argument, "synthetic address for whitelisted DNS names", OPTION_SECTION_DNS },
@@ -277,6 +279,13 @@ static bool socks_spec_has_pass(const char *spec)
 	return colon != NULL;
 }
 
+/* True when a DNS= / -u value has a "via" SOCKS spec that carries a password. */
+static bool dns_route_has_pass(char *value)
+{
+	char *via = find_dns_via(value);
+	return via && socks_spec_has_pass(ltrim(via + 3));
+}
+
 /*
  * A secret given on the command line is visible to every local user in
  * /proc/PID/cmdline until args_scrub_argv runs. Warn and remember where
@@ -287,7 +296,8 @@ static void note_cli_secret(int key, char *arg)
 {
 	if (!arg || arg[0] == '\0')
 		return;
-	if (key != 'k' && !socks_spec_has_pass(arg))
+	if (key == 'u' ? !dns_route_has_pass(arg) :
+	    (key != 'k' && !socks_spec_has_pass(arg)))
 		return;
 	if (key == 'k')
 		log_warn("monitor token on the command line is visible to other local users; use MONITORTOKENFILE (--monitortokenfile)");
@@ -531,7 +541,7 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 		if (key == -1)
             break;
 
-		if (key == 's' || key == 'x' || key == 'k')
+		if (key == 's' || key == 'x' || key == 'k' || key == 'u')
 			note_cli_secret(key, optarg);
 		if(parse_opt(key, optarg, pgp)!=0)
 		{
@@ -642,7 +652,7 @@ bool args_validate(zroxy_t *ptr)
 		log_error("DNS, SNIP, DSOCKS, DTIMEOUT and DACL need LDNS; add \"LDNS = 127.0.0.1:53\" for the previous behaviour");
 		return false;
 	}
-	if (ptr->dnsserver->Remote.ip[0] == '\0')
+	if (ptr->dnsserver->route_count == 0)
 	{
 		log_error("LDNS needs an upstream DNS (DNS = HOST[:PORT])");
 		return false;
@@ -874,7 +884,8 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 		}
 
 		if (!secret_seen && (ckey == 'k' ||
-		    ((ckey == 's' || ckey == 'x') && socks_spec_has_pass(fix_val))))
+		    ((ckey == 's' || ckey == 'x') && socks_spec_has_pass(fix_val)) ||
+		    (ckey == 'u' && dns_route_has_pass(fix_val))))
 		{
 			secret_seen = true;
 			if (fstat(cfd, &st) == 0)
@@ -1096,26 +1107,133 @@ static bool parse_sni_ip(zroxy_t *ptr,char *str)
 	return true;
 }
 
+/*
+ * "HOST[:PORT] via SPEC": the start of the "via" word after the upstream,
+ * or NULL. "via" is a whole whitespace-separated word, so it cannot be cut
+ * out of a host name.
+ */
+static char *find_dns_via(char *str)
+{
+	char *p = str;
+	while (*p && !isspace((unsigned char)*p))
+		p++;
+	while (*p && isspace((unsigned char)*p))
+		p++;
+	if (strncmp(p, "via", 3) == 0 && (p[3] == '\0' || isspace((unsigned char)p[3])))
+		return p;
+	return NULL;
+}
+
+static bool str_equal_null(const char *a, const char *b)
+{
+	if (!a || !b)
+		return a == b;
+	return strcmp(a, b) == 0;
+}
+
+/* The same upstream reached the same way. */
+static bool dns_route_same(const dns_route_t *a, const dns_route_t *b)
+{
+	if (strcasecmp(a->upstream.ip, b->upstream.ip) != 0 ||
+	    a->upstream.port != b->upstream.port || a->direct != b->direct)
+		return false;
+	if (!a->socks || !b->socks)
+		return a->socks == b->socks;
+	return strcasecmp(a->socks->host, b->socks->host) == 0 &&
+		a->socks->port == b->socks->port &&
+		str_equal_null(a->socks->user, b->socks->user) &&
+		str_equal_null(a->socks->pass, b->socks->pass);
+}
+
+static bool fill_sockshost(sockshost_t *socks, char *str);
+
+/*
+ * One DNS= / -u value is one route: HOST[:PORT] [via SOCKS-SPEC|direct].
+ * It is parsed completely and appended only when valid.
+ */
 static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 {
 	char *endname;
+	char *via;
+	char *end;
 	uint16_t port = 53;
+	dns_route_t route;
 	dnshost_t *dns = dns_config(ptr);
 
 	if (!dns)
 		return false;
+	memset(&route, 0, sizeof(route));
+
+	via = find_dns_via(str);
+	end = str;
+	while (*end && !isspace((unsigned char)*end))
+		end++;
+	if (*end)
+	{
+		/* anything after the host must be the via clause */
+		char *rest = end;
+		*end = '\0';
+		while (isspace((unsigned char)*++rest)) ;
+		if (*rest && !via)
+		{
+			log_error("DNS upstream: unexpected text after the host (use \"HOST[:PORT] via SPEC\")");
+			return false;
+		}
+	}
+	if (via)
+	{
+		char *spec = trim(via + 3);
+		if (spec[0] == '\0')
+		{
+			log_error("DNS upstream: \"via\" needs a SOCKS5 spec or \"direct\"");
+			return false;
+		}
+		if (strcasecmp(spec, "direct") == 0)
+			route.direct = true;
+		else
+		{
+			route.socks = (sockshost_t*)calloc(1, sizeof(sockshost_t));
+			if (!route.socks)
+				return false;
+			if (!fill_sockshost(route.socks, spec))
+			{
+				free_sockshost(route.socks);
+				return false;
+			}
+		}
+	}
 
 	endname = strchr(str,':');
 	if(endname)
 	{
 		*endname++ = 0;
 		if (!parse_u16(endname, &port, 1, 65535))
-			return false;
+			goto fail;
 	}
-	if (!copy_bounded(dns->Remote.ip, sizeof(dns->Remote.ip), str))
-		return false;
-	dns->Remote.port = port;
+	if (!copy_bounded(route.upstream.ip, sizeof(route.upstream.ip), str))
+		goto fail;
+	route.upstream.port = port;
+
+	for (unsigned i = 0; i < dns->route_count; i++)
+	{
+		if (dns_route_same(&route, &dns->routes[i]))
+		{
+			log_error("DNS upstream %s:%u is already defined", route.upstream.ip,
+			    (unsigned)route.upstream.port);
+			goto fail;
+		}
+	}
+	if (dns->route_count >= DNS_ROUTES_MAX)
+	{
+		log_error("too many DNS upstreams (at most %d)", DNS_ROUTES_MAX);
+		goto fail;
+	}
+	dns->routes[dns->route_count++] = route;
 	return true;
+
+fail:
+	free_sockshost(route.socks);
+	return false;
 }
 
 static bool fill_sockshost(sockshost_t *socks, char *str)
@@ -1377,6 +1495,8 @@ void args_free_dns(zroxy_t *ptr)
 		{
 			free_sockshost(ptr->dnsserver->Socks);
 		}
+		for (unsigned i = 0; i < ptr->dnsserver->route_count; i++)
+			free_sockshost(ptr->dnsserver->routes[i].socks);
 		free(ptr->dnsserver->acl);
 		free(ptr->dnsserver);
 		ptr->dnsserver = NULL;

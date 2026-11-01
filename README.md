@@ -179,8 +179,8 @@ use the key names in the last column.
 | `-w`, `--white` | path | Whitelist file | `WHITE` |
 | `-O`, `--openproxy` | `yes`/`no` | Allow SNI listeners to forward every host name when no whitelist is set; default `no`, in which case startup fails if listeners are configured without `WHITE`. Ignored when a whitelist is set. Does not affect DNS-only setups | `OPENPROXY` |
 | `-d`, `--ldns` | bind:port | Local DNS listener (UDP and TCP) | `LDNS` |
-| `-u`, `--dns` | host[:port] | Upstream DNS server | `DNS` |
-| `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP | `DSOCKS` |
+| `-u`, `--dns` | `host[:port] [via spec\|direct]` | Upstream DNS route; repeat for up to 4 routes, in order (see [DNS forwarding](#dns-forwarding)) | `DNS` |
+| `-x`, `--dsocks` | host:port | SOCKS5 for DNS upstream TCP, used by routes without `via` | `DSOCKS` |
 | `-X`, `--dsockspassfile` | path | Read the DNS SOCKS5 password from the first line of a file; the `DSOCKS` spec then has the form `user@host[:port]` | `DSOCKSPASSFILE` |
 | `-t`, `--dtimeout` | seconds | DNS upstream timeout | `DTIMEOUT` |
 | `-i`, `--snip` | IPv4 address | Synthetic address for matching DNS names | `SNIP` |
@@ -439,6 +439,21 @@ resolves upstream names to IPv4 only.
 DNS settings may appear in any CLI or configuration-file order. The parser keeps
 one DNS configuration object and the last `LDNS` value wins.
 
+Each `DNS` line or `-u` option adds one upstream route, up to four, in the
+order given (config file first, then the command line, like `PORT`):
+
+- `DNS = HOST[:PORT]` goes through the global `DSOCKS` if one is set,
+  otherwise directly.
+- `DNS = HOST[:PORT] via [USER:PASSWORD@]HOST[:PORT]` goes through that
+  route's own SOCKS5 proxy (default port 1080). Routes are separate lines, so
+  a password may contain commas. `DSOCKSPASSFILE` applies only to the global
+  `DSOCKS`; give a `via` proxy its password inline.
+- `DNS = HOST[:PORT] via direct` connects directly even when `DSOCKS` is set.
+  There is no automatic fallback to a direct connection.
+
+A fifth route, an exact duplicate (same server and same way of reaching it),
+or an empty or malformed `via` is an error.
+
 Forwarded answers are cached in memory for their TTL, capped at one hour, or
 five minutes for NXDOMAIN and NODATA. The cache holds up to `DCACHE` entries
 (default 2048); `DCACHE = 0` disables it. Identical queries that arrive while
@@ -483,6 +498,14 @@ LDNS = 127.0.0.1:5353
 DNS = 1.1.1.1:53
 DSOCKS = 127.0.0.1:9050
 DTIMEOUT = 5
+```
+
+With more than one route:
+
+```ini
+DNS = 1.1.1.1 via 127.0.0.1:9050
+DNS = 9.9.9.9 via user:secret@127.0.0.1:9051
+DNS = 192.168.1.1 via direct
 ```
 
 DNS-over-TCP framing uses a two-byte length prefix. Queries are forwarded
