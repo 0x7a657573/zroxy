@@ -108,6 +108,12 @@ int main(int argc, const char **argv)
 		}
 	}
 
+	if(monitor && whitelist)
+	{
+		if (!monitor_add_section(monitor, "Whitelist", filter_stats_json, whitelist))
+			log_error("monitor whitelist section failed");
+	}
+
 	/*check for dns server*/
 	if(prg_setting.dnsserver)
 	{

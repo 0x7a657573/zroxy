@@ -3,6 +3,7 @@
 
 import os
 import re
+import signal
 import socket
 import sys
 import threading
@@ -406,12 +407,60 @@ def test_sni_idle_timeout():
         proc.check_alive()
 
 
+def test_monitor_whitelist_object():
+    with zroxy_lab.Lab() as lab:
+        mon_port = zroxy_lab.free_tcp_port()
+        bare = lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
+        if "Whitelist" in zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"]:
+            raise AssertionError("Whitelist object present without a whitelist file")
+        bare.stop()
+
+    with zroxy_lab.Lab() as lab:
+        wl = lab.write("white.txt", "a.example\nb.example\n")
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(["-l", "0", "-m", str(mon_port), "-w", wl], tcp_ports=[mon_port])
+        keys = ("Entries", "Reloads", "ReloadFailures", "LastReload")
+        base = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"].get("Whitelist")
+        if not isinstance(base, dict):
+            raise AssertionError("missing Whitelist object")
+        for key in keys:
+            _number(base.get(key), "Whitelist." + key)
+        if (base["Entries"], base["Reloads"], base["ReloadFailures"], base["LastReload"]) != (2, 0, 0, 0):
+            raise AssertionError("unexpected initial Whitelist: %r" % base)
+
+        # Rewriting the file is picked up by the watcher.
+        before = int(time.time())
+        lab.write("white.txt", "a.example\nb.example\n*.c.example\n")
+        doc = _wait_doc(mon_port, lambda d: d["Whitelist"]["Reloads"] >= 1, 4.0)["json"]["Whitelist"]
+        if doc["Entries"] != 3 or doc["ReloadFailures"] != 0:
+            raise AssertionError("unexpected Whitelist after reload: %r" % doc)
+        if not (before <= doc["LastReload"] <= int(time.time())):
+            raise AssertionError("implausible LastReload: %r" % doc)
+        reloads = doc["Reloads"]
+        stamp = doc["LastReload"]
+
+        # An entry longer than a config line is refused; the old list stays.
+        lab.write("white.txt", "x" * 2000 + "\n")
+        doc = _wait_doc(mon_port, lambda d: d["Whitelist"]["ReloadFailures"] >= 1, 4.0)["json"]["Whitelist"]
+        if doc["Entries"] != 3 or doc["Reloads"] != reloads or doc["LastReload"] != stamp:
+            raise AssertionError("failed reload changed the list: %r" % doc)
+
+        # SIGHUP reloads through the same path.
+        lab.write("white.txt", "only.example\n")
+        doc = _wait_doc(mon_port, lambda d: d["Whitelist"]["Entries"] == 1, 4.0)["json"]["Whitelist"]
+        if doc["Reloads"] != reloads + 1 or doc["ReloadFailures"] != 1:
+            raise AssertionError("unexpected Whitelist after recovery: %r" % doc)
+        os.kill(proc.proc.pid, signal.SIGHUP)
+        _wait_doc(mon_port, lambda d: d["Whitelist"]["Reloads"] == reloads + 2, 4.0)
+        proc.check_alive()
+
+
 def main():
     failed = 0
     for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error,
                  test_monitor_http_framing, test_monitor_process_object,
                  test_sni_close_reasons, test_sni_connect_failure_and_handshake_timeout,
-                 test_sni_idle_timeout):
+                 test_sni_idle_timeout, test_monitor_whitelist_object):
         try:
             test()
         except Exception:

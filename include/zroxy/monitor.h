@@ -11,11 +11,26 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+/*
+ * Appends the members of a top-level report object as `"Key" : value` pairs
+ * separated by ",\n", with no trailing separator. The monitor adds the braces.
+ */
+typedef bool (*mon_section_fn)(void *ctx, char **ptr, char *end);
+
+typedef struct mon_section
+{
+	char name[32];
+	mon_section_fn fn;
+	void *ctx;
+	struct mon_section *next;
+}mon_section_t;
+
 typedef struct
 {
 	int fd;
 	uint16_t Port;
 	statistics_t *state;
+	mon_section_t *sections; /* guarded by stats_lock; nodes are never freed */
 	pthread_mutex_t stats_lock; /* guards the state list head only */
 	char *token; /* optional bearer secret; NULL disables authentication */
 	int header_timeout; /* seconds to wait for a complete header */
@@ -31,5 +46,7 @@ typedef struct
 
 mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int header_timeout_sec);
 statistics_t *monitor_add_stat(mon_t *self,char *name);
+/* Adds a top-level object written by fn. ctx must outlive the monitor. */
+bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx);
 
 #endif /* MONITOR_H_ */

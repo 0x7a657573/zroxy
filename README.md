@@ -302,7 +302,8 @@ fit, the monitor answers `500 Internal Server Error` with an empty body and
 logs the failure once.
 
 The report is one JSON object. `ZroxyVersion` and `CountOfOpenFile` come
-first, then the `Process` object, then one object per enabled service
+first, then the `Process` object, the `Whitelist` object when a whitelist is
+configured, then one object per enabled service
 (`DNS_Server`, `SNI_Server`). Keys are only ever added; existing keys keep
 their names and meaning.
 
@@ -324,6 +325,16 @@ The `Process` object describes the zroxy process:
 | `RssBytes` | Resident set size now (Linux only; omitted elsewhere) |
 | `PeakRssBytes` | Peak resident set size from `getrusage` |
 | `CpuUserMs`, `CpuSystemMs` | User and system CPU time used by the process, in milliseconds |
+
+When a whitelist file is configured (`-w`), the report has a `Whitelist`
+object. It is absent otherwise.
+
+| Key | Meaning |
+| --- | --- |
+| `Entries` | Entries in the list now in use |
+| `Reloads` | Successful reloads since start (the initial load is not counted) |
+| `ReloadFailures` | Reloads that failed and kept the previous list |
+| `LastReload` | Unix time of the last successful reload; `0` if none since start |
 
 `SNI_Server` adds the connection cap and counters that say how connections
 ended. Each connection is counted once, under the reason it ended; a relay that

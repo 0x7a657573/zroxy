@@ -761,7 +761,12 @@ The report starts with the version, `CountOfOpenFile`, and the `Process`
 object. `Process` is not a statistics object: the worker fills it on each
 request from `getpid`, `getrlimit`, `getrusage`, and (on Linux) one bounded
 read of `/proc/self/status` into a stack buffer. It takes no lock and
-allocates nothing. Statistics objects follow.
+allocates nothing. Registered sections follow, then the statistics objects.
+
+A section (`monitor_add_section`) is a named top-level object written by a
+callback. `main` registers `Whitelist` this way when a whitelist file is
+configured, because the whitelist is not a statistics object and has no
+connection counters.
 
 The JSON is formatted into one 16 KiB stack buffer. The response head is built
 in reserved space in front of the body, so the head and body leave in a single
@@ -773,7 +778,9 @@ empty 500 and logs the overflow once.
 The monitor uses two lock levels:
 
 - `stats_lock` protects the linked-list head when statistics objects are added
-  or the list is read;
+  or the list is read, and the section list. A report walks the section list
+  with it held, so a section callback must be short and must not call back into
+  the monitor (the whitelist callback takes only the filter read lock);
 - each `statistics_t::Lock` protects that object's counters.
 
 The list lock is released before `stats_get` takes an individual statistics
@@ -821,7 +828,9 @@ exact name, never a longer name that starts with it.
 A reload builds a complete new snapshot first, swaps it in under the write
 lock, then frees the old one; the write lock guarantees no reader still uses
 it. If opening, parsing, or allocating the replacement fails, the old snapshot
-is kept. Reloads come from the file watcher or from `SIGHUP`. On Linux the
+is kept. Each reload counts in `filter_t` as a success (`reloads`, with the
+time in `last_reload`) or a failure (`reload_failures`), as relaxed atomics, and
+the monitor reports them. Reloads come from the file watcher or from `SIGHUP`. On Linux the
 watcher watches the parent directory for `IN_CLOSE_WRITE`/`IN_MOVED_TO` on the
 file name, so a save by rename is seen and a half-written file is not loaded.
 
@@ -1001,6 +1010,10 @@ The monitor exposes one JSON document containing:
 - service uptime;
 - maximum, active, and total connections; and
 - total received/transmitted byte counts.
+
+When a whitelist file is configured, a `Whitelist` object reports the entry
+count, successful and failed reloads, and the time of the last successful
+reload.
 
 The `SNI_Server` object also reports the connection limit, how many connections
 reached the relay, and why the others ended (see
