@@ -8,7 +8,15 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "2.0.0"
+#define version	 "2.1.0"
+/*
+* args : accept up to four DNS routes, each with optional per-route SOCKS
+* dns : fail over between DNS routes, sticky on the working route
+* monitor : report the active DNS route and the route switch count
+* socks : offer username/password auth only when configured, fixes Tor
+* socks : name the failing SOCKS5 step and reply code in logs
+*/
+//#define version	 "2.0.0"
 /*
 * sni : refuse loopback and other unsafe resolved destinations
 * sni : refuse to run as an open proxy unless OPENPROXY is set
