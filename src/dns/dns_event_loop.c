@@ -708,9 +708,17 @@ static bool upstream_queue_query(dns_upstream_t *upstream)
 static void upstream_connected(dns_event_t *event, dns_upstream_t *upstream)
 {
 	if (event->dns->routes[upstream->route].socks) {
-		static const uint8_t hello[] = { 5, 2, 0, 2 };
-		memcpy(upstream->out, hello, sizeof(hello));
-		upstream->out_len = sizeof(hello);
+		static const uint8_t hello_auth[] = { 5, 2, 0, 2 };
+		static const uint8_t hello_noauth[] = { 5, 1, 0 };
+		sockshost_t *socks = event->dns->routes[upstream->route].socks;
+		/* Offer user/pass only when configured: Tor picks it whenever offered. */
+		if (socks->user && socks->pass) {
+			memcpy(upstream->out, hello_auth, sizeof(hello_auth));
+			upstream->out_len = sizeof(hello_auth);
+		} else {
+			memcpy(upstream->out, hello_noauth, sizeof(hello_noauth));
+			upstream->out_len = sizeof(hello_noauth);
+		}
 		upstream->out_off = 0;
 		upstream->socks_phase = SOCKS_GREETING;
 		upstream->state = UP_SOCKS_WRITE;

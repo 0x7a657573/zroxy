@@ -83,7 +83,12 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
     // +-----+----------+----------+
     // |  1  |    1     | 1 to 255 |
     // +-----+----------+----------+
-	if(!net_write_all_ms(*sockfd,"\x05\x02\x00\x02",4, io_ms))	/*Write Hello*/
+	/* Offer user/pass only when configured: Tor picks it whenever offered. */
+	if(socks->user && socks->pass)
+		status = net_write_all_ms(*sockfd,"\x05\x02\x00\x02",4, io_ms);
+	else
+		status = net_write_all_ms(*sockfd,"\x05\x01\x00",3, io_ms);
+	if(!status)	/*Write Hello*/
 	{
 		log_error("[!] Error writing SOCKS hello to %s", socks5_host);
 		socks5_close(sockfd);
@@ -135,7 +140,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 
 		if (!socks->user || !socks->pass)
 		{
-			log_error("[!] SOCKS username/password required");
+			log_error("[!] SOCKS server selected username/password auth, which we did not offer");
 			socks5_close(sockfd);
 			return false;
 		}

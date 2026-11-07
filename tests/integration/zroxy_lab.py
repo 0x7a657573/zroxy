@@ -718,7 +718,12 @@ class FakeTcpServer:
 class FakeSocks5Server:
     """Minimal SOCKS5 server: no-auth, CONNECT, then bidirectional relay."""
 
-    def __init__(self, upstream_host, upstream_port, fragment=1, fragment_gap=0.005):
+    def __init__(self, upstream_host, upstream_port, fragment=1, fragment_gap=0.005,
+                 tor_like=False, credentials=("user", "pass")):
+        # tor_like: select user/pass (0x02) whenever the client offers it.
+        self.tor_like = tor_like
+        self.credentials = credentials
+        self.auth_requests = []
         self.upstream_host = upstream_host
         self.upstream_port = upstream_port
         self.fragment = fragment
@@ -764,7 +769,21 @@ class FakeSocks5Server:
             greeting = ver_n + methods
             with self._lock:
                 self.greetings.append(greeting)
-            _write_fragmented(self._stop, conn, b"\x05\x00", self.fragment, self.fragment_gap)
+            if self.tor_like and 2 in methods:
+                _write_fragmented(self._stop, conn, b"\x05\x02", self.fragment, self.fragment_gap)
+                auth_ver = _read_exact(conn, 2, 3.0)
+                user = _read_exact(conn, auth_ver[1], 3.0)
+                plen = _read_exact(conn, 1, 3.0)[0]
+                password = _read_exact(conn, plen, 3.0)
+                with self._lock:
+                    self.auth_requests.append((user.decode(), password.decode()))
+                good = (user.decode(), password.decode()) == tuple(self.credentials)
+                _write_fragmented(self._stop, conn, b"\x01" + (b"\x00" if good else b"\x01"),
+                                  self.fragment, self.fragment_gap)
+                if not good:
+                    return
+            else:
+                _write_fragmented(self._stop, conn, b"\x05\x00", self.fragment, self.fragment_gap)
             head = _read_exact(conn, 4, 3.0)
             ver, cmd, _rsv, atyp = head
             if ver != 5 or cmd != 1:

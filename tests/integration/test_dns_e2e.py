@@ -105,6 +105,44 @@ def test_dns_forward_through_socks():
             raise AssertionError("DNS did not issue a SOCKS CONNECT")
         if socks.connects[0] != ("127.0.0.1", upstream.port):
             raise AssertionError("unexpected SOCKS destination: %r" % (socks.connects,))
+        if not socks.greetings or socks.greetings[0] != b"\x05\x01\x00":
+            raise AssertionError("unexpected SOCKS greeting: %r" % (socks.greetings,))
+        proc.check_alive()
+
+
+def test_dns_socks_tor_like_without_credentials():
+    """A Tor-like proxy picks user/pass whenever offered: without credentials
+    the DNS path must offer only no-auth so the query still succeeds."""
+    query = zroxy_lab.build_dns_query("tor-dns.test", qid=0x1A2D)
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        socks = lab.socks_server(upstream_host="127.0.0.1", upstream_port=upstream.port,
+                                 tor_like=True)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, socks=socks, connections=4)
+        _expect_exact(ldns, query, 3.0)
+        if not socks.greetings or any(g != b"\x05\x01\x00" for g in socks.greetings):
+            raise AssertionError("greeting must offer only no-auth: %r" % (socks.greetings,))
+        if socks.auth_requests:
+            raise AssertionError("unexpected SOCKS auth: %r" % (socks.auth_requests,))
+        proc.check_alive()
+
+
+def test_dns_socks_tor_like_with_credentials():
+    """With credentials configured the DNS path offers user/pass and authenticates."""
+    query = zroxy_lab.build_dns_query("tor-auth-dns.test", qid=0x1A2E)
+    with zroxy_lab.Lab() as lab:
+        upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
+        socks = lab.socks_server(upstream_host="127.0.0.1", upstream_port=upstream.port,
+                                 tor_like=True)
+        ldns = zroxy_lab.free_udp_port()
+        proc = _start(lab, upstream, ldns, socks_addr="user:pass@127.0.0.1:%s" % socks.port,
+                      connections=4)
+        _expect_exact(ldns, query, 3.0)
+        if not socks.greetings or any(g != b"\x05\x02\x00\x02" for g in socks.greetings):
+            raise AssertionError("greeting must offer user/pass: %r" % (socks.greetings,))
+        if not socks.auth_requests or socks.auth_requests[0] != ("user", "pass"):
+            raise AssertionError("SOCKS auth mismatch: %r" % (socks.auth_requests,))
         proc.check_alive()
 
 
@@ -772,6 +810,8 @@ def main():
         test_dns_forward_fragmented,
         test_dns_bounded_failures,
         test_dns_forward_through_socks,
+        test_dns_socks_tor_like_without_credentials,
+        test_dns_socks_tor_like_with_credentials,
         test_dns_hostname_resolution_retries,
         test_dns_hostname_upstream_forwards,
         test_dns_full_size_udp_queries_forward,

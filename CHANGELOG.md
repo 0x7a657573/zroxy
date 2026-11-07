@@ -36,6 +36,17 @@ These notes describe the `2.0.0` release. Nothing here says the result is produc
   once with one route) instead of leaving the query waiting until its
   deadline.
 
+### Fixed
+
+- The SOCKS5 client offers username/password authentication (method `0x02`)
+  only when both a user and a password are configured; otherwise its greeting
+  offers no-auth (`0x00`) alone. Before, it always offered both, and a server
+  that picks `0x02` whenever it is offered, such as Tor, made every SNI and
+  DNS connection fail with "SOCKS username/password required" when no
+  credentials were set (in releases before 2.0.0 this was a crash). A server
+  that still selects `0x02` without credentials is rejected as having chosen
+  a method zroxy did not offer.
+
 ## 2.0.0 - 2026-11-01
 
 ### Breaking
