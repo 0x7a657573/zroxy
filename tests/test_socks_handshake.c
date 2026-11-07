@@ -104,7 +104,8 @@ enum scenario_mode
     SCENARIO_BAD_METHOD = 6,
     SCENARIO_TRUNCATED_METHOD = 7,
     SCENARIO_BAD_ATYP = 8,
-    SCENARIO_AUTH_REJECTED = 9
+    SCENARIO_AUTH_REJECTED = 9,
+    SCENARIO_TOR_LIKE = 10
 };
 
 typedef struct
@@ -112,6 +113,8 @@ typedef struct
     int listen_fd;
     enum scenario_mode mode;
     bool server_ok;
+    bool creds;
+    bool offered_auth;
     int stage;
 } scenario_t;
 
@@ -145,15 +148,20 @@ static void *server_thread(void *arg)
     }
     sc->stage = 1;
 
+    /* The client offers user/pass (0x02) only when credentials are configured. */
     uint8_t hello[4];
-    const uint8_t expected_hello[4] = {0x05, 0x02, 0x00, 0x02};
-    if (!read_exact_fd(client_fd, hello, sizeof(hello)))
+    const uint8_t expected_hello_auth[4] = {0x05, 0x02, 0x00, 0x02};
+    const uint8_t expected_hello_noauth[3] = {0x05, 0x01, 0x00};
+    size_t hello_len = sc->creds ? sizeof(expected_hello_auth) : sizeof(expected_hello_noauth);
+    const uint8_t *expected_hello = sc->creds ? expected_hello_auth : expected_hello_noauth;
+    if (!read_exact_fd(client_fd, hello, hello_len))
     {
         sc->stage = -2;
         close(client_fd);
         return NULL;
     }
-    if (memcmp(hello, expected_hello, sizeof(hello)) != 0)
+    sc->offered_auth = hello_len == 4;
+    if (memcmp(hello, expected_hello, hello_len) != 0)
     {
         sc->stage = -3;
         close(client_fd);
@@ -228,6 +236,54 @@ static void *server_thread(void *arg)
         if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
         {
             sc->stage = -12;
+            close(client_fd);
+            return NULL;
+        }
+        sc->server_ok = true;
+    }
+    else if (sc->mode == SCENARIO_TOR_LIKE)
+    {
+        /* Like Tor: pick user/pass whenever it was offered, else no auth. */
+        const uint8_t method_reply[2] = {0x05, 0x02};
+        const uint8_t method_reply_none[2] = {0x05, 0x00};
+        const uint8_t expected_auth[] = {
+            0x01, 0x04, 'u', 's', 'e', 'r',
+            0x04, 'p', 'a', 's', 's'
+        };
+        const uint8_t auth_reply[2] = {0x01, 0x00};
+        const uint8_t connect_reply[] = {0x05, 0x00, 0x00, 0x01, 10, 0, 0, 1, 0x04, 0x38};
+        uint8_t auth_buf[sizeof(expected_auth)];
+        if (!write_split_bytes(client_fd, sc->offered_auth ? method_reply : method_reply_none, 2))
+        {
+            sc->stage = -26;
+            close(client_fd);
+            return NULL;
+        }
+        if (sc->offered_auth)
+        {
+            if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)) ||
+                memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
+            {
+                sc->stage = -27;
+                close(client_fd);
+                return NULL;
+            }
+            if (!write_split_bytes(client_fd, auth_reply, sizeof(auth_reply)))
+            {
+                sc->stage = -28;
+                close(client_fd);
+                return NULL;
+            }
+        }
+        if (!expect_connect_request_ipv4(client_fd, "5.6.7.8", 443))
+        {
+            sc->stage = -29;
+            close(client_fd);
+            return NULL;
+        }
+        if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
+        {
+            sc->stage = -30;
             close(client_fd);
             return NULL;
         }
@@ -403,6 +459,7 @@ static bool run_scenario(enum scenario_mode mode, sockshost_t *socks, const char
 
     sc.listen_fd = listen_fd;
     sc.mode = mode;
+    sc.creds = socks->user && socks->pass;
     sc.server_ok = false;
     if (pthread_create(&tid, NULL, server_thread, &sc) != 0)
     {
@@ -450,6 +507,22 @@ static void test_userpass_split_reply_success(void)
     (void)stage;
     expect_true(server_ok, "user/pass server observed expected bytes");
     expect_true(ok, "user/pass split reply handshake success");
+}
+
+static void test_tor_like_server(void)
+{
+    sockshost_t socks = {0};
+    bool server_ok = false;
+    int stage = 0;
+    bool ok = run_scenario(SCENARIO_TOR_LIKE, &socks, "5.6.7.8", 443, &server_ok, &stage);
+    expect_true(server_ok, "tor-like server saw only no-auth offered without credentials");
+    expect_true(ok, "tor-like server connect succeeds without credentials");
+
+    socks.user = "user";
+    socks.pass = "pass";
+    ok = run_scenario(SCENARIO_TOR_LIKE, &socks, "5.6.7.8", 443, &server_ok, &stage);
+    expect_true(server_ok, "tor-like server saw user/pass offered and authenticated");
+    expect_true(ok, "tor-like server connect succeeds with credentials");
 }
 
 static void test_auth_without_password_fails(void)
@@ -583,6 +656,7 @@ int main(void)
     test_no_auth_split_reply_success();
     test_userpass_split_reply_success();
     test_close_mid_reply_fails();
+    test_tor_like_server();
     test_auth_without_password_fails();
     test_malformed_replies_fail();
     test_stalled_socks_times_out();

@@ -915,10 +915,16 @@ static bool socks_expect(sni_conn *c, uint32_t need, int phase)
 
 static bool socks_queue_greet(sni_conn *c)
 {
-	static const uint8_t greet[4] = {0x05, 0x02, 0x00, 0x02};
-	memcpy(c->socks_out, greet, sizeof(greet));
+	static const uint8_t greet_auth[4] = {0x05, 0x02, 0x00, 0x02};
+	static const uint8_t greet_noauth[3] = {0x05, 0x01, 0x00};
+	/* Offer user/pass only when configured: Tor picks it whenever offered. */
+	bool auth = c->cfg.Socks && c->cfg.Socks->user && c->cfg.Socks->pass;
+	if (auth)
+		memcpy(c->socks_out, greet_auth, sizeof(greet_auth));
+	else
+		memcpy(c->socks_out, greet_noauth, sizeof(greet_noauth));
 	c->socks_phase = SP_GREET;
-	c->socks_out_len = 4;
+	c->socks_out_len = auth ? 4 : 3;
 	c->socks_out_off = 0;
 	c->socks_in_len = 0;
 	c->socks_need = 0;
@@ -934,7 +940,7 @@ static bool socks_queue_auth(sni_conn *c)
 	size_t plen;
 	uint8_t *out = c->socks_out;
 	if (!c->cfg.Socks || !c->cfg.Socks->user || !c->cfg.Socks->pass) {
-		log_error("[!] SOCKS username/password required");
+		log_error("[!] SOCKS server selected username/password auth, which we did not offer");
 		return false;
 	}
 	user = c->cfg.Socks->user;

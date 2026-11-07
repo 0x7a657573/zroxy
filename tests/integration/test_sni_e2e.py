@@ -61,7 +61,7 @@ def test_sni_socks5():
         proc.check_alive()
         if not socks.greetings:
             raise AssertionError("SOCKS5 server received no greeting")
-        if socks.greetings[0] != b"\x05\x02\x00\x02":
+        if socks.greetings[0] != b"\x05\x01\x00":
             raise AssertionError("unexpected SOCKS5 greeting %r" % socks.greetings[0])
         if ("localhost", upstream.port) not in socks.connects:
             raise AssertionError("CONNECT target mismatch: %r" % socks.connects)

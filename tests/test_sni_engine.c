@@ -855,7 +855,8 @@ enum {
 	SOCKS_BAD_VER,
 	SOCKS_BAD_METHOD,
 	SOCKS_BAD_AUTH,
-	SOCKS_BAD_REP
+	SOCKS_BAD_REP,
+	SOCKS_TOR
 };
 
 typedef struct socks_job {
@@ -866,6 +867,8 @@ typedef struct socks_job {
 	uint16_t upstream_port;
 	int split;
 	int ok;
+	int nmethods;
+	int offered_auth;
 	char host[256];
 	int port;
 } socks_job;
@@ -966,6 +969,10 @@ static void *socks_thread(void *arg)
 		close(fd);
 		return NULL;
 	}
+	job->nmethods = hdr[1];
+	for (int i = 0; i < hdr[1]; i++)
+		if (methods[i] == 0x02)
+			job->offered_auth = 1;
 	if (job->mode == SOCKS_BAD_VER) {
 		socks_write(fd, "\x04\x00", 2, job->split);
 		close(fd);
@@ -978,7 +985,9 @@ static void *socks_thread(void *arg)
 		job->ok = 1;
 		return NULL;
 	}
-	if (job->mode == SOCKS_AUTH || job->mode == SOCKS_BAD_AUTH) {
+	/* SOCKS_TOR selects username/password whenever the client offers it. */
+	if (job->mode == SOCKS_AUTH || job->mode == SOCKS_BAD_AUTH ||
+			(job->mode == SOCKS_TOR && job->offered_auth)) {
 		uint8_t alen[2];
 		uint8_t auth[512];
 		size_t need;
@@ -1105,7 +1114,7 @@ static void test_socks_mode(int mode, int with_auth, int split, const char *name
 	client = make_client(pair[1], eport, 4, NULL, NULL, &socks);
 	expect_true(client && pthread_create(&htid, NULL, sni_client_handler, client) == 0, "socks handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "socks client write");
-	if (mode == SOCKS_NOAUTH || mode == SOCKS_AUTH) {
+	if (mode == SOCKS_NOAUTH || mode == SOCKS_AUTH || mode == SOCKS_TOR) {
 		struct pollfd pfd;
 		pfd.fd = efd;
 		pfd.events = POLLIN;
@@ -1142,6 +1151,8 @@ static void test_socks_mode(int mode, int with_auth, int split, const char *name
 	pthread_join(htid, NULL);
 	pthread_join(stid, NULL);
 	expect_true(job.ok == 1, name);
+	expect_int(job.nmethods, with_auth ? 2 : 1, "socks greeting method count");
+	expect_int(job.offered_auth, with_auth, "socks offers user/pass only with credentials");
 	close(sfd);
 	close(efd);
 	sni_test_clear_faults();
@@ -3027,6 +3038,9 @@ int main(void)
 	test_socks_mode(SOCKS_NOAUTH, 0, 0, "socks direct");
 	test_socks_mode(SOCKS_AUTH, 1, 0, "socks auth");
 	test_socks_mode(SOCKS_AUTH, 1, 1, "socks split bytes");
+	test_socks_mode(SOCKS_TOR, 0, 0, "socks tor without credentials");
+	test_socks_mode(SOCKS_TOR, 1, 0, "socks tor with credentials");
+	test_socks_mode(SOCKS_TOR, 0, 1, "socks tor split bytes without credentials");
 	test_socks_mode(SOCKS_BAD_VER, 0, 0, "socks bad version");
 	test_socks_mode(SOCKS_BAD_METHOD, 0, 0, "socks bad method");
 	test_socks_mode(SOCKS_BAD_AUTH, 1, 0, "socks bad auth");
