@@ -1,8 +1,8 @@
 # Changelog
 
-These notes describe the `2.0.0` release. Nothing here says the result is production-ready.
+These notes describe the `2.1.0` release. Nothing here says the result is production-ready.
 
-## Unreleased
+## 2.1.0 - 2026-11-07
 
 ### DNS
 
@@ -35,6 +35,19 @@ These notes describe the `2.0.0` release. Nothing here says the result is produc
 - A connect that fails immediately now counts as a failed attempt (retried
   once with one route) instead of leaving the query waiting until its
   deadline.
+
+### OpenWrt
+
+- `/etc/config/zroxy` now holds the settings in `main`, `dns`, `route` and
+  `monitor` sections, and the init script writes `/var/etc/zroxy/zroxy.conf`
+  from them at start. Setting `config_file` keeps a hand-written config in
+  use unchanged. Values with line breaks, more than four routes and bad
+  booleans make the start fail. The OpenWrt guide documents the sections,
+  the option-to-key table and how to migrate from `config_file`.
+- An enabled `dns` section with no enabled `route` now fails at start with a
+  clear message, instead of zroxy exiting at once and procd respawning it
+  until it gives up.
+- The package is built by its directory name in the SDK, as documented.
 
 ### Fixed
 
