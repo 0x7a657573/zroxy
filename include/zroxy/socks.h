@@ -34,6 +34,9 @@ typedef struct
 	uint8_t status;
 }SocksAuthenticationReplay_t;
 
+/* Name of a SOCKS5 reply code (RFC 1928 REP, plus Tor's extended codes), for logs. */
+const char *socks5_rep_name(uint8_t rep);
+
 bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,bool keepalive, int timeout_sec);
 
 #endif /* SOCKS_H_ */

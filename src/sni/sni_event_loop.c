@@ -1010,7 +1010,10 @@ static bool socks_on_recv(sni_engine *e, sni_conn *c)
 			return false;
 		}
 		if (method != 0 && method != 2) {
-			log_error("[!] We can not support Method %d", method);
+			if (method == 0xFF)
+				log_error("[!] SOCKS server replied: no acceptable authentication method");
+			else
+				log_error("[!] SOCKS server selected unsupported method 0x%02X", method);
 			return false;
 		}
 		if (method == 2)
@@ -1033,7 +1036,9 @@ static bool socks_on_recv(sni_engine *e, sni_conn *c)
 			return false;
 		}
 		if (rep != 0) {
-			log_error("[!] Error Success Command: %d", rep);
+			log_error("[!] SOCKS server %s:%u refused CONNECT: reply 0x%02X (%s)",
+				c->cfg.Socks ? c->cfg.Socks->host : "?",
+				c->cfg.Socks ? (unsigned)c->cfg.Socks->port : 0u, rep, socks5_rep_name(rep));
 			return false;
 		}
 		if (atyp == 0x01)

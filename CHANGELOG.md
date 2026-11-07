@@ -46,6 +46,13 @@ These notes describe the `2.0.0` release. Nothing here says the result is produc
   credentials were set (in releases before 2.0.0 this was a crash). A server
   that still selects `0x02` without credentials is rejected as having chosen
   a method zroxy did not offer.
+- SOCKS5 handshake failures now say which step failed. The DNS path used to
+  log only "NO DATA DNS upstream request failed"; it now also logs the SOCKS
+  server and the failing step: bad version, no acceptable authentication
+  method (`0xFF`), unsupported method, rejected username/password, refused
+  CONNECT or unsupported address type. A refused CONNECT names the reply
+  code, including Tor's onion-service codes (`0xF0`-`0xF7`), instead of
+  "Error Success Command". Credentials are never logged.
 
 ## 2.0.0 - 2026-11-01
 
