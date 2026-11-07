@@ -644,9 +644,44 @@ static bool can_run_loopback_socket_test(void)
     return true;
 }
 
+static void expect_str(const char *got, const char *want, const char *name)
+{
+    if (strcmp(got, want) != 0)
+    {
+        fprintf(stderr, "FAIL: %s got \"%s\" want \"%s\"\n", name, got, want);
+        failures++;
+    }
+}
+
+static void test_rep_names(void)
+{
+    expect_str(socks5_rep_name(0x00), "succeeded", "rep 0x00");
+    expect_str(socks5_rep_name(0x01), "general SOCKS server failure", "rep 0x01");
+    expect_str(socks5_rep_name(0x02), "connection not allowed by ruleset", "rep 0x02");
+    expect_str(socks5_rep_name(0x03), "network unreachable", "rep 0x03");
+    expect_str(socks5_rep_name(0x04), "host unreachable", "rep 0x04");
+    expect_str(socks5_rep_name(0x05), "connection refused", "rep 0x05");
+    expect_str(socks5_rep_name(0x06), "TTL expired", "rep 0x06");
+    expect_str(socks5_rep_name(0x07), "command not supported", "rep 0x07");
+    expect_str(socks5_rep_name(0x08), "address type not supported", "rep 0x08");
+    expect_str(socks5_rep_name(0xF0), "onion service descriptor not found", "rep 0xF0");
+    expect_str(socks5_rep_name(0xF1), "onion service descriptor invalid", "rep 0xF1");
+    expect_str(socks5_rep_name(0xF2), "onion service introduction failed", "rep 0xF2");
+    expect_str(socks5_rep_name(0xF3), "onion service rendezvous failed", "rep 0xF3");
+    expect_str(socks5_rep_name(0xF4), "onion service missing client authorization", "rep 0xF4");
+    expect_str(socks5_rep_name(0xF5), "onion service wrong client authorization", "rep 0xF5");
+    expect_str(socks5_rep_name(0xF6), "invalid onion service address", "rep 0xF6");
+    expect_str(socks5_rep_name(0xF7), "onion service introduction timed out", "rep 0xF7");
+    expect_str(socks5_rep_name(0x09), "unknown", "rep 0x09");
+    expect_str(socks5_rep_name(0xFF), "unknown", "rep 0xFF");
+}
+
 int main(void)
 {
     log_set_quiet(1);
+
+    /* Pure function: runs even where loopback sockets are unavailable. */
+    test_rep_names();
 
     if (!can_run_loopback_socket_test())
     {

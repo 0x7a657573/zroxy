@@ -652,8 +652,10 @@ static bool queue_socks_request(dns_event_t *event, dns_upstream_t *upstream)
 	const char *host = event->dns->routes[upstream->route].upstream.ip;
 	size_t hlen = strlen(host);
 	uint16_t port = htons(event->dns->routes[upstream->route].upstream.port);
-	if (hlen == 0 || hlen > 255 || hlen + 7 > sizeof(upstream->out))
+	if (hlen == 0 || hlen > 255 || hlen + 7 > sizeof(upstream->out)) {
+		log_error("[!] DNS upstream host name is unusable in a SOCKS request (length %zu)", hlen);
 		return false;
+	}
 	upstream->out[0] = 5;
 	upstream->out[1] = 1;
 	upstream->out[2] = 0;
@@ -806,23 +808,50 @@ static void upstream_write(dns_event_t *event, dns_upstream_t *upstream)
 
 static bool socks_read_done(dns_event_t *event, dns_upstream_t *upstream)
 {
+	sockshost_t *socks = event->dns->routes[upstream->route].socks;
+	const char *shost = socks && socks->host ? socks->host : "?";
+	unsigned sport = socks ? (unsigned)socks->port : 0u;
 	if (upstream->socks_phase == SOCKS_GREETING) {
-		if (upstream->in[0] != 5)
+		if (upstream->in[0] != 5) {
+			log_error("[!] SOCKS server %s:%u greeting reply has bad version %u", shost, sport,
+					(unsigned)upstream->in[0]);
 			return false;
+		}
 		if (upstream->in[1] == 0)
 			return queue_socks_request(event, upstream);
-		if (upstream->in[1] == 2)
-			return queue_socks_auth(event, upstream);
+		if (upstream->in[1] == 2) {
+			if (queue_socks_auth(event, upstream))
+				return true;
+			log_error("[!] SOCKS server %s:%u selected username/password auth, but none is usable (not configured or length rejected)",
+					shost, sport);
+			return false;
+		}
+		if (upstream->in[1] == 0xFF)
+			log_error("[!] SOCKS server %s:%u replied: no acceptable authentication method", shost, sport);
+		else
+			log_error("[!] SOCKS server %s:%u selected unsupported method 0x%02X", shost, sport,
+					(unsigned)upstream->in[1]);
 		return false;
 	}
 	if (upstream->socks_phase == SOCKS_AUTH) {
-		if (upstream->in[0] != 1 || upstream->in[1] != 0)
+		if (upstream->in[0] != 1 || upstream->in[1] != 0) {
+			log_error("[!] SOCKS server %s:%u rejected username/password authentication (status 0x%02X)",
+					shost, sport, (unsigned)upstream->in[1]);
 			return false;
+		}
 		return queue_socks_request(event, upstream);
 	}
 	if (upstream->socks_phase == SOCKS_REQUEST) {
-		if (upstream->in[0] != 5 || upstream->in[1] != 0)
+		if (upstream->in[0] != 5) {
+			log_error("[!] SOCKS server %s:%u CONNECT reply has bad version %u", shost, sport,
+					(unsigned)upstream->in[0]);
 			return false;
+		}
+		if (upstream->in[1] != 0) {
+			log_error("[!] SOCKS server %s:%u refused CONNECT to the DNS upstream: reply 0x%02X (%s)",
+					shost, sport, (unsigned)upstream->in[1], socks5_rep_name(upstream->in[1]));
+			return false;
+		}
 		if (upstream->in[3] == 1) {
 			upstream->socks_phase = SOCKS_REPLY_REST;
 			upstream->in_len = 0;
@@ -841,6 +870,8 @@ static bool socks_read_done(dns_event_t *event, dns_upstream_t *upstream)
 			upstream->in_need = 1;
 			return true;
 		}
+		log_error("[!] SOCKS server %s:%u CONNECT reply has unsupported address type 0x%02X", shost,
+				sport, (unsigned)upstream->in[3]);
 		return false;
 	}
 	if (upstream->socks_phase == SOCKS_REPLY_LEN) {
