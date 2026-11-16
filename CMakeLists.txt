@@ -89,7 +89,7 @@ zroxy_add_module(zroxy_monitor
 
 zroxy_add_module(zroxy_dns
     SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsacl.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dns_event_loop.c src/dns/dnsserver.c
-    DEPS zroxy_net zroxy_resolver zroxy_filter zroxy_stats zroxy_monitor)
+    DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats zroxy_monitor)
 
 # The SNI engine's own headers (event loop, resolver) stay private to
 # src/sni/; tests that drive the engine directly link zroxy_sni_internal.

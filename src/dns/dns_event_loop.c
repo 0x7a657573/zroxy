@@ -2,6 +2,7 @@
 
 #include "dns_event_loop.h"
 #include "sni_resolver.h"
+#include "reactor.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -9,7 +10,6 @@
 #include <limits.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -29,7 +29,9 @@
 #define DNS_EVENT_REQUESTS 2048u
 #define DNS_EVENT_RESPONSE_BYTES (16u * 1024u * 1024u)
 #define DNS_EVENT_UDP_BURST 64u
-#define DNS_EVENT_POLL_MAX (4u + DNS_EVENT_UPSTREAMS + DNS_EVENT_CLIENTS)
+/* Fixed sockets, upstreams and clients; bounds the poll backend only. */
+#define DNS_REACTOR_CAP (4 + DNS_EVENT_UPSTREAMS + DNS_EVENT_CLIENTS)
+#define DNS_EVENT_BATCH 64
 #define DNS_EVENT_IDLE_MS 30000
 #define DNS_RESOLVE_RETRY_MS 1000
 #define DNS_RESOLVE_REFRESH_MS 60000
@@ -81,6 +83,11 @@ struct dns_request {
 
 struct dns_client {
 	dns_client_t *next;
+	dns_client_t *dead_next;
+	dns_watch_t watch;
+	uint32_t interest;
+	int registered;
+	int dead;
 	dns_event_t *event;
 	dns_request_t *request;
 	int fd;
@@ -98,6 +105,10 @@ struct dns_client {
 
 struct dns_upstream {
 	dns_event_t *event;
+	dns_watch_t watch;
+	uint32_t interest;
+	int registered;
+	uint64_t closed_batch;
 	dns_request_t *request;
 	int fd;
 	int state;
@@ -141,7 +152,11 @@ struct dns_event {
 	dns_route_state_t routes[DNS_ROUTES_MAX];
 	unsigned active;	/* route that new queries go to */
 	dns_upstream_t upstreams[DNS_EVENT_UPSTREAMS];
+	reactor re;
+	dns_watch_t fixed[4];
+	uint64_t batch;
 	dns_client_t *clients;
+	dns_client_t *graveyard;
 	unsigned client_count;
 	dns_request_t *pending_head;
 	dns_request_t *pending_tail;
@@ -310,10 +325,12 @@ static void client_close(dns_event_t *event, dns_client_t *client)
 		client->request->client = NULL;
 		client->request = NULL;
 	}
+	if (client->registered)
+		reactor_del(&event->re, client->fd);
+	client->registered = 0;
 	close_fd(&client->fd);
 	if (__atomic_load_n(&event->dns->tcp_active, __ATOMIC_RELAXED) > 0)
 		__atomic_sub_fetch(&event->dns->tcp_active, 1, __ATOMIC_RELAXED);
-	free(client->output);
 	p = &event->clients;
 	while (*p && *p != client)
 		p = &(*p)->next;
@@ -321,7 +338,23 @@ static void client_close(dns_event_t *event, dns_client_t *client)
 		*p = client->next;
 	if (event->client_count > 0)
 		event->client_count--;
-	free(client);
+	/*
+	 * A ready batch may still hold an event for this client, so it is freed
+	 * only after the batch (client_reap); dispatch skips dead clients.
+	 */
+	client->dead = 1;
+	client->dead_next = event->graveyard;
+	event->graveyard = client;
+}
+
+static void client_reap(dns_event_t *event)
+{
+	while (event->graveyard) {
+		dns_client_t *client = event->graveyard;
+		event->graveyard = client->dead_next;
+		free(client->output);
+		free(client);
+	}
 }
 
 static bool client_queue_reply(dns_client_t *client, const uint8_t *buf, size_t len)
@@ -554,6 +587,14 @@ static void upstream_close(dns_event_t *event, dns_upstream_t *upstream)
 {
 	if (upstream->fd >= 0 && event->dns->active_upstreams > 0)
 		__atomic_sub_fetch(&event->dns->active_upstreams, 1u, __ATOMIC_RELAXED);
+	if (upstream->registered)
+		reactor_del(&event->re, upstream->fd);
+	upstream->registered = 0;
+	/*
+	 * The slot may be reopened in this same batch while a ready event for
+	 * the old connection is still queued: upstream_dispatch drops it.
+	 */
+	upstream->closed_batch = event->batch;
 	close_fd(&upstream->fd);
 	upstream->state = UP_CLOSED;
 	upstream->out_len = upstream->out_off = 0;
@@ -844,11 +885,11 @@ static void upstream_read(dns_event_t *event, dns_upstream_t *upstream)
 	}
 }
 
-static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, short revents)
+static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, uint32_t revents)
 {
 	if (!upstream || upstream->fd < 0)
 		return;
-	if (upstream->state == UP_CONNECT && (revents & (POLLOUT | POLLERR | POLLHUP))) {
+	if (upstream->state == UP_CONNECT && (revents & (RE_OUT | RE_ERR | RE_HUP))) {
 		int error = 0;
 		socklen_t len = sizeof(error);
 		if (getsockopt(upstream->fd, SOL_SOCKET, SO_ERROR, &error, &len) != 0 || error != 0) {
@@ -858,21 +899,21 @@ static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, short re
 		upstream_connected(event, upstream);
 	}
 	if (upstream->state == UP_QUERY_WRITE || upstream->state == UP_SOCKS_WRITE) {
-		if (revents & POLLOUT)
+		if (revents & RE_OUT)
 			upstream_write(event, upstream);
-		else if (revents & (POLLERR | POLLHUP))
+		else if (revents & (RE_ERR | RE_HUP))
 			upstream_fail(event, upstream);
 		return;
 	}
 	if (upstream->state == UP_REPLY_LEN || upstream->state == UP_REPLY_BODY ||
 		upstream->state == UP_SOCKS_READ) {
-		if (revents & POLLIN)
+		if (revents & RE_IN)
 			upstream_read(event, upstream);
-		else if (revents & (POLLERR | POLLHUP))
+		else if (revents & (RE_ERR | RE_HUP))
 			upstream_fail(event, upstream);
 		return;
 	}
-	if (upstream->state == UP_IDLE && revents & (POLLIN | POLLERR | POLLHUP))
+	if (upstream->state == UP_IDLE && revents & (RE_IN | RE_ERR | RE_HUP))
 		upstream_close(event, upstream);
 }
 
@@ -951,14 +992,15 @@ static void schedule(dns_event_t *event)
 	}
 }
 
-static void client_pump(dns_event_t *event, dns_client_t *client, short revents)
+static void client_pump(dns_event_t *event, dns_client_t *client, uint32_t revents)
 {
 	if (!client || client->fd < 0) return;
-	if (revents & (POLLERR | POLLHUP)) {
+	/* A half-closed peer reports IN|HUP: read what it sent before giving up. */
+	if ((revents & RE_ERR) || ((revents & RE_HUP) && !(revents & RE_IN))) {
 		client_close(event, client);
 		return;
 	}
-	if (client->state == CLIENT_WRITE && revents & POLLOUT) {
+	if (client->state == CLIENT_WRITE && revents & RE_OUT) {
 		for (;;) {
 			ssize_t n = write(client->fd, client->output + client->output_off,
 					client->output_len - client->output_off);
@@ -978,7 +1020,7 @@ static void client_pump(dns_event_t *event, dns_client_t *client, short revents)
 			client_close(event, client); return;
 		}
 	}
-	if ((client->state == CLIENT_READ_LEN || client->state == CLIENT_READ_QUERY) && revents & POLLIN) {
+	if ((client->state == CLIENT_READ_LEN || client->state == CLIENT_READ_QUERY) && revents & RE_IN) {
 		for (;;) {
 			ssize_t n = read(client->fd, client->input + client->input_off, client->input_need - client->input_off);
 			if (n > 0) {
@@ -1031,6 +1073,9 @@ static void accept_clients(dns_event_t *event)
 		if (!client) { close(fd); continue; }
 		client->event = event; client->fd = fd; client->state = CLIENT_READ_LEN;
 		client->input_need = 2; client->deadline_ms = mono_now() + DNS_TCP_IDLE_MS;
+		client->watch = (dns_watch_t){ WATCH_CLIENT, client };
+		if (!reactor_add(&event->re, fd, RE_IN, &client->watch)) { free(client); close(fd); continue; }
+		client->registered = 1; client->interest = RE_IN;
 		client->next = event->clients; event->clients = client; event->client_count++;
 		(void)__atomic_add_fetch(&event->dns->tcp_active, 1, __ATOMIC_RELAXED);
 	}
@@ -1240,47 +1285,113 @@ static void drain_wake(dns_event_t *event)
 	}
 }
 
+static uint32_t upstream_interest(const dns_upstream_t *upstream)
+{
+	switch (upstream->state) {
+	case UP_CONNECT: case UP_QUERY_WRITE: case UP_SOCKS_WRITE:
+		return RE_OUT;
+	case UP_IDLE: case UP_REPLY_LEN: case UP_REPLY_BODY: case UP_SOCKS_READ:
+		return RE_IN;
+	default:
+		return 0;
+	}
+}
+
+/* A waiting client has interest 0: the reactor still reports ERR and HUP. */
+static uint32_t client_interest(const dns_client_t *client)
+{
+	if (client->state == CLIENT_WRITE)
+		return RE_OUT;
+	return client->state == CLIENT_WAIT ? 0 : RE_IN;
+}
+
+/*
+ * Bring the reactor in line with the state transitions of the last batch.
+ * Only fds whose interest changed (or that were just opened) cost a syscall.
+ * An fd the reactor refuses is dropped like any other failed connection;
+ * that can schedule more work, so go again until nothing was dropped.
+ */
+static void sync_interest(dns_event_t *event)
+{
+	bool again;
+	do {
+		dns_client_t *client;
+		unsigned i;
+		again = false;
+		for (i = 0; i < event->dns->upstream_connections; i++) {
+			dns_upstream_t *upstream = &event->upstreams[i];
+			uint32_t want;
+			bool ok = true;
+			if (upstream->fd < 0)
+				continue;
+			want = upstream_interest(upstream);
+			if (!upstream->registered)
+				ok = reactor_add(&event->re, upstream->fd, want, &upstream->watch);
+			else if (upstream->interest != want)
+				ok = reactor_mod(&event->re, upstream->fd, want, &upstream->watch);
+			if (!ok) {
+				upstream_fail(event, upstream);
+				again = true;
+				continue;
+			}
+			upstream->registered = 1;
+			upstream->interest = want;
+		}
+		for (client = event->clients; client; ) {
+			dns_client_t *next = client->next;
+			uint32_t want = client_interest(client);
+			if (client->interest != want) {
+				if (!reactor_mod(&event->re, client->fd, want, &client->watch)) {
+					client_close(event, client);
+					again = true;
+				} else {
+					client->interest = want;
+				}
+			}
+			client = next;
+		}
+		client_reap(event);
+	} while (again);
+}
+
+static void upstream_dispatch(dns_event_t *event, dns_upstream_t *upstream, uint32_t revents)
+{
+	/* Closed earlier in this batch (maybe reopened): the event is stale. */
+	if (upstream->closed_batch == event->batch)
+		return;
+	upstream_pump(event, upstream, revents);
+}
+
 static void *event_main(void *arg)
 {
 	dns_event_t *event = arg;
 	while (!event->stop) {
-		struct pollfd fds[DNS_EVENT_POLL_MAX];
-		dns_watch_t watch[DNS_EVENT_POLL_MAX];
-		nfds_t count = 0;
-		int rc;
-		int64_t now = mono_now();
-		unsigned i;
-		dns_client_t *client;
-		fds[count] = (struct pollfd){ event->dns->local_sock, POLLIN, 0 }; watch[count++] = (dns_watch_t){ WATCH_UDP, NULL };
-		if (event->dns->tcp_sock >= 0) { fds[count] = (struct pollfd){ event->dns->tcp_sock, POLLIN, 0 }; watch[count++] = (dns_watch_t){ WATCH_TCP_LISTEN, NULL }; }
-		fds[count] = (struct pollfd){ event->dns->wake[0], POLLIN, 0 }; watch[count++] = (dns_watch_t){ WATCH_WAKE, NULL };
-		fds[count] = (struct pollfd){ event->resolver->pipe_read, POLLIN, 0 }; watch[count++] = (dns_watch_t){ WATCH_RESOLVER, NULL };
-		for (i = 0; i < event->dns->upstream_connections; i++) {
-			dns_upstream_t *upstream = &event->upstreams[i]; short events = 0;
-			if (upstream->fd < 0) continue;
-			if (upstream->state == UP_CONNECT || upstream->state == UP_QUERY_WRITE || upstream->state == UP_SOCKS_WRITE) events |= POLLOUT;
-			if (upstream->state == UP_IDLE || upstream->state == UP_REPLY_LEN || upstream->state == UP_REPLY_BODY || upstream->state == UP_SOCKS_READ) events |= POLLIN;
-			fds[count] = (struct pollfd){ upstream->fd, events, 0 }; watch[count++] = (dns_watch_t){ WATCH_UPSTREAM, upstream };
-		}
-		for (client = event->clients; client && count < DNS_EVENT_POLL_MAX; client = client->next) {
-			short events = client->state == CLIENT_WRITE ? POLLOUT : (client->state == CLIENT_WAIT ? 0 : POLLIN);
-			fds[count] = (struct pollfd){ client->fd, events, 0 }; watch[count++] = (dns_watch_t){ WATCH_CLIENT, client };
-		}
-		rc = poll(fds, count, loop_timeout(event, now));
-		if (rc < 0) { if (errno == EINTR) continue; log_error("dns event poll failed: %s", strerror(errno)); break; }
-		for (i = 0; i < count; i++) {
-			if (!fds[i].revents) continue;
-			switch (watch[i].kind) {
+		reactor_event ready[DNS_EVENT_BATCH];
+		int n;
+		int i;
+		n = reactor_wait(&event->re, ready, DNS_EVENT_BATCH, loop_timeout(event, mono_now()));
+		if (n < 0) { if (errno == EINTR) continue; log_error("dns event wait failed: %s", strerror(errno)); break; }
+		event->batch++;
+		for (i = 0; i < n; i++) {
+			dns_watch_t *watch = ready[i].tag;
+			if (!watch) continue;
+			switch (watch->kind) {
 			case WATCH_UDP: pull_udp(event); break;
 			case WATCH_TCP_LISTEN: accept_clients(event); break;
 			case WATCH_WAKE: drain_wake(event); event->stop = 1; break;
 			case WATCH_RESOLVER: resolver_drain(event); break;
-			case WATCH_UPSTREAM: upstream_pump(event, watch[i].ptr, fds[i].revents); break;
-			case WATCH_CLIENT: client_pump(event, watch[i].ptr, fds[i].revents); break;
+			case WATCH_UPSTREAM: upstream_dispatch(event, watch->ptr, ready[i].ev); break;
+			case WATCH_CLIENT:
+				/* Closed by an earlier event of this batch; freed after it. */
+				if (!((dns_client_t *)watch->ptr)->dead)
+					client_pump(event, watch->ptr, ready[i].ev);
+				break;
 			default: break;
 			}
 		}
+		client_reap(event);
 		sweep(event, mono_now());
+		sync_interest(event);
 	}
 	return NULL;
 }
@@ -1295,6 +1406,8 @@ static void event_destroy(dns_event_t *event)
 		upstream_close(event, &event->upstreams[i]);
 	}
 	while (event->clients) client_close(event, event->clients);
+	client_reap(event);
+	reactor_close(&event->re);
 	for (i = 0; i < DNS_ROUTES_MAX; i++) {
 		if (event->routes[i].upstream.req)
 			sni_resolver_cancel(event->routes[i].upstream.slot, event->routes[i].upstream.req);
@@ -1303,6 +1416,19 @@ static void event_destroy(dns_event_t *event)
 	}
 	if (event->resolver) { sni_resolver_sink_mark_closed(event->resolver); sni_resolver_sink_release(event->resolver); }
 	free(event);
+}
+
+static bool register_fixed(dns_event_t *event)
+{
+	event->fixed[0] = (dns_watch_t){ WATCH_UDP, NULL };
+	event->fixed[1] = (dns_watch_t){ WATCH_TCP_LISTEN, NULL };
+	event->fixed[2] = (dns_watch_t){ WATCH_WAKE, NULL };
+	event->fixed[3] = (dns_watch_t){ WATCH_RESOLVER, NULL };
+	return reactor_add(&event->re, event->dns->local_sock, RE_IN, &event->fixed[0]) &&
+		(event->dns->tcp_sock < 0 ||
+			reactor_add(&event->re, event->dns->tcp_sock, RE_IN, &event->fixed[1])) &&
+		reactor_add(&event->re, event->dns->wake[0], RE_IN, &event->fixed[2]) &&
+		reactor_add(&event->re, event->resolver->pipe_read, RE_IN, &event->fixed[3]);
 }
 
 bool dns_event_loop_start(dnsserver_t *dns)
@@ -1314,12 +1440,13 @@ bool dns_event_loop_start(dnsserver_t *dns)
 	if (!event) return false;
 	if (dns->upstream_connections == 0 || dns->upstream_connections > DNS_EVENT_UPSTREAMS)
 		dns->upstream_connections = DNS_EVENT_UPSTREAMS;
-	event->dns = dns; event->generation = 1;
+	event->dns = dns; event->generation = 1; event->re.epfd = -1;
 	for (i = 0; i < DNS_ROUTES_MAX; i++) event->routes[i].upstream.slot = event->routes[i].socks.slot = -1;
-	for (i = 0; i < DNS_EVENT_UPSTREAMS; i++) { event->upstreams[i].event = event; event->upstreams[i].fd = -1; event->upstreams[i].state = UP_CLOSED; }
+	for (i = 0; i < DNS_EVENT_UPSTREAMS; i++) { event->upstreams[i].event = event; event->upstreams[i].fd = -1; event->upstreams[i].watch = (dns_watch_t){ WATCH_UPSTREAM, &event->upstreams[i] }; event->upstreams[i].state = UP_CLOSED; }
 	if (pipe(dns->wake) != 0 || !net_set_nonblock_cloexec(dns->wake[0]) || !net_set_nonblock_cloexec(dns->wake[1]) ||
 		!net_set_nonblock_cloexec(dns->local_sock) || (dns->tcp_sock >= 0 && !net_set_nonblock_cloexec(dns->tcp_sock)) ||
-		!sni_resolver_sink_open(SNI_SINK_DIRECT, &event->resolver)) {
+		!sni_resolver_sink_open(SNI_SINK_DIRECT, &event->resolver) ||
+		!reactor_open(&event->re, DNS_REACTOR_CAP, false) || !register_fixed(event)) {
 		event_destroy(event); return false;
 	}
 	for (i = 0; i < dns->route_count; i++) {
