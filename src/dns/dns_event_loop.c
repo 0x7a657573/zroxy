@@ -21,6 +21,7 @@
 #include <zroxy/log.h>
 #include <zroxy/net.h>
 #include <zroxy/net_io.h>
+#include <zroxy/socks5_codec.h>
 
 /* These bounds keep the loop's memory and fd use independent of input load. */
 #define DNS_EVENT_UPSTREAMS 96u
@@ -40,8 +41,6 @@ enum upstream_state {
 	UP_SOCKS_WRITE, UP_SOCKS_READ
 };
 enum attempt_result { ATTEMPT_ERROR, ATTEMPT_BAD, ATTEMPT_LOCAL, ATTEMPT_TIMEOUT };
-enum socks_phase { SOCKS_GREETING, SOCKS_AUTH, SOCKS_REQUEST, SOCKS_REPLY_HEAD,
-	SOCKS_REPLY_LEN, SOCKS_REPLY_REST };
 enum watch_kind { WATCH_UDP, WATCH_TCP_LISTEN, WATCH_WAKE, WATCH_RESOLVER,
 	WATCH_UPSTREAM, WATCH_CLIENT };
 
@@ -102,7 +101,7 @@ struct dns_upstream {
 	dns_request_t *request;
 	int fd;
 	int state;
-	int socks_phase;
+	socks5_client socks;
 	uint8_t out[600];
 	size_t out_len;
 	size_t out_off;
@@ -647,52 +646,6 @@ static void upstream_fail(dns_event_t *event, dns_upstream_t *upstream)
 	upstream_fail_mode(event, upstream, ATTEMPT_ERROR);
 }
 
-static bool queue_socks_request(dns_event_t *event, dns_upstream_t *upstream)
-{
-	const char *host = event->dns->routes[upstream->route].upstream.ip;
-	size_t hlen = strlen(host);
-	uint16_t port = htons(event->dns->routes[upstream->route].upstream.port);
-	if (hlen == 0 || hlen > 255 || hlen + 7 > sizeof(upstream->out)) {
-		log_error("[!] DNS upstream host name is unusable in a SOCKS request (length %zu)", hlen);
-		return false;
-	}
-	upstream->out[0] = 5;
-	upstream->out[1] = 1;
-	upstream->out[2] = 0;
-	upstream->out[3] = 3;
-	upstream->out[4] = (uint8_t)hlen;
-	memcpy(upstream->out + 5, host, hlen);
-	memcpy(upstream->out + 5 + hlen, &port, sizeof(port));
-	upstream->out_len = 7 + hlen;
-	upstream->out_off = 0;
-	upstream->socks_phase = SOCKS_REQUEST;
-	upstream->state = UP_SOCKS_WRITE;
-	return true;
-}
-
-static bool queue_socks_auth(dns_event_t *event, dns_upstream_t *upstream)
-{
-	sockshost_t *socks = event->dns->routes[upstream->route].socks;
-	size_t ulen;
-	size_t plen;
-	if (!socks || !socks->user || !socks->pass)
-		return false;
-	ulen = strlen(socks->user);
-	plen = strlen(socks->pass);
-	if (ulen == 0 || ulen > 255 || plen > 255 || ulen + plen + 3 > sizeof(upstream->out))
-		return false;
-	upstream->out[0] = 1;
-	upstream->out[1] = (uint8_t)ulen;
-	memcpy(upstream->out + 2, socks->user, ulen);
-	upstream->out[2 + ulen] = (uint8_t)plen;
-	memcpy(upstream->out + 3 + ulen, socks->pass, plen);
-	upstream->out_len = 3 + ulen + plen;
-	upstream->out_off = 0;
-	upstream->socks_phase = SOCKS_AUTH;
-	upstream->state = UP_SOCKS_WRITE;
-	return true;
-}
-
 static bool upstream_queue_query(dns_upstream_t *upstream)
 {
 	dns_request_t *request = upstream->request;
@@ -707,23 +660,42 @@ static bool upstream_queue_query(dns_upstream_t *upstream)
 	return true;
 }
 
+static bool upstream_socks_apply(dns_event_t *event, dns_upstream_t *upstream, s5_step step)
+{
+	sockshost_t *socks = event->dns->routes[upstream->route].socks;
+	if (step == S5_SEND) {
+		memcpy(upstream->out, upstream->socks.out, upstream->socks.out_len);
+		upstream->out_len = upstream->socks.out_len;
+		upstream->out_off = 0;
+		upstream->state = UP_SOCKS_WRITE;
+		return true;
+	}
+	if (step == S5_READ) {
+		upstream->in_len = 0;
+		upstream->in_need = upstream->socks.need;
+		upstream->state = UP_SOCKS_READ;
+		return true;
+	}
+	if (step == S5_DONE) {
+		upstream->state = UP_IDLE;
+		upstream->idle_since_ms = mono_now();
+		return upstream_queue_query(upstream);
+	}
+	log_error("[!] SOCKS server %s:%u: %s", socks && socks->host ? socks->host : "?",
+			socks ? (unsigned)socks->port : 0u, socks5_client_strerror(&upstream->socks));
+	return false;
+}
+
 static void upstream_connected(dns_event_t *event, dns_upstream_t *upstream)
 {
 	if (event->dns->routes[upstream->route].socks) {
-		static const uint8_t hello_auth[] = { 5, 2, 0, 2 };
-		static const uint8_t hello_noauth[] = { 5, 1, 0 };
 		sockshost_t *socks = event->dns->routes[upstream->route].socks;
-		/* Offer user/pass only when configured: Tor picks it whenever offered. */
-		if (socks->user && socks->pass) {
-			memcpy(upstream->out, hello_auth, sizeof(hello_auth));
-			upstream->out_len = sizeof(hello_auth);
-		} else {
-			memcpy(upstream->out, hello_noauth, sizeof(hello_noauth));
-			upstream->out_len = sizeof(hello_noauth);
-		}
-		upstream->out_off = 0;
-		upstream->socks_phase = SOCKS_GREETING;
-		upstream->state = UP_SOCKS_WRITE;
+		/* The codec offers user/pass only when both are configured. */
+		if (!socks5_client_init(&upstream->socks, socks->user, socks->pass,
+				event->dns->routes[upstream->route].upstream.ip,
+				(uint16_t)event->dns->routes[upstream->route].upstream.port) ||
+			!upstream_socks_apply(event, upstream, socks5_client_start(&upstream->socks)))
+			upstream_fail(event, upstream);
 	} else if (!upstream_queue_query(upstream)) {
 		upstream_fail(event, upstream);
 	}
@@ -801,91 +773,8 @@ static void upstream_write(dns_event_t *event, dns_upstream_t *upstream)
 		upstream->state = UP_REPLY_LEN;
 		return;
 	}
-	upstream->in_len = 0;
-	upstream->in_need = upstream->socks_phase == SOCKS_REQUEST ? 4u : 2u;
-	upstream->state = UP_SOCKS_READ;
-}
-
-static bool socks_read_done(dns_event_t *event, dns_upstream_t *upstream)
-{
-	sockshost_t *socks = event->dns->routes[upstream->route].socks;
-	const char *shost = socks && socks->host ? socks->host : "?";
-	unsigned sport = socks ? (unsigned)socks->port : 0u;
-	if (upstream->socks_phase == SOCKS_GREETING) {
-		if (upstream->in[0] != 5) {
-			log_error("[!] SOCKS server %s:%u greeting reply has bad version %u", shost, sport,
-					(unsigned)upstream->in[0]);
-			return false;
-		}
-		if (upstream->in[1] == 0)
-			return queue_socks_request(event, upstream);
-		if (upstream->in[1] == 2) {
-			if (queue_socks_auth(event, upstream))
-				return true;
-			log_error("[!] SOCKS server %s:%u selected username/password auth, but none is usable (not configured or length rejected)",
-					shost, sport);
-			return false;
-		}
-		if (upstream->in[1] == 0xFF)
-			log_error("[!] SOCKS server %s:%u replied: no acceptable authentication method", shost, sport);
-		else
-			log_error("[!] SOCKS server %s:%u selected unsupported method 0x%02X", shost, sport,
-					(unsigned)upstream->in[1]);
-		return false;
-	}
-	if (upstream->socks_phase == SOCKS_AUTH) {
-		if (upstream->in[0] != 1 || upstream->in[1] != 0) {
-			log_error("[!] SOCKS server %s:%u rejected username/password authentication (status 0x%02X)",
-					shost, sport, (unsigned)upstream->in[1]);
-			return false;
-		}
-		return queue_socks_request(event, upstream);
-	}
-	if (upstream->socks_phase == SOCKS_REQUEST) {
-		if (upstream->in[0] != 5) {
-			log_error("[!] SOCKS server %s:%u CONNECT reply has bad version %u", shost, sport,
-					(unsigned)upstream->in[0]);
-			return false;
-		}
-		if (upstream->in[1] != 0) {
-			log_error("[!] SOCKS server %s:%u refused CONNECT to the DNS upstream: reply 0x%02X (%s)",
-					shost, sport, (unsigned)upstream->in[1], socks5_rep_name(upstream->in[1]));
-			return false;
-		}
-		if (upstream->in[3] == 1) {
-			upstream->socks_phase = SOCKS_REPLY_REST;
-			upstream->in_len = 0;
-			upstream->in_need = 6;
-			return true;
-		}
-		if (upstream->in[3] == 4) {
-			upstream->socks_phase = SOCKS_REPLY_REST;
-			upstream->in_len = 0;
-			upstream->in_need = 18;
-			return true;
-		}
-		if (upstream->in[3] == 3) {
-			upstream->socks_phase = SOCKS_REPLY_LEN;
-			upstream->in_len = 0;
-			upstream->in_need = 1;
-			return true;
-		}
-		log_error("[!] SOCKS server %s:%u CONNECT reply has unsupported address type 0x%02X", shost,
-				sport, (unsigned)upstream->in[3]);
-		return false;
-	}
-	if (upstream->socks_phase == SOCKS_REPLY_LEN) {
-		upstream->socks_phase = SOCKS_REPLY_REST;
-		upstream->in_len = 0;
-		upstream->in_need = (size_t)upstream->in[0] + 2u;
-		return true;
-	}
-	if (upstream->socks_phase == SOCKS_REPLY_REST) {
-		upstream->state = UP_IDLE;
-		upstream->idle_since_ms = mono_now();
-		return upstream_queue_query(upstream);
-	}
-	return false;
+	if (!upstream_socks_apply(event, upstream, socks5_client_sent(&upstream->socks)))
+		upstream_fail(event, upstream);
 }
 
 static void upstream_read(dns_event_t *event, dns_upstream_t *upstream)
@@ -915,7 +804,8 @@ static void upstream_read(dns_event_t *event, dns_upstream_t *upstream)
 				(upstream->state != UP_REPLY_BODY && upstream->in_len < upstream->in_need))
 				return;
 			if (upstream->state == UP_SOCKS_READ) {
-				if (!socks_read_done(event, upstream)) {
+				if (!upstream_socks_apply(event, upstream,
+						socks5_client_feed(&upstream->socks, upstream->in, upstream->in_len))) {
 					upstream_fail(event, upstream);
 					return;
 				}
