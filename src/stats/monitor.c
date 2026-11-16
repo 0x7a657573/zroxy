@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /*
  * monitor.c
  *
@@ -27,8 +28,13 @@
 #include <zroxy/net_io.h>
 #include <fcntl.h>
 #include <sys/resource.h>
+#include <poll.h>
 
 #define MON_MAX_WORKERS 32
+/* How long monitor_stop waits beyond the header timeout for workers. */
+#define MON_STOP_MARGIN_MS 1000
+/* A worker re-checks the stop flag at least this often. */
+#define MON_WORKER_SLICE_MS 100
 #define MON_MAX_HEADER 4096
 /* JSON body limit, and room in front of it for the response head. */
 #define MON_MAX_BODY 16384
@@ -59,6 +65,15 @@ static void mon_worker_release(void)
 	if (mon_workers > 0)
 		mon_workers--;
 	pthread_mutex_unlock(&mon_worker_mu);
+}
+
+static int mon_worker_count(void)
+{
+	int n;
+	pthread_mutex_lock(&mon_worker_mu);
+	n = mon_workers;
+	pthread_mutex_unlock(&mon_worker_mu);
+	return n;
 }
 
 static bool http_headers_done(const uint8_t *buf, size_t len)
@@ -268,7 +283,6 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	int sockfd;
 	struct in_addr addr;
 	mon_t *mon;
-	pthread_t thread_id;
 	const char *bind_text = bind_ip;
 
 	if (!bind_text || bind_text[0] == '\0')
@@ -315,22 +329,35 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	mon->state = NULL;
 	if (mon_process_start == 0)
 		time(&mon_process_start);
-	mon->fd = sockfd;
-	mon->Port = port;
-	mon->header_timeout = header_timeout_sec < 1 ? 5 : header_timeout_sec;
-	if (mon->header_timeout > 60)
-		mon->header_timeout = 60;
-
-	if (pthread_create(&thread_id, NULL, monitor_accept_thread, (void*)mon) != 0)
+	mon->wake[0] = mon->wake[1] = -1;
+	if (pipe2(mon->wake, O_CLOEXEC | O_NONBLOCK) != 0)
 	{
-		log_error("monitor thread create failed");
+		log_error("monitor wake pipe failed");
 		close(sockfd);
 		pthread_mutex_destroy(&mon->stats_lock);
 		mon_free_token(mon->token);
 		free(mon);
 		return NULL;
 	}
-	pthread_detach(thread_id);
+	/* the accept thread polls, so a wake-up never leaves it stuck in accept */
+	fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK);
+	mon->fd = sockfd;
+	mon->Port = port;
+	mon->header_timeout = header_timeout_sec < 1 ? 5 : header_timeout_sec;
+	if (mon->header_timeout > 60)
+		mon->header_timeout = 60;
+
+	if (pthread_create(&mon->accept_thread, NULL, monitor_accept_thread, (void*)mon) != 0)
+	{
+		log_error("monitor thread create failed");
+		close(sockfd);
+		close(mon->wake[0]);
+		close(mon->wake[1]);
+		pthread_mutex_destroy(&mon->stats_lock);
+		mon_free_token(mon->token);
+		free(mon);
+		return NULL;
+	}
 
 	return mon;
 }
@@ -383,6 +410,21 @@ static void *monitor_accept_thread(void *vargp)
 	monclient_t *client;
 	while(1)
 	{
+		struct pollfd pfd[2] = {
+			{ .fd = sockfd, .events = POLLIN },
+			{ .fd = mon->wake[0], .events = POLLIN }
+		};
+		if (poll(pfd, 2, -1) < 0)
+		{
+			if (errno != EINTR)
+				log_error("monitor poll failed");
+			continue;
+		}
+		if (pfd[1].revents)
+			break; /* monitor_stop */
+		if (!pfd[0].revents)
+			continue;
+
 		client = (monclient_t *)calloc(1, sizeof(monclient_t));
 		if (!client)
 			continue;
@@ -391,11 +433,13 @@ static void *monitor_accept_thread(void *vargp)
 		client->connid = accept(sockfd, (struct sockaddr*)&client->cli, &client->addr_len);
 		if (client->connid < 0)
 		{
-			if (errno != EINTR)
+			if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
 				log_error("server accept failed");
 			free(client);
 			continue;
 		}
+		/* some systems pass the listener's O_NONBLOCK on to the client */
+		fcntl(client->connid, F_SETFL, fcntl(client->connid, F_GETFL, 0) & ~O_NONBLOCK);
 
 		if (client->connid >= FD_SETSIZE || !mon_worker_acquire())
 		{
@@ -415,6 +459,53 @@ static void *monitor_accept_thread(void *vargp)
 		pthread_detach(thread_id);
 	}
 	return NULL;
+}
+
+void monitor_stop(mon_t *self)
+{
+	mon_section_t *sec;
+	statistics_t *stat;
+	int64_t deadline;
+	char b = 0;
+
+	if (!self)
+		return;
+	__atomic_store_n(&self->stopping, 1, __ATOMIC_RELEASE);
+	/* the pipe is empty and nonblocking: one byte always fits */
+	while (write(self->wake[1], &b, 1) < 0 && errno == EINTR)
+		;
+	pthread_join(self->accept_thread, NULL);
+	close(self->fd);
+	close(self->wake[0]);
+	close(self->wake[1]);
+
+	/* Workers are detached and hold self; wait for them, but not forever. */
+	deadline = net_mono_ms() + (int64_t)self->header_timeout * 1000 + MON_STOP_MARGIN_MS;
+	while (mon_worker_count() > 0)
+	{
+		if (net_mono_ms() >= deadline)
+		{
+			log_error("monitor clients did not finish; leaving monitor state allocated");
+			return;
+		}
+		usleep(10000);
+	}
+
+	for (sec = self->sections; sec; )
+	{
+		mon_section_t *next = sec->next;
+		free(sec);
+		sec = next;
+	}
+	for (stat = self->state; stat; )
+	{
+		statistics_t *next = stat->next;
+		stats_free(stat);
+		stat = next;
+	}
+	pthread_mutex_destroy(&self->stats_lock);
+	mon_free_token(self->token);
+	free(self);
 }
 
 static void *monitor_client_thread(void *arg)
@@ -449,6 +540,10 @@ static void *monitor_client_thread(void *arg)
 		if (now < 0 || now >= deadline)
 			break;
 		remain_ms = deadline - now;
+		if (__atomic_load_n(&client->owner->stopping, __ATOMIC_ACQUIRE))
+			break;
+		if (remain_ms > MON_WORKER_SLICE_MS)
+			remain_ms = MON_WORKER_SLICE_MS;
 
 		FD_ZERO(&rfds);
 		tv.tv_sec = (time_t)(remain_ms / 1000);
@@ -464,10 +559,7 @@ static void *monitor_client_thread(void *arg)
 		}
 
 		if(!FD_ISSET( client->connid, &rfds ))
-		{
-			log_trace("TimeOut tid:%i",client->connid);
-			break;
-		}
+			continue; /* slice over: the deadline and the stop flag are checked on top */
 
 		ssize_t newData = read(client->connid, &buffer[Windex], sizeof(buffer) - Windex);/* read length of message */
 		if (newData < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))

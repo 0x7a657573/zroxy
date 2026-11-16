@@ -34,6 +34,9 @@ typedef struct
 	pthread_mutex_t stats_lock; /* guards the state list head only */
 	char *token; /* optional bearer secret; NULL disables authentication */
 	int header_timeout; /* seconds to wait for a complete header */
+	pthread_t accept_thread; /* joined by monitor_stop */
+	int wake[2]; /* pipe that wakes the accept thread */
+	int stopping; /* set by monitor_stop; workers give up at their next slice */
 }mon_t;
 
 typedef struct
@@ -48,6 +51,16 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 statistics_t *monitor_add_stat(mon_t *self,char *name);
 /* Adds a top-level object written by fn. ctx must outlive the monitor. */
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx);
+/*
+ * Stops accepting, joins the accept thread, closes the listener, waits for the
+ * active clients (at most the header timeout plus a margin), then frees the
+ * sections, the statistics objects, the token and the monitor itself. If a
+ * client is still running after that wait, nothing it can touch is freed.
+ *
+ * Call it only after every service that writes to the statistics objects
+ * (SNI, DNS) has stopped, and once the sections' contexts are still valid.
+ */
+void monitor_stop(mon_t *self);
 
 #ifdef MON_TEST_HOOKS
 #include <stddef.h>

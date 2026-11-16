@@ -35,6 +35,15 @@ void stats_init(statistics_t **self,char *name)
 }
 
 
+void stats_free(statistics_t *self)
+{
+	if (!self)
+		return;
+	pthread_mutex_destroy(&self->Lock);
+	free(self);
+}
+
+
 void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx)
 {
 	pthread_mutex_lock(&self->Lock);
