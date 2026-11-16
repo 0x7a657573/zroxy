@@ -40,31 +40,6 @@ static bool socks5_write_port(uint8_t *dst, int port)
 	return true;
 }
 
-const char *socks5_rep_name(uint8_t rep)
-{
-	switch (rep)
-	{
-	case 0x00: return "succeeded";
-	case 0x01: return "general SOCKS server failure";
-	case 0x02: return "connection not allowed by ruleset";
-	case 0x03: return "network unreachable";
-	case 0x04: return "host unreachable";
-	case 0x05: return "connection refused";
-	case 0x06: return "TTL expired";
-	case 0x07: return "command not supported";
-	case 0x08: return "address type not supported";
-	case 0xF0: return "onion service descriptor not found";
-	case 0xF1: return "onion service descriptor invalid";
-	case 0xF2: return "onion service introduction failed";
-	case 0xF3: return "onion service rendezvous failed";
-	case 0xF4: return "onion service missing client authorization";
-	case 0xF5: return "onion service wrong client authorization";
-	case 0xF6: return "invalid onion service address";
-	case 0xF7: return "onion service introduction timed out";
-	default:   return "unknown";
-	}
-}
-
 bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,bool keepalive, int timeout_sec)
 {
 	int io_ms;
