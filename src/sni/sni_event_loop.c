@@ -16,19 +16,12 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-#if defined(__linux__) && !defined(SNI_FORCE_POLL)
-#define SNI_BACKEND_EPOLL 1
-#include <sys/epoll.h>
-#else
-#define SNI_BACKEND_POLL 1
-#include <poll.h>
-#endif
-
 #include <zroxy/log.h>
 #include <zroxy/net.h>
 #include <zroxy/net_io.h>
 #include <zroxy/socks5_codec.h>
 #include "sni_resolver.h"
+#include "reactor.h"
 
 /*
  * Plan:
@@ -57,11 +50,17 @@
 #define SNI_ADDR_MAX 16
 #define SNI_POLL_MAX 4096
 
+#ifdef SNI_FORCE_POLL
+#define SNI_USE_POLL true
+#else
+#define SNI_USE_POLL false
+#endif
+
 enum {
-	SNI_EV_IN = 1,
-	SNI_EV_OUT = 2,
-	SNI_EV_ERR = 4,
-	SNI_EV_HUP = 8,
+	SNI_EV_IN = RE_IN,
+	SNI_EV_OUT = RE_OUT,
+	SNI_EV_ERR = RE_ERR,
+	SNI_EV_HUP = RE_HUP,
 	/* Keep the fd registered so ERR/HUP are reported. No read or write. */
 	SNI_EV_ARMED = 16
 };
@@ -99,12 +98,6 @@ enum {
 	SNI_CLOSE_IDLE_TIMEOUT,
 	SNI_CLOSE_STALL_TIMEOUT
 };
-
-#if defined(SNI_BACKEND_POLL) && defined(POLLRDHUP)
-#define SNI_POLL_IN (POLLIN | POLLRDHUP)
-#elif defined(SNI_BACKEND_POLL)
-#define SNI_POLL_IN POLLIN
-#endif
 
 typedef struct sni_engine sni_engine;
 typedef struct sni_conn sni_conn;
@@ -177,7 +170,7 @@ struct sni_conn {
 };
 
 struct sni_engine {
-	int backend;
+	reactor re;
 	int listen_fd;
 	int wake_r;
 	int wake_w;
@@ -193,13 +186,6 @@ struct sni_engine {
 	uint32_t sink_interest;
 	uint32_t next_index;
 	uint64_t next_generation;
-#if defined(SNI_BACKEND_POLL)
-	struct pollfd *pfds;
-	sni_tag **tags;
-	int poll_n;
-	int poll_cap;
-	int poll_cursor;
-#endif
 };
 
 struct sni_listener {
@@ -344,64 +330,28 @@ static int io_connect(int fd, const struct sockaddr *sa, socklen_t len)
 	return connect(fd, sa, len);
 }
 
-#if defined(SNI_BACKEND_EPOLL)
-static uint32_t to_epoll(uint32_t ev)
-{
-	uint32_t out = 0;
-	if (ev & SNI_EV_IN)
-		out |= (uint32_t)(EPOLLIN | EPOLLRDHUP);
-	if (ev & SNI_EV_OUT)
-		out |= (uint32_t)EPOLLOUT;
-	return out;
-}
-
-static uint32_t from_epoll(uint32_t ev)
-{
-	uint32_t out = 0;
-	if ((ev & (uint32_t)EPOLLIN) != 0)
-		out |= SNI_EV_IN;
-	if ((ev & (uint32_t)EPOLLOUT) != 0)
-		out |= SNI_EV_OUT;
-	if ((ev & (uint32_t)EPOLLERR) != 0)
-		out |= SNI_EV_ERR;
-	if ((ev & (uint32_t)(EPOLLHUP | EPOLLRDHUP)) != 0)
-		out |= SNI_EV_HUP;
-	return out;
-}
-
 static bool react_add(sni_engine *e, int fd, uint32_t ev, sni_tag *tag)
 {
-	struct epoll_event ee;
-	memset(&ee, 0, sizeof(ee));
-	ee.events = to_epoll(ev);
-	ee.data.ptr = tag;
-	return epoll_ctl(e->backend, EPOLL_CTL_ADD, fd, &ee) == 0;
+	return reactor_add(&e->re, fd, ev, tag);
 }
 
 static bool react_mod(sni_engine *e, int fd, uint32_t ev, sni_tag *tag)
 {
-	struct epoll_event ee;
-	memset(&ee, 0, sizeof(ee));
-	ee.events = to_epoll(ev);
-	ee.data.ptr = tag;
-	return epoll_ctl(e->backend, EPOLL_CTL_MOD, fd, &ee) == 0;
+	return reactor_mod(&e->re, fd, ev, tag);
 }
 
 static void react_del(sni_engine *e, int fd)
 {
-	struct epoll_event ee;
-	memset(&ee, 0, sizeof(ee));
-	epoll_ctl(e->backend, EPOLL_CTL_DEL, fd, &ee);
+	reactor_del(&e->re, fd);
 }
 
 static int react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 {
-	struct epoll_event evs[64];
-	int cap = max;
+	reactor_event evs[64];
 	int n;
 	int i;
-	if (cap > 64)
-		cap = 64;
+	if (max > 64)
+		max = 64;
 	note_wait();
 #ifdef SNI_TEST_HOOKS
 	if (take_one(&g_eintr_wait)) {
@@ -413,135 +363,18 @@ static int react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 		return -1;
 	}
 #endif
-	n = epoll_wait(e->backend, evs, cap, timeout_ms);
+	n = reactor_wait(&e->re, evs, max, timeout_ms);
 	if (n < 0)
 		return -1;
 	for (i = 0; i < n; i++) {
-		sni_tag *tag = (sni_tag *)evs[i].data.ptr;
+		sni_tag *tag = (sni_tag *)evs[i].tag;
 		out[i].tag = tag;
-		out[i].fd = tag ? tag->fd : -1;
-		out[i].ev = from_epoll(evs[i].events);
+		/* epoll reports no fd; the tag holds the fd it is armed with. */
+		out[i].fd = evs[i].fd >= 0 ? evs[i].fd : (tag ? tag->fd : -1);
+		out[i].ev = evs[i].ev;
 	}
 	return n;
 }
-#else
-static short to_poll_ev(uint32_t ev)
-{
-	short out = 0;
-	if (ev & SNI_EV_IN)
-		out = (short)(out | SNI_POLL_IN);
-	if (ev & SNI_EV_OUT)
-		out = (short)(out | POLLOUT);
-	return out;
-}
-
-static uint32_t from_poll_ev(short rev)
-{
-	uint32_t out = 0;
-	if ((rev & POLLIN) != 0)
-		out |= SNI_EV_IN;
-	if ((rev & POLLOUT) != 0)
-		out |= SNI_EV_OUT;
-	if ((rev & POLLERR) != 0)
-		out |= SNI_EV_ERR;
-	if ((rev & POLLHUP) != 0)
-		out |= SNI_EV_HUP;
-	if ((rev & POLLNVAL) != 0)
-		out |= SNI_EV_ERR;
-#ifdef POLLRDHUP
-	if ((rev & POLLRDHUP) != 0)
-		out |= SNI_EV_HUP;
-#endif
-	return out;
-}
-
-static int poll_index(const sni_engine *e, int fd)
-{
-	int i;
-	for (i = 0; i < e->poll_n; i++) {
-		if (e->pfds[i].fd == fd)
-			return i;
-	}
-	return -1;
-}
-
-static bool react_add(sni_engine *e, int fd, uint32_t ev, sni_tag *tag)
-{
-	if (e->poll_n >= e->poll_cap)
-		return false;
-	e->pfds[e->poll_n].fd = fd;
-	e->pfds[e->poll_n].events = to_poll_ev(ev);
-	e->pfds[e->poll_n].revents = 0;
-	e->tags[e->poll_n] = tag;
-	e->poll_n++;
-	return true;
-}
-
-static bool react_mod(sni_engine *e, int fd, uint32_t ev, sni_tag *tag)
-{
-	int i = poll_index(e, fd);
-	if (i < 0)
-		return false;
-	e->pfds[i].events = to_poll_ev(ev);
-	e->tags[i] = tag;
-	return true;
-}
-
-static void react_del(sni_engine *e, int fd)
-{
-	int i = poll_index(e, fd);
-	if (i < 0)
-		return;
-	e->poll_n--;
-	if (i != e->poll_n) {
-		e->pfds[i] = e->pfds[e->poll_n];
-		e->tags[i] = e->tags[e->poll_n];
-	}
-}
-
-static int react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
-{
-	int n;
-	int seen = 0;
-	int produced = 0;
-	int start;
-	note_wait();
-#ifdef SNI_TEST_HOOKS
-	if (take_one(&g_eintr_wait)) {
-		errno = EINTR;
-		return -1;
-	}
-	if (take_one(&g_fail_wait)) {
-		errno = EBADF;
-		return -1;
-	}
-#endif
-	n = poll(e->pfds, (nfds_t)e->poll_n, timeout_ms);
-	if (n < 0)
-		return -1;
-	if (e->poll_n <= 0)
-		return 0;
-	start = e->poll_cursor;
-	if (start >= e->poll_n)
-		start = 0;
-	while (seen < e->poll_n && produced < max) {
-		int i = start + seen;
-		if (i >= e->poll_n)
-			i -= e->poll_n;
-		if (e->pfds[i].revents != 0) {
-			out[produced].tag = e->tags[i];
-			out[produced].fd = e->pfds[i].fd;
-			out[produced].ev = from_poll_ev(e->pfds[i].revents);
-			produced++;
-		}
-		seen++;
-	}
-	e->poll_cursor = start + 1;
-	if (e->poll_cursor >= e->poll_n)
-		e->poll_cursor = 0;
-	return produced;
-}
-#endif
 
 static bool watch(sni_engine *e, int fd, uint32_t ev, uint32_t *slot, sni_tag *tag)
 {
@@ -1676,12 +1509,6 @@ static void sni_engine_deinit(sni_engine *e)
 		c = next;
 	}
 	e->head = NULL;
-#if defined(SNI_BACKEND_EPOLL)
-	if (e->backend >= 0) {
-		close(e->backend);
-		e->backend = -1;
-	}
-#endif
 	if (e->wake_r >= 0) {
 		close(e->wake_r);
 		e->wake_r = -1;
@@ -1694,20 +1521,14 @@ static void sni_engine_deinit(sni_engine *e)
 		close(e->listen_fd);
 		e->listen_fd = -1;
 	}
-#if defined(SNI_BACKEND_POLL)
-	free(e->pfds);
-	free(e->tags);
-	e->pfds = NULL;
-	e->tags = NULL;
-	e->poll_n = 0;
-#endif
+	reactor_close(&e->re);
 }
 
 static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg)
 {
 	int pipes[2];
 	memset(e, 0, sizeof(*e));
-	e->backend = -1;
+	e->re.epfd = -1;
 	e->listen_fd = -1;
 	e->wake_r = -1;
 	e->wake_w = -1;
@@ -1727,18 +1548,8 @@ static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg
 			&e->sink))
 		goto fail;
 	sni_resolver_watch_bind(e->sink->listener_id, e->cfg.Port.bindip, e->cfg.Port.local_port);
-#if defined(SNI_BACKEND_POLL)
-	e->poll_cap = SNI_POLL_MAX;
-	e->pfds = (struct pollfd *)calloc((size_t)e->poll_cap, sizeof(*e->pfds));
-	e->tags = (sni_tag **)calloc((size_t)e->poll_cap, sizeof(*e->tags));
-	if (!e->pfds || !e->tags)
+	if (!reactor_open(&e->re, SNI_POLL_MAX, SNI_USE_POLL))
 		goto fail;
-#endif
-#if defined(SNI_BACKEND_EPOLL)
-	e->backend = epoll_create1(EPOLL_CLOEXEC);
-	if (e->backend < 0)
-		goto fail;
-#endif
 	if (pipe(pipes) != 0)
 		goto fail;
 	e->wake_r = pipes[0];
