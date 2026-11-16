@@ -32,17 +32,20 @@ typedef struct
 	uint32_t reloads;			/* successful reloads since start */
 	uint32_t reload_failures;	/* reloads that kept the previous list */
 	uint32_t last_reload;		/* unix time of the last successful reload, 0 = never */
+	pthread_t watcher;		/* joinable file watcher, valid when watching */
+	bool watching;
+	int wake[2];			/* pipe that tells the watcher to stop, -1 when unused */
 }filter_t;
 
 /* Load a file and start watching it for changes. NULL on any error. */
 filter_t *filter_init(char *filename);
 /* Build from entries in memory, with no file and no watcher. */
 filter_t *filter_from_list(const char *const *entries, size_t count);
-/* Only for lists without a watcher (filter_from_list). */
+/* Stops and joins the watcher if there is one, then frees. Valid for every filter. */
 void filter_free(filter_t *self);
 
 #ifdef FILTER_TEST_HOOKS
-/* Load a file like filter_init, but start no watcher. Release with filter_free. */
+/* Load a file like filter_init, but start no watcher. */
 filter_t *filter_test_open(const char *filename);
 #endif
 

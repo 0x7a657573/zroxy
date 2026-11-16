@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /*
  * filter.c
  *
@@ -17,6 +18,8 @@
 #include <fcntl.h>
 #endif
 #include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <errno.h>
 #include <ctype.h>
 #include <inttypes.h>
@@ -285,6 +288,7 @@ static filter_t *filter_alloc(filter_set_t *set, const char *path)
 		free(self);
 		return NULL;
 	}
+	self->wake[0] = self->wake[1] = -1;
 	self->set = set;
 	return self;
 }
@@ -374,6 +378,22 @@ static void *filter_watch_thread(void *vargp)
 	ssize_t len;
 	while(1)
 	{
+		struct pollfd pfd[2] = {
+			{ .fd = fd, .events = POLLIN },
+			{ .fd = self->wake[0], .events = POLLIN }
+		};
+		int pr = poll(pfd, 2, -1);
+		if (pr < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			log_error("filter watcher crash");
+			break;
+		}
+		if (pfd[1].revents)
+			break;
+		if (!pfd[0].revents)
+			continue;
 		len = read(fd, buf, sizeof(buf));
 		if (len < 0)
 		{
@@ -423,6 +443,18 @@ static void *filter_watch_thread(void *vargp)
 #define FILTER_NOTE_CHANGE	(NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB)
 #endif
 
+/* true when the watcher was told to stop (or the wake pipe broke) */
+static bool watch_stop_requested(const filter_t *self, int timeout_ms)
+{
+	struct pollfd p = { .fd = self->wake[0], .events = POLLIN };
+	int r;
+
+	do
+		r = poll(&p, 1, timeout_ms);
+	while (r < 0 && errno == EINTR);
+	return r != 0;
+}
+
 /* open the whitelist and register it; the old registration goes with close(fd) */
 static int filter_watch_open(int kq, const char *filename)
 {
@@ -460,6 +492,18 @@ static void *filter_watch_thread(void *vargp)
 		return NULL;
 	}
 
+	{
+		struct kevent wake;
+		EV_SET(&wake, self->wake[0], EVFILT_READ, EV_ADD, 0, 0, NULL);
+		if (kevent(kq, &wake, 1, NULL, 0, NULL) == -1)
+		{
+			log_error("Couldn't watch the stop pipe");
+			close(fd);
+			close(kq);
+			return NULL;
+		}
+	}
+
 	log_info("Watching for changes to %s...", filename);
 
 	while (1)
@@ -476,6 +520,8 @@ static void *filter_watch_thread(void *vargp)
 		}
 		if (nev == 0)
 			continue;
+		if (event.filter == EVFILT_READ)
+			break; /* told to stop */
 
 		if (event.fflags & (NOTE_DELETE | NOTE_RENAME))
 		{
@@ -485,11 +531,14 @@ static void *filter_watch_thread(void *vargp)
 			fd = -1;
 			for (tries = 0; tries < 50 && fd == -1; tries++)
 			{
-				usleep(100000);
+				if (watch_stop_requested(self, 100))
+					break;
 				fd = filter_watch_open(kq, filename);
 			}
 			if (fd == -1)
 			{
+				if (watch_stop_requested(self, 0))
+					break;
 				log_error("whitelist %s is gone; stop watching", filename);
 				break;
 			}
@@ -516,7 +565,6 @@ filter_t *filter_init(char *filename)
 {
 	filter_set_t *set = set_load_file(filename);
 	filter_t *self;
-	pthread_t thread_id;
 
 	if (!set)
 		return NULL;
@@ -528,16 +576,21 @@ filter_t *filter_init(char *filename)
 	}
 	log_info("load %zu valid host", set->total);
 
-	/*create file watcher*/
-	if (pthread_create(&thread_id, NULL, filter_watch_thread, (void*)self) == 0)
-		pthread_detach(thread_id);
+	/*create file watcher; without one the list still works, it just never auto-reloads*/
+	if (pipe2(self->wake, O_CLOEXEC | O_NONBLOCK) != 0)
+	{
+		self->wake[0] = self->wake[1] = -1;
+		log_error("whitelist watcher pipe failed");
+	}
+	else if (pthread_create(&self->watcher, NULL, filter_watch_thread, (void*)self) == 0)
+		self->watching = true;
 	else
 		log_error("whitelist watcher thread failed");
 	return self;
 }
 
 #ifdef FILTER_TEST_HOOKS
-/* filter_init without the watcher thread, so filter_free can release it. */
+/* filter_init without the watcher thread. */
 filter_t *filter_test_open(const char *filename)
 {
 	filter_set_t *set = set_load_file(filename);
@@ -581,6 +634,18 @@ void filter_free(filter_t *self)
 {
 	if(!self)
 		return;
+	if (self->watching)
+	{
+		char b = 0;
+		/* the pipe is empty and nonblocking: one byte always fits */
+		while (write(self->wake[1], &b, 1) < 0 && errno == EINTR)
+			;
+		pthread_join(self->watcher, NULL);
+	}
+	if (self->wake[0] >= 0)
+		close(self->wake[0]);
+	if (self->wake[1] >= 0)
+		close(self->wake[1]);
 	set_free(self->set);
 	free(self->filepath);
 	pthread_rwlock_destroy(&self->lock);
