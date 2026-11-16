@@ -23,10 +23,44 @@
 static zroxy_t prg_setting = {0};
 
 /*
- * Block until SIGINT or SIGTERM. SIGHUP reloads the whitelist.
+ * A running service. main pushes one as each service starts and stops them
+ * in reverse order, so a service is never stopped before the ones using it
+ * (the monitor reads the statistics of SNI and DNS and the whitelist).
+ */
+typedef struct
+{
+	const char *name;
+	void *handle;
+	void (*stop)(void *handle);
+	void (*reload)(void *handle);	/* NULL when SIGHUP means nothing to it */
+}service_t;
+
+static void stop_whitelist(void *h) { filter_free(h); }
+static void reload_whitelist(void *h) { filter_reload(h); }
+static void stop_monitor(void *h) { monitor_stop(h); }
+static void stop_dns(void *h) { dnsserver_stop(h); }
+static void stop_sni(void *h) { sniproxy_stop(h); }
+
+static void service_add(service_t *list, size_t *count, const service_t *svc)
+{
+	list[(*count)++] = *svc;
+}
+
+static void services_stop(service_t *list, size_t *count)
+{
+	while (*count > 0)
+	{
+		service_t *svc = &list[--*count];
+		log_info("stopping %s", svc->name);
+		svc->stop(svc->handle);
+	}
+}
+
+/*
+ * Block until SIGINT or SIGTERM. SIGHUP reloads the services that can.
  * The signals are blocked in every thread, so only this sigwait sees them.
  */
-static int wait_for_shutdown(const sigset_t *sigs, filter_t *whitelist)
+static int wait_for_shutdown(const sigset_t *sigs, const service_t *list, size_t count)
 {
 	for (;;)
 	{
@@ -35,9 +69,16 @@ static int wait_for_shutdown(const sigset_t *sigs, filter_t *whitelist)
 			continue;
 		if (sig == SIGHUP)
 		{
-			if (whitelist)
-				filter_reload(whitelist);
-			else
+			bool any = false;
+			for (size_t k = 0; k < count; k++)
+			{
+				if (list[k].reload)
+				{
+					list[k].reload(list[k].handle);
+					any = true;
+				}
+			}
+			if (!any)
 				log_info("SIGHUP ignored: no whitelist configured");
 			continue;
 		}
@@ -53,9 +94,9 @@ int main(int argc, const char **argv)
 	mon_t *monitor = NULL;
 	filter_t *whitelist = NULL;
 	struct dnsserver *dns = NULL;
-	sni_listener **listeners = NULL;
+	service_t *services = NULL;
+	size_t service_count = 0;
 	size_t listener_count = 0;
-	size_t i = 0;
 	statistics_t *SniStat = NULL;
 	SniServer_t Xconf;
 
@@ -84,6 +125,16 @@ int main(int argc, const char **argv)
 		return 1;
 	}
 
+	for (lport_t *p = prg_setting.ports; p; p = p->next)
+		listener_count++;
+	/* whitelist, monitor, DNS and one entry per SNI listener */
+	services = calloc(listener_count + 3, sizeof(*services));
+	if (!services)
+	{
+		log_error("service list allocation failed");
+		goto out;
+	}
+
 	/*check white list before listeners so a bad file does not become an open proxy*/
 	if(prg_setting.WhitePath)
 	{
@@ -96,6 +147,7 @@ int main(int argc, const char **argv)
 			log_error("whitelist load failed");
 			goto out;
 		}
+		service_add(services, &service_count, &(service_t){ "whitelist", whitelist, stop_whitelist, reload_whitelist });
 	}
 
 	/*check Monitor*/
@@ -110,6 +162,7 @@ int main(int argc, const char **argv)
 			log_error("monitor failed to start");
 			goto out;
 		}
+		service_add(services, &service_count, &(service_t){ "monitor", monitor, stop_monitor, NULL });
 	}
 
 	if(monitor && whitelist)
@@ -139,6 +192,7 @@ int main(int argc, const char **argv)
 			log_error("dns server failed to start");
 			goto out;
 		}
+		service_add(services, &service_count, &(service_t){ "dns", dns, stop_dns, NULL });
 	}
 
 	if(monitor)
@@ -162,27 +216,16 @@ int main(int argc, const char **argv)
 	}
 
 	for (lport_t *p = prg_setting.ports; p; p = p->next)
-		listener_count++;
-	if (listener_count)
 	{
-		listeners = calloc(listener_count, sizeof(*listeners));
-		if (!listeners)
-		{
-			log_error("listener allocation failed");
-			listener_count = 0;
-			goto out;
-		}
-	}
-
-	for (lport_t *p = prg_setting.ports; p; p = p->next, i++)
-	{
+		sni_listener *ls;
 		Xconf.Port = *p;
-		listeners[i] = sniproxy_start(&Xconf);
-		if (!listeners[i])
+		ls = sniproxy_start(&Xconf);
+		if (!ls)
 		{
 			log_error("sni listener failed on %s:%u", Xconf.Port.bindip, (unsigned)Xconf.Port.local_port);
 			goto out;
 		}
+		service_add(services, &service_count, &(service_t){ "sni", ls, stop_sni, NULL });
 	}
 	args_free_ports(&prg_setting); /*free Port List*/
 
@@ -202,18 +245,13 @@ int main(int argc, const char **argv)
 	}
 	priv_harden(prg_setting.drop_priv);
 
-	log_info("shutting down on signal %d", wait_for_shutdown(&sigs, whitelist));
+	log_info("shutting down on signal %d", wait_for_shutdown(&sigs, services, service_count));
 	rc = 0;
 
 out:
-	/*
-	 * Stop the data paths. The monitor and whitelist watcher stay up until
-	 * exit: they only read shared state and own nothing that needs flushing.
-	 */
-	for (i = 0; i < listener_count; i++)
-		sniproxy_stop(listeners ? listeners[i] : NULL);
-	free(listeners);
-	dnsserver_stop(dns);
+	/* reverse start order: SNI and DNS first, then the monitor, then the whitelist */
+	services_stop(services, &service_count);
+	free(services);
 	args_free_ports(&prg_setting);
 	args_free_dns(&prg_setting);
 	args_free_socks(&prg_setting);
