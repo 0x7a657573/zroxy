@@ -145,12 +145,121 @@ def test_monitor_stop_race():
             raise AssertionError("monitor polling failed during shutdown: %s" % errors[0])
 
 
+def _start_all(lab, white, extra=()):
+    upstream = lab.dns_server(mode="reply",
+                              response_fn=lambda q: zroxy_lab.build_dns_response(q, (9, 9, 9, 9)))
+    sni_port = zroxy_lab.free_tcp_port()
+    mon_port = zroxy_lab.free_tcp_port()
+    ldns = zroxy_lab.free_udp_port()
+    proc = lab.zroxy(
+        [
+            "-l", "0",
+            "-p", "127.0.0.1:%s" % sni_port,
+            "-m", str(mon_port),
+            "-d", "127.0.0.1:%s" % ldns,
+            "-u", "127.0.0.1:%s" % upstream.port,
+            "-t", "1",
+            "-i", "%d.%d.%d.%d" % SYNTHETIC_IP,
+            "-w", white,
+            *extra,
+        ],
+        tcp_ports=[sni_port, mon_port],
+        udp_ports=[ldns],
+    )
+    return proc, sni_port, mon_port, ldns
+
+
+def _check_stop_order(proc):
+    positions = []
+    text = proc.log_text(limit=1 << 20)
+    for name in ("sni", "dns", "monitor", "whitelist"):
+        at = text.find("stopping %s" % name)
+        if at < 0:
+            raise AssertionError("service %s was not stopped\n%s" % (name, text))
+        positions.append(at)
+    if positions != sorted(positions):
+        raise AssertionError("services stopped out of order\n%s" % text)
+
+
+def test_sigterm_stops_every_service():
+    with zroxy_lab.Lab() as lab:
+        white = lab.write("white.txt", "first.test\n")
+        proc, _sni_port, mon_port, ldns = _start_all(lab, white)
+        zroxy_lab.fetch_monitor(mon_port, timeout=2.0)
+        zroxy_lab.udp_exchange(ldns, zroxy_lab.build_dns_query("first.test"), 2.0)
+        # A half-sent monitor request must not hold up shutdown either.
+        idle = socket.create_connection(("127.0.0.1", mon_port), timeout=2.0)
+        idle.sendall(b"GET /")
+        try:
+            started = time.monotonic()
+            os.kill(proc.proc.pid, signal.SIGTERM)
+            code = _wait_exit(proc, 5.0)
+            elapsed = time.monotonic() - started
+        finally:
+            idle.close()
+        if code != 0:
+            raise AssertionError("exit code %s\n%s" % (code, proc.log_text()))
+        if elapsed > 3.0:
+            raise AssertionError("shutdown took %.2fs" % elapsed)
+        _check_stop_order(proc)
+        try:
+            socket.create_connection(("127.0.0.1", mon_port), timeout=1.0).close()
+        except ConnectionRefusedError:
+            pass
+        else:
+            raise AssertionError("monitor port still accepts connections")
+
+
+def test_startup_failure_stops_started_services():
+    with zroxy_lab.Lab() as lab:
+        white = lab.write("white.txt", "first.test\n")
+        busy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        busy.bind(("127.0.0.1", 0))
+        busy.listen(1)
+        try:
+            busy_port = busy.getsockname()[1]
+            mon_port = zroxy_lab.free_tcp_port()
+            ldns = zroxy_lab.free_udp_port()
+            log_path = lab.path("zroxy-fail.log")
+            with open(log_path, "wb") as log:
+                proc = subprocess.Popen(
+                    [
+                        zroxy_lab.zroxy_binary(),
+                        "-l", "0",
+                        "-p", "127.0.0.1:%s" % busy_port,
+                        "-m", str(mon_port),
+                        "-d", "127.0.0.1:%s" % ldns,
+                        "-u", "127.0.0.1:9",
+                        "-w", white,
+                    ],
+                    stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                try:
+                    code = proc.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                    raise AssertionError("zroxy did not exit after a failed start")
+            with open(log_path, "r", errors="replace") as fh:
+                text = fh.read()
+        finally:
+            busy.close()
+        if code == 0:
+            raise AssertionError("failed start exited 0\n%s" % text)
+        for name in ("dns", "monitor", "whitelist"):
+            if "stopping %s" % name not in text:
+                raise AssertionError("%s was not stopped after a failed start\n%s" % (name, text))
+
+
 def main():
     tests = [
         test_sighup_reloads_whitelist,
         test_sigterm_clean_exit,
         test_sigint_clean_exit,
         test_monitor_stop_race,
+        test_sigterm_stops_every_service,
+        test_startup_failure_stops_started_services,
     ]
     failed = 0
     for test in tests:
