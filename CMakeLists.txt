@@ -59,7 +59,7 @@ zroxy_add_module(zroxy_priv
     DEPS zroxy_log)
 
 zroxy_add_module(zroxy_net
-    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c
+    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c src/net/socks5_codec.c
     DEPS zroxy_log)
 
 # Hostname resolution is shared by the SNI and DNS data planes.  Keeping it
@@ -166,6 +166,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(dns_throttle     tests/test_dns_throttle.c     zroxy_dns)
     zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args)
     zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net)
+    zroxy_add_unit_test(socks5_codec     tests/test_socks5_codec.c     zroxy_net)
     zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)
     zroxy_add_unit_test(sni_engine       tests/test_sni_engine.c       zroxy_sni_hooks)
     zroxy_add_unit_test(sni_engine_poll  tests/test_sni_engine.c       zroxy_sni_hooks_poll)
