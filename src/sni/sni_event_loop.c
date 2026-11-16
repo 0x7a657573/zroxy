@@ -27,6 +27,7 @@
 #include <zroxy/log.h>
 #include <zroxy/net.h>
 #include <zroxy/net_io.h>
+#include <zroxy/socks5_codec.h>
 #include "sni_resolver.h"
 
 /*
@@ -99,15 +100,6 @@ enum {
 	SNI_CLOSE_STALL_TIMEOUT
 };
 
-enum {
-	SP_GREET = 1,
-	SP_AUTH,
-	SP_REQ,
-	SP_REP_HDR,
-	SP_REP_LEN,
-	SP_REP_REST
-};
-
 #if defined(SNI_BACKEND_POLL) && defined(POLLRDHUP)
 #define SNI_POLL_IN (POLLIN | POLLRDHUP)
 #elif defined(SNI_BACKEND_POLL)
@@ -150,7 +142,7 @@ struct sni_conn {
 	int up_shut;
 	int io_ms;
 	int idle_ms;
-	int socks_phase;
+	int socks_step;
 	int naddr;
 	int addr_i;
 	int resolve_slot;
@@ -172,16 +164,14 @@ struct sni_conn {
 	uint32_t c2u_off;
 	uint32_t u2c_len;
 	uint32_t u2c_off;
-	uint32_t socks_out_len;
 	uint32_t socks_out_off;
 	uint32_t socks_in_len;
-	uint32_t socks_need;
 	char host[ZROXY_MAX_HOSTNAME];
 	uint8_t hello[SNI_HELLO_CAP];
 	uint8_t c2u[SNI_RELAY_CAP];
 	uint8_t u2c[SNI_RELAY_CAP];
-	uint8_t socks_out[SNI_SOCKS_CAP];
 	uint8_t socks_in[SNI_SOCKS_CAP];
+	socks5_client socks;
 	sni_addr addrs[SNI_ADDR_MAX];
 	SniServer_t cfg;
 };
@@ -777,9 +767,9 @@ static bool conn_arm(sni_engine *e, sni_conn *c)
 		cin |= SNI_EV_ARMED;
 		uin |= SNI_EV_OUT;
 	} else if (c->state == SNI_ST_SOCKS) {
-		if (c->socks_out_off < c->socks_out_len)
+		if (c->socks_step == S5_SEND)
 			uin |= SNI_EV_OUT;
-		if (c->socks_in_len < c->socks_need)
+		else if (c->socks_step == S5_READ)
 			uin |= SNI_EV_IN;
 	} else if (c->state == SNI_ST_RELAY) {
 		if (!c->client_eof && c->c2u_off == c->c2u_len)
@@ -900,214 +890,60 @@ static void socks_deadline(sni_conn *c)
 	c->deadline = (now < 0) ? 0 : now + (int64_t)c->io_ms;
 }
 
-static bool socks_expect(sni_conn *c, uint32_t need, int phase)
+/* The codec moved to its next step: restart the I/O counters and the deadline. */
+static void socks_next(sni_conn *c, s5_step step)
 {
-	if (need == 0 || need > SNI_SOCKS_CAP)
-		return false;
-	c->socks_phase = phase;
-	c->socks_out_len = 0;
+	c->socks_step = step;
 	c->socks_out_off = 0;
 	c->socks_in_len = 0;
-	c->socks_need = need;
 	socks_deadline(c);
-	return true;
-}
-
-static bool socks_queue_greet(sni_conn *c)
-{
-	static const uint8_t greet_auth[4] = {0x05, 0x02, 0x00, 0x02};
-	static const uint8_t greet_noauth[3] = {0x05, 0x01, 0x00};
-	/* Offer user/pass only when configured: Tor picks it whenever offered. */
-	bool auth = c->cfg.Socks && c->cfg.Socks->user && c->cfg.Socks->pass;
-	if (auth)
-		memcpy(c->socks_out, greet_auth, sizeof(greet_auth));
-	else
-		memcpy(c->socks_out, greet_noauth, sizeof(greet_noauth));
-	c->socks_phase = SP_GREET;
-	c->socks_out_len = auth ? 4 : 3;
-	c->socks_out_off = 0;
-	c->socks_in_len = 0;
-	c->socks_need = 0;
-	socks_deadline(c);
-	return true;
-}
-
-static bool socks_queue_auth(sni_conn *c)
-{
-	const char *user;
-	const char *pass;
-	size_t ulen;
-	size_t plen;
-	uint8_t *out = c->socks_out;
-	if (!c->cfg.Socks || !c->cfg.Socks->user || !c->cfg.Socks->pass) {
-		log_error("[!] SOCKS server selected username/password auth, which we did not offer");
-		return false;
-	}
-	user = c->cfg.Socks->user;
-	pass = c->cfg.Socks->pass;
-	ulen = strlen(user);
-	plen = strlen(pass);
-	if (ulen == 0 || ulen > 255 || plen > 255) {
-		log_error("[!] SOCKS username/password length rejected");
-		return false;
-	}
-	out[0] = 0x01;
-	out[1] = (uint8_t)ulen;
-	memcpy(out + 2, user, ulen);
-	out[2u + ulen] = (uint8_t)plen;
-	if (plen > 0)
-		memcpy(out + 3u + ulen, pass, plen);
-	c->socks_phase = SP_AUTH;
-	c->socks_out_len = (uint32_t)(3u + ulen + plen);
-	c->socks_out_off = 0;
-	c->socks_in_len = 0;
-	c->socks_need = 0;
-	socks_deadline(c);
-	return true;
-}
-
-static bool socks_queue_req(sni_conn *c)
-{
-	size_t hlen = strlen(c->host);
-	uint8_t *out = c->socks_out;
-	uint16_t be;
-	if (hlen == 0 || hlen > 255)
-		return false;
-	be = htons(c->cfg.Port.remote_port);
-	out[0] = 0x05;
-	out[1] = 0x01;
-	out[2] = 0x00;
-	if (net_is_ip_literal(c->host)) {
-		in_addr_t ip;
-		if (inet_pton(AF_INET, c->host, &ip) != 1)
-			return false;
-		out[3] = 0x01;
-		memcpy(out + 4, &ip, 4);
-		memcpy(out + 8, &be, sizeof(be));
-		c->socks_out_len = 10;
-	} else {
-		out[3] = 0x03;
-		out[4] = (uint8_t)hlen;
-		memcpy(out + 5, c->host, hlen);
-		memcpy(out + 5u + hlen, &be, sizeof(be));
-		c->socks_out_len = (uint32_t)(5u + hlen + 2u);
-	}
-	c->socks_phase = SP_REQ;
-	c->socks_out_off = 0;
-	c->socks_in_len = 0;
-	c->socks_need = 0;
-	socks_deadline(c);
-	return true;
-}
-
-static bool socks_on_recv(sni_engine *e, sni_conn *c)
-{
-	if (c->socks_phase == SP_GREET) {
-		uint8_t ver = c->socks_in[0];
-		uint8_t method = c->socks_in[1];
-		if (ver != 5) {
-			log_error("[!] We can not support ver %d", ver);
-			return false;
-		}
-		if (method != 0 && method != 2) {
-			if (method == 0xFF)
-				log_error("[!] SOCKS server replied: no acceptable authentication method");
-			else
-				log_error("[!] SOCKS server selected unsupported method 0x%02X", method);
-			return false;
-		}
-		if (method == 2)
-			return socks_queue_auth(c);
-		return socks_queue_req(c);
-	}
-	if (c->socks_phase == SP_AUTH) {
-		if (c->socks_in[1] != 0) {
-			log_error("[!] Error Socks Authentication:%02X", c->socks_in[1]);
-			return false;
-		}
-		return socks_queue_req(c);
-	}
-	if (c->socks_phase == SP_REP_HDR) {
-		uint8_t ver = c->socks_in[0];
-		uint8_t rep = c->socks_in[1];
-		uint8_t atyp = c->socks_in[3];
-		if (ver != 5) {
-			log_error("[!] Error Socks Ver");
-			return false;
-		}
-		if (rep != 0) {
-			log_error("[!] SOCKS server %s:%u refused CONNECT: reply 0x%02X (%s)",
-				c->cfg.Socks ? c->cfg.Socks->host : "?",
-				c->cfg.Socks ? (unsigned)c->cfg.Socks->port : 0u, rep, socks5_rep_name(rep));
-			return false;
-		}
-		if (atyp == 0x01)
-			return socks_expect(c, 6, SP_REP_REST);
-		if (atyp == 0x04)
-			return socks_expect(c, 18, SP_REP_REST);
-		if (atyp == 0x03)
-			return socks_expect(c, 1, SP_REP_LEN);
-		log_error("[!] unsupported address type");
-		return false;
-	}
-	if (c->socks_phase == SP_REP_LEN)
-		return socks_expect(c, (uint32_t)c->socks_in[0] + 2u, SP_REP_REST);
-	if (c->socks_phase == SP_REP_REST) {
-		enter_relay(e, c);
-		return !c->dead;
-	}
-	return false;
 }
 
 static void socks_pump(sni_engine *e, sni_conn *c)
 {
 	int guard = 0;
 	while (!c->dead && c->state == SNI_ST_SOCKS && guard++ < 100000) {
-		if (c->socks_out_off < c->socks_out_len) {
-			int wr = write_some(c->up_fd, c->socks_out, c->socks_out_len,
+		if (c->socks_step == S5_SEND) {
+			int wr = write_some(c->up_fd, c->socks.out, (uint32_t)c->socks.out_len,
 					&c->socks_out_off, NULL);
 			if (wr < 0) {
 				conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
-			if (c->socks_out_off < c->socks_out_len)
+			if (c->socks_out_off < c->socks.out_len)
 				break;
-			if (c->socks_phase == SP_GREET || c->socks_phase == SP_AUTH) {
-				if (!socks_expect(c, 2, c->socks_phase)) {
-					conn_kill(e, c, SNI_CLOSE_SOCKS);
-					return;
-				}
-			} else if (c->socks_phase == SP_REQ) {
-				if (!socks_expect(c, 4, SP_REP_HDR)) {
-					conn_kill(e, c, SNI_CLOSE_SOCKS);
-					return;
-				}
-			} else {
+			socks_next(c, socks5_client_sent(&c->socks));
+		} else if (c->socks_step == S5_READ) {
+			s5_step step;
+			int rr;
+			if (c->socks.need > SNI_SOCKS_CAP) {
 				conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
-			continue;
-		}
-		if (c->socks_need > c->socks_in_len) {
-			int rr = read_some(c->up_fd, c->socks_in, c->socks_need, &c->socks_in_len);
+			rr = read_some(c->up_fd, c->socks_in, (uint32_t)c->socks.need, &c->socks_in_len);
 			if (rr == 0)
 				break;
 			if (rr < 0) {
 				conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
-			if (c->socks_in_len < c->socks_need)
+			if (c->socks_in_len < c->socks.need)
 				break;
-			if (!socks_on_recv(e, c)) {
-				if (!c->dead)
-					conn_kill(e, c, SNI_CLOSE_SOCKS);
-				return;
-			}
-			if (c->dead || c->state != SNI_ST_SOCKS)
-				return;
-			continue;
+			step = socks5_client_feed(&c->socks, c->socks_in, c->socks_in_len);
+			socks_next(c, step);
+		} else if (c->socks_step == S5_DONE) {
+			enter_relay(e, c);
+			return;
+		} else {
+			break;
 		}
-		break;
+		if (c->socks_step == S5_FAIL) {
+			log_error("[!] SOCKS server %s:%u: %s",
+				c->cfg.Socks->host ? c->cfg.Socks->host : "?",
+				(unsigned)c->cfg.Socks->port, socks5_client_strerror(&c->socks));
+			conn_kill(e, c, SNI_CLOSE_SOCKS);
+			return;
+		}
 	}
 	if (!c->dead && c->state == SNI_ST_SOCKS && !conn_arm(e, c))
 		conn_kill(e, c, SNI_CLOSE_NONE);
@@ -1116,10 +952,12 @@ static void socks_pump(sni_engine *e, sni_conn *c)
 static void socks_begin(sni_engine *e, sni_conn *c)
 {
 	c->state = SNI_ST_SOCKS;
-	if (!socks_queue_greet(c)) {
+	if (!socks5_client_init(&c->socks, c->cfg.Socks->user, c->cfg.Socks->pass, c->host,
+			c->cfg.Port.remote_port)) {
 		conn_kill(e, c, SNI_CLOSE_SOCKS);
 		return;
 	}
+	socks_next(c, socks5_client_start(&c->socks));
 	socks_pump(e, c);
 }
 
