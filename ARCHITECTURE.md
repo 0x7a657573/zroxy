@@ -282,6 +282,7 @@ started, then returns `1`.
 | `include/zroxy/config.h` | Length bounds | Compile-time limits |
 | `include/zroxy/version.h` | Current version and release notes | Used by monitor output |
 | `src/sni/sniproxy.c` | SOCKS priming, listener start/stop | One loop per configured port |
+| `src/core/reactor.c` | epoll/poll readiness reactor (private) | Registers fds for one loop thread; callers delete an fd before closing it |
 | `src/sni/sni_event_loop.c` | Non-blocking SNI state machine | Owns listener/client/upstream fds on its thread |
 | `src/sni/sni_event_loop.h` | Event-loop API and test hooks (private) | Joinable listener: open/close |
 | `src/sni/sni_resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
@@ -293,7 +294,7 @@ started, then returns `1`.
 | `src/net/socks5_codec.c` | Sans-IO SOCKS5 client handshake | Owns no fd; shared by the blocking helper, the SNI loop and the DNS loop |
 | `src/net/socks.c` | Blocking SOCKS5 client helper | Drives the codec with deadline-bounded I/O (legacy/test paths) |
 | `src/dns/dnsserver.c` | DNS service socket start/stop | Owns listener sockets and shutdown sequencing |
-| `src/dns/dns_event_loop.c` | Non-blocking DNS state machines | Owns DNS listener, client, upstream, resolver and wake fds |
+| `src/dns/dns_event_loop.c` | Non-blocking DNS state machines | Owns DNS listener, client, upstream, resolver and wake fds; registers them in the shared reactor |
 | `src/dns/dnsproxy.c` | DNS local answers and legacy test helpers | Shared request validation and reply construction |
 | `src/dns/dns.c` | DNS decode/encode | Bounded packet representation |
 | `src/stats/statistics.c` | Per-service counters | One mutex per statistics object |
@@ -411,7 +412,8 @@ Each SNI loop can react to four kinds of event source:
 | Client/upstream fds | Drive the current connection state |
 
 Linux uses `epoll`. Other supported builds use `poll`; a Linux test build can
-force the poll backend with `SNI_FORCE_POLL`. The loop does not use `select` or
+force the poll backend with `SNI_FORCE_POLL`, which the SNI loop passes to the
+shared reactor as a runtime flag. The DNS loop uses the same reactor. The loop does not use `select` or
 `FD_SET` for the SNI data plane.
 
 ### Client acceptance and capacity
@@ -676,7 +678,15 @@ flowchart TD
 1. `dnsserver_start` binds the configured IPv4 UDP socket and the optional
    same-port TCP listener, then starts one joinable DNS event-loop thread.
    The loop owns client sockets, the wake pipe, resolver completions, and a
-   bounded set of upstream TCP connections.
+   bounded set of upstream TCP connections. Every fd stays registered in the
+   shared reactor (`src/core/reactor.c`, epoll on Linux): a client is added on
+   accept, an upstream when its connection is opened, and the interest is
+   modified when the state changes (a client waiting for its answer has
+   interest 0 but still reports errors and hangups). The loop deletes an fd
+   from the reactor before closing it.
+   A closed client is freed only after the ready batch it may appear in, and
+   an upstream closed in a batch ignores that batch's remaining events, so a
+   stale event is never applied to a reused slot or freed client.
 2. The loop drains up to 64 UDP datagrams per readiness notification and then
    returns to the remaining ready sockets. Datagrams shorter than a header,
    larger than 510 bytes, or with QR set are ignored. At most 2048 accepted
@@ -1134,9 +1144,6 @@ These are the rules future changes should preserve or update explicitly:
 - Each DNS upstream connection carries one query at a time (no TCP
   pipelining). Throughput toward a slow upstream is bounded by the configured
   upstream-connection count divided by the upstream round-trip time.
-- The DNS loop currently uses `poll`, rebuilding a bounded watch set of at
-  most 228 descriptors. A Linux `epoll` backend remains follow-up work for
-  substantially larger connection caps.
 - Monitor request handling still uses `select` internally and one detached
   worker per accepted monitor client within its 32-worker cap.
 - A resolver worker can remain allocated until process exit if bounded shutdown
