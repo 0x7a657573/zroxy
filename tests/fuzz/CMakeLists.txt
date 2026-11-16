@@ -40,6 +40,6 @@ endfunction()
 zroxy_add_fuzzer(sni_host fuzz_sni_host.c
     zroxy_net zroxy_resolver zroxy_filter zroxy_sni_internal)
 zroxy_add_fuzzer(dns fuzz_dns.c zroxy_dns)
-zroxy_add_fuzzer(socks fuzz_socks.c zroxy_net Threads::Threads)
+zroxy_add_fuzzer(socks fuzz_socks.c zroxy_net)
 zroxy_add_fuzzer(monitor_request fuzz_monitor_request.c zroxy_monitor_hooks)
 zroxy_add_fuzzer(config fuzz_config.c zroxy_filter_hooks zroxy_args)
