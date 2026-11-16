@@ -82,7 +82,7 @@ loop owns its capacity state; the shared `NO DATA` throttle uses atomic state
 transitions and counters.
 
 The main thread waits for signals: `SIGHUP` reloads the whitelist, and
-`SIGINT`/`SIGTERM` stop the SNI listeners and the DNS service and exit with
+`SIGINT`/`SIGTERM` stop every service in reverse start order and exit with
 status `0`.
 
 ## System context
@@ -262,15 +262,24 @@ them.
 
 - `SIGHUP` reloads the whitelist (the same path the file watcher uses). Without
   a whitelist it is logged and ignored.
-- `SIGINT` or `SIGTERM` starts shutdown. Each SNI listener is stopped: its
-  event loop is woken, closes every client and upstream connection, and is
-  joined. The DNS event loop is woken through its wake pipe, completes cleanup
-  of its requests and descriptors, and is joined. `main` returns `0`.
-- The monitor and the whitelist watcher are not stopped explicitly. They only
-  read shared state and end with the process.
+- `SIGINT` or `SIGTERM` starts shutdown. `main` keeps a small list of the
+  running services (name, handle, stop function and an optional reload
+  function), adding each one as it starts: whitelist, monitor, DNS, then each
+  SNI listener. `SIGHUP` calls the reload function of the services that have
+  one (only the whitelist). Shutdown stops them in reverse order:
+  - each SNI listener's event loop is woken, closes every client and upstream
+    connection, and is joined;
+  - the DNS event loop is woken through its wake pipe, completes cleanup of its
+    requests and descriptors, and is joined;
+  - `monitor_stop` wakes and joins the accept thread, closes the listener,
+    waits for the active workers, then frees the sections, the statistics
+    objects, the token and the monitor;
+  - `filter_free` wakes and joins the whitelist watcher, then frees the filter.
 
-A startup failure also goes through the same stop path for anything already
-started, then returns `1`.
+  `main` then returns `0`.
+
+A startup failure stops whatever already started through the same reverse
+path, then returns `1`.
 
 ## Module map
 
@@ -360,6 +369,9 @@ flowchart TB
   objects. Its `localdns_free` function does not free those aliases.
 - Monitor workers close their client descriptor exactly once and release their
   worker slot before exiting.
+- The monitor owns its sections, statistics objects and token, and frees them in
+  `monitor_stop`. The whitelist filter owns its watcher thread and wake pipe and
+  frees them in `filter_free`.
 - The DNS event loop owns its UDP/TCP listeners, wake pipe, resolver completion
   pipe, local TCP clients, requests, and reusable upstream connections.
   `dnsserver_stop` wakes and joins it before releasing those resources.
@@ -877,6 +889,10 @@ time in `last_reload`) or a failure (`reload_failures`), as relaxed atomics, and
 the monitor reports them. Reloads come from the file watcher or from `SIGHUP`. On Linux the
 watcher watches the parent directory for `IN_CLOSE_WRITE`/`IN_MOVED_TO` on the
 file name, so a save by rename is seen and a half-written file is not loaded.
+The watcher is a joinable thread that waits on its event source and a wake
+pipe (`poll` on Linux, a `kqueue` read filter on FreeBSD); `filter_free` writes
+to the pipe, joins the thread and then frees the filter, so it is valid for
+every filter, with or without a watcher.
 
 The DNS path matches the decoded query name and the SNI path matches the
 normalized SNI/Host name. The whitelist is not a universal firewall for every
@@ -908,9 +924,9 @@ protocol; it affects the hostname-aware paths described above.
 
 The service objects use shared references rather than duplicating the filter
 and SOCKS credentials. `main` stops the SNI listeners and the DNS service
-before it frees the configuration they reference. The whitelist and monitor
-objects are not freed: the watcher and monitor threads may still read them
-until the process exits.
+before it frees the configuration they reference. The monitor is stopped after
+them, because SNI and DNS write the statistics objects it owns and frees, and
+the whitelist last, because the monitor's `Whitelist` section reads it.
 
 The argument parser allocates one `dnshost_t` for all DNS-related options, so
 CLI and configuration-file option order does not change defaults. `LDNS` marks
@@ -1040,8 +1056,13 @@ to the resolver reference-counting protocol.
 On `SIGINT`/`SIGTERM`, and on a startup failure after some services started,
 `main` stops each SNI listener (every live connection goes through the close
 path above) and then the DNS service, as described in
-[Signals and shutdown](#signals-and-shutdown). The whitelist, its watcher and
-the monitor are left to process exit.
+[Signals and shutdown](#signals-and-shutdown). The monitor and the whitelist
+(with its watcher) are stopped after them, in that order.
+
+`monitor_stop` waits for active monitor workers for at most the header timeout
+plus one second. Workers re-check a stop flag every 100 ms, so idle or
+half-sent requests end at once. If a worker is still alive when the bound
+expires, the monitor state is deliberately left allocated.
 
 ## Observability
 
@@ -1102,7 +1123,7 @@ The test layout mirrors the major boundaries:
 | `sni_e2e` | real zroxy SNI loopback exchange |
 | `dns_e2e` | real zroxy DNS: forwarding, failures, whitelist, reload, upstream connection reuse |
 | `monitor_e2e` | real zroxy monitor exchange |
-| `lifecycle_e2e` | `SIGHUP` reload and clean `SIGTERM`/`SIGINT` exit |
+| `lifecycle_e2e` | `SIGHUP` reload, clean `SIGTERM`/`SIGINT` exit, every service stopped in order, failed start |
 
 The SNI engine tests use fault injection to exercise partial reads/writes,
 `EAGAIN`, `EINTR`, timeouts, half-close, resolver cancellation, stale
@@ -1139,8 +1160,9 @@ These are the rules future changes should preserve or update explicitly:
 
 ## Known limitations and open design work
 
-- Shutdown does not stop the monitor or the whitelist watcher; they end with
-  the process.
+- If a monitor worker is still writing to a stalled client when the bounded
+  `monitor_stop` wait expires, the monitor's state is left allocated until
+  process exit.
 - Each DNS upstream connection carries one query at a time (no TCP
   pipelining). Throughput toward a slow upstream is bounded by the configured
   upstream-connection count divided by the upstream round-trip time.
