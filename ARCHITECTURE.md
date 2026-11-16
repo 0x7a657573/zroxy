@@ -13,7 +13,8 @@ The main implementation areas are:
   event-loop and resolver headers are private to this directory);
 - `src/dns/` — local UDP/TCP DNS service and upstream TCP forwarding;
 - `src/stats/` — counters and the HTTP JSON monitor;
-- `src/net/` — sockets, bounded I/O, hostname extraction, and SOCKS5 helpers;
+- `src/net/` — sockets, bounded I/O, hostname extraction, and the SOCKS5
+  client codec and blocking helper;
 - `src/filter/` — whitelist loading, matching, and reload;
 - `src/log/` — logging and log synchronization.
 
@@ -289,7 +290,8 @@ started, then returns `1`.
 | `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |
 | `src/net/net.c` | IPv4 listen/connect, HTTP/TLS host extraction | Protocol-independent socket helpers |
 | `src/net/net_io.c` | Exact and deadline-bounded I/O | Shared timeout behavior |
-| `src/net/socks.c` | Blocking SOCKS5 client helper | Used by DNS and legacy/test paths |
+| `src/net/socks5_codec.c` | Sans-IO SOCKS5 client handshake | Owns no fd; shared by the blocking helper, the SNI loop and the DNS loop |
+| `src/net/socks.c` | Blocking SOCKS5 client helper | Drives the codec with deadline-bounded I/O (legacy/test paths) |
 | `src/dns/dnsserver.c` | DNS service socket start/stop | Owns listener sockets and shutdown sequencing |
 | `src/dns/dns_event_loop.c` | Non-blocking DNS state machines | Owns DNS listener, client, upstream, resolver and wake fds |
 | `src/dns/dnsproxy.c` | DNS local answers and legacy test helpers | Shared request validation and reply construction |
@@ -503,8 +505,11 @@ configured timeout covers the connect phase.
 
 #### `SOCKS`
 
-The upstream fd is the connection to the SOCKS5 server. The state machine sends
-and receives these phases with partial-I/O support:
+The upstream fd is the connection to the SOCKS5 server. The handshake itself is
+the shared sans-IO codec (`socks5_codec`): it follows one pattern, write a whole
+message and then read exactly `need` bytes, and owns no fd. The event loop does
+the non-blocking partial I/O around it and keeps the per-phase deadline. The
+codec moves through these phases:
 
 ```text
 GREETING -> optional USERNAME/PASSWORD AUTH -> CONNECT REQUEST -> REPLY
@@ -947,7 +952,7 @@ Current important bounds are:
 | SNI initial buffer | 8192 bytes | `SNI_HELLO_CAP` |
 | SNI client-to-upstream relay buffer | 8192 bytes | `SNI_RELAY_CAP` |
 | SNI upstream-to-client relay buffer | 8192 bytes | `SNI_RELAY_CAP` |
-| SOCKS5 phase buffer | 600 bytes | `SNI_SOCKS_CAP` |
+| SOCKS5 reply buffer | 600 bytes | `SNI_SOCKS_CAP` |
 | Resolver workers | 4 | `SNI_RESOLVER_THREADS` |
 | Resolver slots | 128 | `SNI_RESOLVER_SLOTS` |
 | Per-listener client lookup quota | 104 | `SNI_RESOLVER_LISTENER_QUOTA` |
@@ -1076,6 +1081,7 @@ The test layout mirrors the major boundaries:
 | `test_filter_whitelist` | whitelist matching: exact, suffix, generic patterns, case, no prefix match |
 | `test_dns_codec` | bounded DNS decode/encode |
 | `test_args_parse` | CLI/config parsing and limits |
+| `test_socks5_codec` | sans-IO SOCKS5 codec: greeting, auth, request forms, reply types, errors |
 | `test_socks_handshake` | SOCKS5 handshake and deadlines |
 | `test_sni_forwarding` | direct/SOCKS forwarding entry point |
 | `test_sni_engine` | epoll event-loop state machine |
