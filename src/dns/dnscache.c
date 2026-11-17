@@ -5,11 +5,9 @@
  */
 #include <zroxy/dnscache.h>
 #include <zroxy/dns.h>
-#include <zroxy/net_io.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 /* Wire name (255) + TYPE + CLASS + flag byte */
 #define DNSCACHE_KEY_MAX	264
@@ -36,15 +34,11 @@ struct dnscache_flight
 	uint32_t hash;
 	uint16_t key_len;
 	uint8_t key[DNSCACHE_KEY_MAX];
-	size_t stored;
-	size_t full;
-	uint8_t resp[DNS_UDP_MAX_PAYLOAD];
 };
 
 struct dnscache
 {
 	pthread_mutex_t mu;
-	pthread_cond_t done;
 	dnscache_entry **buckets;
 	size_t bucket_mask;
 	size_t max_entries;
@@ -65,19 +59,6 @@ static uint32_t key_hash(const uint8_t *key, size_t len)
 		h *= 16777619u;
 	}
 	return h;
-}
-
-static int init_mono_cond(pthread_cond_t *cv)
-{
-	pthread_condattr_t attr;
-	int rc;
-	if (pthread_condattr_init(&attr) != 0)
-		return -1;
-	rc = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-	if (rc == 0)
-		rc = pthread_cond_init(cv, &attr);
-	pthread_condattr_destroy(&attr);
-	return rc == 0 ? 0 : -1;
 }
 
 dnscache_t *dnscache_create(size_t max_entries)
@@ -104,13 +85,6 @@ dnscache_t *dnscache_create(size_t max_entries)
 		free(c);
 		return NULL;
 	}
-	if (init_mono_cond(&c->done) != 0)
-	{
-		pthread_mutex_destroy(&c->mu);
-		free(c->buckets);
-		free(c);
-		return NULL;
-	}
 	c->bucket_mask = buckets - 1;
 	c->max_entries = max_entries;
 	return c;
@@ -128,7 +102,6 @@ void dnscache_free(dnscache_t *c)
 		free(e);
 		e = next;
 	}
-	pthread_cond_destroy(&c->done);
 	pthread_mutex_destroy(&c->mu);
 	free(c->buckets);
 	free(c);
@@ -188,7 +161,7 @@ static dnscache_flight *flight_find_locked(dnscache_t *c, const uint8_t *key, si
 	for (i = 0; i < DNSCACHE_FLIGHTS; i++)
 	{
 		dnscache_flight *f = &c->flights[i];
-		/* A finished flight is only kept for its followers. */
+		/* A finished flight stays allocated until its followers let go. */
 		if (f->state == FLIGHT_PENDING && f->hash == hash && f->key_len == key_len &&
 			memcmp(f->key, key, key_len) == 0)
 			return f;
@@ -209,8 +182,6 @@ static dnscache_flight *flight_claim_locked(dnscache_t *c, const uint8_t *key, s
 		f->hash = hash;
 		f->key_len = (uint16_t)key_len;
 		memcpy(f->key, key, key_len);
-		f->stored = 0;
-		f->full = 0;
 		return f;
 	}
 	return NULL;
@@ -340,66 +311,13 @@ void dnscache_finish(dnscache_t *c, dnscache_flight *f, const uint8_t *resp,
 		return;
 	if (stored > full_len)
 		full_len = 0;
-	/* Followers get at most a UDP-sized prefix of a larger reply. */
-	if (stored > sizeof(f->resp))
-		stored = sizeof(f->resp);
 	pthread_mutex_lock(&c->mu);
-	if (full_len > 0)
-	{
-		memcpy(f->resp, resp, stored);
-		f->stored = stored;
-		f->full = full_len;
-		/* Only a complete reply is cached. */
-		if (stored == full_len && now_ms >= 0)
-			store_locked(c, f, resp, stored, now_ms);
-	}
+	/* Only a complete reply is cached. */
+	if (full_len > 0 && stored == full_len && now_ms >= 0)
+		store_locked(c, f, resp, stored, now_ms);
 	f->state = FLIGHT_DONE;
 	flight_release_locked(f);
-	pthread_cond_broadcast(&c->done);
 	pthread_mutex_unlock(&c->mu);
-}
-
-size_t dnscache_follow(dnscache_t *c, dnscache_flight *f, const uint8_t *query, size_t qlen,
-		int64_t deadline_ms, uint8_t *out, size_t cap)
-{
-	struct timespec ts;
-	int64_t left;
-	size_t full = 0;
-	size_t n = 0;
-
-	if (!c || !f)
-		return 0;
-	left = deadline_ms - net_mono_ms();
-	if (left < 0)
-		left = 0;
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-		left = 0;
-	ts.tv_sec += (time_t)(left / 1000);
-	ts.tv_nsec += (long)(left % 1000) * 1000000L;
-	if (ts.tv_nsec >= 1000000000L)
-	{
-		ts.tv_sec += 1;
-		ts.tv_nsec -= 1000000000L;
-	}
-
-	pthread_mutex_lock(&c->mu);
-	while (f->state == FLIGHT_PENDING)
-	{
-		if (pthread_cond_timedwait(&c->done, &c->mu, &ts) != 0 && f->state == FLIGHT_PENDING)
-			break;
-	}
-	if (f->state == FLIGHT_DONE && f->full > 0)
-	{
-		n = f->stored < cap ? f->stored : cap;
-		memcpy(out, f->resp, n);
-		full = f->full;
-	}
-	flight_release_locked(f);
-	pthread_mutex_unlock(&c->mu);
-
-	if (full > 0 && !dns_reply_adopt(out, n, query, qlen))
-		full = 0;
-	return full;
 }
 
 void dnscache_abandon_follower(dnscache_t *c, dnscache_flight *f)
