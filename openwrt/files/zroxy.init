@@ -196,6 +196,7 @@ generate_conf() {
 	zr_opt SNITIMEOUT main snitimeout
 	zr_opt SNIIDLETIMEOUT main sniidletimeout
 	zr_opt SNIMAXCONN main snimaxconn
+	zr_join SACL main sacl
 	zr_bool ALLOWLOOPBACK main allowloopback
 	zr_bool DENYPRIVATE main denyprivate
 	zr_opt WHITE main white

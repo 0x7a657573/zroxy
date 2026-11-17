@@ -2131,6 +2131,62 @@ static void test_no_evict_when_relaying(void)
 	expect_true(slots_are_clear(), "no-evict test released slots");
 }
 
+/* SACL: a client outside the list is closed at once and takes no slot. */
+static void test_client_acl(void)
+{
+	echo_srv echo;
+	sni_listener *ls = NULL;
+	SniServer_t cfg;
+	statistics_t *st = NULL;
+	zroxy_cidr_t deny[1];
+	zroxy_cidr_t allow[2];
+	size_t count = 0;
+	uint16_t local = 0;
+	int binder;
+	int fd;
+	uint32_t denied0;
+	uint32_t refused0;
+	uint8_t sink[8];
+	size_t got = 99;
+	expect_true(acl_parse("10.0.0.0/8", deny, 1, &count) && count == 1, "parse deny list");
+	expect_true(acl_parse("10.0.0.0/8,127.0.0.0/8", allow, 2, &count) && count == 2, "parse allow list");
+	expect_true(echo_start(&echo) == 0, "acl echo");
+	binder = listen_loopback(&local);
+	if (binder >= 0)
+		close(binder);
+	stats_init(&st, "sni-acl");
+	fill_listener(&cfg, local, echo.port, 30, st, NULL, NULL);
+	cfg.acl = deny;
+	cfg.acl_count = 1;
+	expect_true(sni_listener_open(&cfg, &ls), "acl deny listener");
+	denied0 = sni_counter("AclDenied");
+	refused0 = sni_counter("Refused");
+	fd = connect_local(local, 2000);
+	expect_true(fd >= 0, "denied client completes the handshake");
+	if (fd >= 0) {
+		expect_true(read_eof_ms(fd, sink, sizeof(sink), &got, 3000) == 0 && got == 0, "denied client is closed");
+		close(fd);
+	}
+	expect_int((int)(sni_counter("AclDenied") - denied0), 1, "AclDenied counts the client");
+	expect_int((int)(sni_counter("Refused") - refused0), 0, "denial is not a refusal");
+	{
+		stat_t snap;
+		stats_get(st, &snap);
+		expect_int((int)snap.TotalConnection, 0, "denied client was not counted as a connection");
+	}
+	sni_listener_close(ls);
+	cfg.acl = allow;
+	cfg.acl_count = 2;
+	expect_true(sni_listener_open(&cfg, &ls), "acl allow listener");
+	denied0 = sni_counter("AclDenied");
+	expect_true(echo_roundtrip(local, REQ, sizeof(REQ) - 1, 3000) == 0, "allowed client is served");
+	expect_int((int)(sni_counter("AclDenied") - denied0), 0, "allowed client is not denied");
+	sni_listener_close(ls);
+	echo_stop(&echo);
+	state_drop(st);
+	expect_true(slots_are_clear(), "acl test released slots");
+}
+
 static void test_connection_cap(void)
 {
 	sni_listener *ls = NULL;
@@ -3286,6 +3342,7 @@ int main(void)
 	test_accept_pause();
 	test_evict_idle_hello();
 	test_no_evict_when_relaying();
+	test_client_acl();
 	test_connection_cap();
 	test_stress_cycles();
 	expect_true(slots_are_clear(), "process-wide slots are clear at the end");

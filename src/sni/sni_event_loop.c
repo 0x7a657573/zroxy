@@ -107,7 +107,8 @@ enum {
 	SNI_CLOSE_HANDSHAKE_TIMEOUT,
 	SNI_CLOSE_IDLE_TIMEOUT,
 	SNI_CLOSE_STALL_TIMEOUT,
-	SNI_CLOSE_EVICTED
+	SNI_CLOSE_EVICTED,
+	SNI_CLOSE_ACL_DENIED
 };
 
 typedef struct sni_engine sni_engine;
@@ -347,15 +348,17 @@ static ssize_t io_write(int fd, const void *buf, size_t len)
 #endif
 }
 
-static int io_accept(int fd)
+static int io_accept(int fd, struct sockaddr_storage *peer)
 {
+	socklen_t len = (socklen_t)sizeof(*peer);
+
 #ifdef SNI_TEST_HOOKS
 	if (take_one(&g_fail_accept)) {
 		errno = EMFILE;
 		return -1;
 	}
 #endif
-	return accept(fd, NULL, NULL);
+	return accept(fd, (struct sockaddr *)peer, &len);
 }
 
 static int io_connect(int fd, const struct sockaddr *sa, socklen_t len)
@@ -532,6 +535,7 @@ static struct {
 	uint32_t idle_timeout;
 	uint32_t stall_timeout;
 	uint32_t evicted;
+	uint32_t acl_denied;
 } g_sni_close;
 
 static void count_close(int reason)
@@ -550,6 +554,7 @@ static void count_close(int reason)
 	case SNI_CLOSE_IDLE_TIMEOUT: counter = &g_sni_close.idle_timeout; break;
 	case SNI_CLOSE_STALL_TIMEOUT: counter = &g_sni_close.stall_timeout; break;
 	case SNI_CLOSE_EVICTED: counter = &g_sni_close.evicted; break;
+	case SNI_CLOSE_ACL_DENIED: counter = &g_sni_close.acl_denied; break;
 	default: return;
 	}
 	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
@@ -576,7 +581,8 @@ bool sni_stats_json(void *ctx, char **ptr, char *end)
 		"\"HandshakeTimeouts\" : %" PRIu32 ",\n"
 		"\"IdleTimeouts\" : %" PRIu32 ",\n"
 		"\"StallTimeouts\" : %" PRIu32 ",\n"
-		"\"Evicted\" : %" PRIu32,
+		"\"Evicted\" : %" PRIu32 ",\n"
+		"\"AclDenied\" : %" PRIu32,
 		sni_worker_limit(),
 		__atomic_load_n(&g_sni_close.relayed, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.refused, __ATOMIC_RELAXED),
@@ -589,7 +595,8 @@ bool sni_stats_json(void *ctx, char **ptr, char *end)
 		__atomic_load_n(&g_sni_close.handshake_timeout, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.idle_timeout, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.stall_timeout, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.evicted, __ATOMIC_RELAXED));
+		__atomic_load_n(&g_sni_close.evicted, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.acl_denied, __ATOMIC_RELAXED));
 	if (n < 0 || (size_t)n >= left)
 		return false;
 	*ptr += n;
@@ -1414,11 +1421,25 @@ static bool take_slot(sni_engine *e)
 	return sni_worker_acquire();
 }
 
+/* No ACL allows every client. A list matches IPv4 peers only; the listeners are IPv4. */
+static bool peer_allowed(const sni_engine *e, const struct sockaddr_storage *peer)
+{
+	if (e->cfg.acl_count == 0)
+		return true;
+	if (peer->ss_family != AF_INET)
+		return false;
+	return acl_allows(e->cfg.acl, e->cfg.acl_count,
+		ntohl(((const struct sockaddr_in *)peer)->sin_addr.s_addr));
+}
+
 static void accept_clients(sni_engine *e)
 {
 	for (;;) {
-		int fd = io_accept(e->listen_fd);
+		struct sockaddr_storage peer;
+		int fd;
 		sni_conn *c;
+		memset(&peer, 0, sizeof(peer));
+		fd = io_accept(e->listen_fd, &peer);
 		if (fd < 0) {
 			if (errno == EINTR)
 				continue;
@@ -1430,6 +1451,11 @@ static void accept_clients(sni_engine *e)
 			}
 			log_error("server accept() %i: %s", errno, strerror(errno));
 			break;
+		}
+		if (!peer_allowed(e, &peer)) {
+			count_close(SNI_CLOSE_ACL_DENIED);
+			close(fd);
+			continue;
 		}
 		if (!set_nb_cloexec(fd)) {
 			count_close(SNI_CLOSE_REFUSED);
