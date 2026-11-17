@@ -138,7 +138,6 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str);
 static char *find_dns_via(char *str);
 static char *ltrim(char *s);
 static bool parse_dns_socks(zroxy_t *ptr,char *str);
-bool args_parse_config(zroxy_t *ptr,char *str);
 static bool parse_sni_ip(zroxy_t *ptr,char *str);
 static bool parse_dns_timeout(zroxy_t *ptr,char *str);
 static bool parse_dns_cache(zroxy_t *ptr,char *str);

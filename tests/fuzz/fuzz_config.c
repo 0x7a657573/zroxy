@@ -29,8 +29,6 @@
 #define MAX_LINES 64u
 #define FUZZ_FD 100	/* where make_file leaves the input; seeds name it */
 
-bool args_parse_config(zroxy_t *ptr, char *str);	/* not in args.h */
-
 /* Occurrences of word in s, ignoring ASCII case. */
 static size_t count_icase(const uint8_t *s, size_t n, const char *word)
 {

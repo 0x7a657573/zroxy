@@ -15,8 +15,6 @@
 #include <zroxy/args.h>
 #include <zroxy/log.h>
 
-bool args_parse_config(zroxy_t *ptr, char *str);
-
 extern int optind;
 
 static int failures = 0;
