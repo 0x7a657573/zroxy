@@ -274,9 +274,13 @@ them.
   - the DNS event loop is woken through its wake pipe, completes cleanup of its
     requests and descriptors, and is joined;
   - `monitor_stop` wakes and joins the accept thread, closes the listener,
-    waits for the active workers, then frees the sections, the statistics
-    objects, the token and the monitor;
-  - `filter_free` wakes and joins the whitelist watcher, then frees the filter.
+    waits for the active workers, then frees the sections, the token and the
+    monitor, and reports whether it did;
+  - `filter_free` wakes and joins the whitelist watcher, then frees the filter;
+  - `main` frees the statistics objects last.
+
+  If `monitor_stop` gave up on a worker, `main` leaves the statistics objects
+  and the whitelist allocated.
 
   `main` then returns `0`.
 
@@ -374,8 +378,10 @@ flowchart TB
   objects. Its `localdns_free` function does not free those aliases.
 - Monitor workers close their client descriptor exactly once and release their
   worker slot before exiting.
-- The monitor owns its sections, statistics objects and token, and frees them in
-  `monitor_stop`. The whitelist filter owns its watcher thread and wake pipe and
+- `main` creates the SNI and DNS statistics objects and frees them after the
+  services stop, unless the monitor gave up on a worker. The monitor only
+  borrows them through `monitor_attach_stat`.
+- The monitor owns its sections and token, and frees them in `monitor_stop`. The whitelist filter owns its watcher thread and wake pipe and
   frees them in `filter_free`.
 - The DNS event loop owns its UDP/TCP listeners, wake pipe, resolver completion
   pipe, local TCP clients, requests, and reusable upstream connections.
@@ -864,7 +870,7 @@ empty 500 and logs the overflow once.
 
 The monitor uses two lock levels:
 
-- `stats_lock` protects the linked-list head when statistics objects are added
+- `stats_lock` protects the linked-list head when statistics objects are attached
   or the list is read, and the section list. A report walks the section list
   with it held, so a section callback must be short and must not call back into
   the monitor (the whitelist callback takes only the filter read lock);
@@ -956,7 +962,7 @@ protocol; it affects the hostname-aware paths described above.
 The service objects use shared references rather than duplicating the filter
 and SOCKS credentials. `main` stops the SNI listeners and the DNS service
 before it frees the configuration they reference. The monitor is stopped after
-them, because SNI and DNS write the statistics objects it owns and frees, and
+them, because SNI and DNS write the statistics objects it reads, and
 the whitelist last, because the monitor's `Whitelist` section reads it.
 
 The argument parser allocates one `dnshost_t` for all DNS-related options, so
@@ -972,7 +978,7 @@ configured DNS options are sufficient to start the service.
 | Resolver completion ring | sink mutex | resolver workers and owning event loop |
 | Filter snapshot pointer | filter rwlock (read: lookup, write: swap) | SNI/DNS readers, reload watcher, `SIGHUP` |
 | Statistics counters | one mutex per statistics object | SNI/DNS event loops and monitor workers |
-| Monitor statistics-list head | monitor `stats_lock` | startup/add and monitor response generation |
+| Monitor statistics-list head | monitor `stats_lock` | startup/attach and monitor response generation |
 | Monitor worker count | monitor worker mutex | monitor accept/workers |
 | SNI live-connection count | SNI worker mutex | SNI accept/destruction paths |
 | Listener startup/stop state | listener mutex/condition | `main` and the event-loop thread |
@@ -1096,7 +1102,7 @@ path above) and then the DNS service, as described in
 `monitor_stop` waits for active monitor workers for at most the header timeout
 plus one second. Workers re-check a stop flag every 100 ms, so idle or
 half-sent requests end at once. If a worker is still alive when the bound
-expires, the monitor state is deliberately left allocated.
+expires, the monitor state, the statistics objects and the whitelist are deliberately left allocated.
 
 ## Observability
 
