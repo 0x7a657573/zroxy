@@ -137,6 +137,21 @@ static bool parse_dns_server(zroxy_t *ptr,char *str);
 static bool parse_dns_upstream(zroxy_t *ptr,char *str);
 static char *find_dns_via(char *str);
 static char *ltrim(char *s);
+void args_free(zroxy_t *ptr)
+{
+	args_free_ports(ptr);
+	args_free_dns(ptr);
+	args_free_socks(ptr);
+	args_free_sacl(ptr);
+	args_free_monitor_token(ptr);
+	free(ptr->WhitePath);
+	ptr->WhitePath = NULL;
+	free(ptr->run_user);
+	ptr->run_user = NULL;
+	free(ptr->run_group);
+	ptr->run_group = NULL;
+}
+
 static bool parse_dns_socks(zroxy_t *ptr,char *str);
 static bool parse_sni_ip(zroxy_t *ptr,char *str);
 static bool parse_dns_timeout(zroxy_t *ptr,char *str);
