@@ -362,19 +362,15 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	return mon;
 }
 
-statistics_t *monitor_add_stat(mon_t *self,char *name)
+bool monitor_attach_stat(mon_t *self,statistics_t *stat)
 {
-	statistics_t *stat;
-	statistics_t *created;
-	if (!self)
-		return NULL;
+	if (!self || !stat)
+		return false;
 	pthread_mutex_lock(&self->stats_lock);
-	stat = self->state;
-	stats_init(&self->state,name);		/*create statistics var*/
-	self->state->next = stat;
-	created = self->state;
+	stat->next = self->state;	/* newest first, as the report lists them */
+	self->state = stat;
 	pthread_mutex_unlock(&self->stats_lock);
-	return created;
+	return true;
 }
 
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx)
@@ -461,15 +457,14 @@ static void *monitor_accept_thread(void *vargp)
 	return NULL;
 }
 
-void monitor_stop(mon_t *self)
+bool monitor_stop(mon_t *self)
 {
 	mon_section_t *sec;
-	statistics_t *stat;
 	int64_t deadline;
 	char b = 0;
 
 	if (!self)
-		return;
+		return true;
 	__atomic_store_n(&self->stopping, 1, __ATOMIC_RELEASE);
 	/* the pipe is empty and nonblocking: one byte always fits */
 	while (write(self->wake[1], &b, 1) < 0 && errno == EINTR)
@@ -486,7 +481,7 @@ void monitor_stop(mon_t *self)
 		if (net_mono_ms() >= deadline)
 		{
 			log_error("monitor clients did not finish; leaving monitor state allocated");
-			return;
+			return false;
 		}
 		usleep(10000);
 	}
@@ -497,15 +492,10 @@ void monitor_stop(mon_t *self)
 		free(sec);
 		sec = next;
 	}
-	for (stat = self->state; stat; )
-	{
-		statistics_t *next = stat->next;
-		stats_free(stat);
-		stat = next;
-	}
 	pthread_mutex_destroy(&self->stats_lock);
 	mon_free_token(self->token);
 	free(self);
+	return true;
 }
 
 static void *monitor_client_thread(void *arg)

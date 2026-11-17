@@ -39,7 +39,8 @@ typedef struct
 
 static void stop_whitelist(void *h) { filter_free(h); }
 static void reload_whitelist(void *h) { filter_reload(h); }
-static void stop_monitor(void *h) { monitor_stop(h); }
+static bool monitor_clean = true;	/* false when monitor_stop gave up on its workers */
+static void stop_monitor(void *h) { monitor_clean = monitor_stop(h); }
 static void stop_dns(void *h) { dnsserver_stop(h); }
 static void stop_sni(void *h) { sniproxy_stop(h); }
 
@@ -100,6 +101,7 @@ int main(int argc, const char **argv)
 	size_t service_count = 0;
 	size_t listener_count = 0;
 	statistics_t *SniStat = NULL;
+	statistics_t *DnsStat = NULL;
 	SniServer_t Xconf;
 
 	log_init();
@@ -203,8 +205,10 @@ int main(int argc, const char **argv)
 	/*check for dns server*/
 	if(prg_setting.dnsserver)
 	{
+		stats_init(&DnsStat,"DNS_Server");
 		if(monitor)
-			prg_setting.dnsserver->Stat = monitor_add_stat(monitor,"DNS_Server");
+			monitor_attach_stat(monitor,DnsStat);
+		prg_setting.dnsserver->Stat = DnsStat;
 
 		prg_setting.dnsserver->whitelist = whitelist;
 
@@ -218,10 +222,14 @@ int main(int argc, const char **argv)
 		service_add(services, &service_count, &(service_t){ "dns", dns, stop_dns, NULL });
 	}
 
-	if(monitor)
+	if(listener_count > 0 || monitor)
 	{
-		SniStat = monitor_add_stat(monitor,"SNI_Server");
-		stats_set_extra(SniStat, sni_stats_json, NULL);
+		stats_init(&SniStat,"SNI_Server");
+		if(monitor)
+		{
+			monitor_attach_stat(monitor,SniStat);
+			stats_set_extra(SniStat, sni_stats_json, NULL);
+		}
 	}
 
 	sni_worker_set_limit(prg_setting.snimaxconn);
@@ -277,6 +285,12 @@ int main(int argc, const char **argv)
 out:
 	/* reverse start order: SNI and DNS first, then the monitor, then the whitelist */
 	services_stop(services, &service_count);
+	/* a monitor that gave up may still read them from a worker */
+	if (monitor_clean)
+	{
+		stats_free(SniStat);
+		stats_free(DnsStat);
+	}
 	free(services);
 	args_free_ports(&prg_setting);
 	args_free_dns(&prg_setting);

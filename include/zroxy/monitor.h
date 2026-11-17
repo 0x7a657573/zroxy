@@ -48,19 +48,27 @@ typedef struct
 }monclient_t;
 
 mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int header_timeout_sec);
-statistics_t *monitor_add_stat(mon_t *self,char *name);
+/*
+ * Adds a caller-owned statistics object to the report, newest first. The
+ * monitor only borrows it: stat must outlive the monitor and is never freed
+ * here. Returns false for a NULL argument.
+ */
+bool monitor_attach_stat(mon_t *self,statistics_t *stat);
 /* Adds a top-level object written by fn. ctx must outlive the monitor. */
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx);
 /*
  * Stops accepting, joins the accept thread, closes the listener, waits for the
  * active clients (at most the header timeout plus a margin), then frees the
- * sections, the statistics objects, the token and the monitor itself. If a
- * client is still running after that wait, nothing it can touch is freed.
+ * sections, the token and the monitor itself. The attached statistics objects
+ * stay the caller's. Returns true when the monitor stopped and freed itself
+ * (also for NULL), false when a client was still running after the wait: then
+ * nothing it can touch is freed, so the caller must keep the attached
+ * statistics objects and the section contexts alive too.
  *
  * Call it only after every service that writes to the statistics objects
  * (SNI, DNS) has stopped, and once the sections' contexts are still valid.
  */
-void monitor_stop(mon_t *self);
+bool monitor_stop(mon_t *self);
 
 #ifdef MON_TEST_HOOKS
 #include <stddef.h>
