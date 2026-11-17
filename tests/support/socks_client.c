@@ -1,5 +1,5 @@
 /*
- * socks.c
+ * socks_client.c - blocking SOCKS5 client, used by tests only.
  *
  *  Created on: Feb 1, 2020
  *      Author: zeus
@@ -17,6 +17,7 @@
 #include <zroxy/socks.h>
 #include <zroxy/net.h>
 #include <zroxy/net_io.h>
+#include "test_support.h"
 
 #define SOCKS_MAX_IDENT 255
 

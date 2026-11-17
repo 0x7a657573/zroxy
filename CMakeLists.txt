@@ -59,7 +59,7 @@ zroxy_add_module(zroxy_priv
     DEPS zroxy_log)
 
 zroxy_add_module(zroxy_net
-    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c src/net/socks5_codec.c src/net/fdlimit.c src/net/acl.c
+    SOURCES src/net/net.c src/net/net_io.c src/net/socks5_codec.c src/net/fdlimit.c src/net/acl.c
     DEPS zroxy_log)
 
 # Readiness reactor (epoll or poll) shared by the SNI and DNS event loops.
@@ -153,6 +153,14 @@ if(BUILD_TESTING)
         DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal zroxy_resolver_internal
         DEFINES SNI_TEST_HOOKS SNI_FORCE_POLL)
 
+    # Blocking helpers (dial, exact read, SOCKS5 client) only tests use.
+    add_library(zroxy_test_support STATIC
+        tests/support/net_blocking.c tests/support/socks_client.c)
+    target_include_directories(zroxy_test_support PUBLIC tests/support)
+    target_link_libraries(zroxy_test_support
+        PUBLIC zroxy_net zroxy_log
+        PRIVATE zroxy_build_options)
+
     # zroxy_add_unit_test(<name> <source> <libs>...)
     # Builds test_<name> and registers it as ctest <name>.
     function(zroxy_add_unit_test name source)
@@ -173,7 +181,7 @@ if(BUILD_TESTING)
             $<TARGET_FILE:zroxy>)
     endif()
 
-    zroxy_add_unit_test(net_host_extract tests/test_net_host_extract.c zroxy_net)
+    zroxy_add_unit_test(net_host_extract tests/test_net_host_extract.c zroxy_net zroxy_test_support)
     zroxy_add_unit_test(filter_whitelist tests/test_filter_whitelist.c zroxy_filter)
     zroxy_add_unit_test(dns_codec        tests/test_dns_codec.c        zroxy_dns)
     zroxy_add_unit_test(dns_cache        tests/test_dns_cache.c        zroxy_dns)
@@ -182,7 +190,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(dns_rate          tests/test_dns_rate.c         zroxy_dns)
     zroxy_add_unit_test(dns_throttle     tests/test_dns_throttle.c     zroxy_dns zroxy_dns_internal)
     zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args zroxy_dns zroxy_dns_internal)
-    zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net)
+    zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net zroxy_test_support)
     zroxy_add_unit_test(socks5_codec     tests/test_socks5_codec.c     zroxy_net)
     zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)
     zroxy_add_unit_test(sni_engine       tests/test_sni_engine.c       zroxy_sni_hooks)

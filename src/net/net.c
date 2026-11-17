@@ -14,12 +14,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <zroxy/net.h>
-#include <netdb.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <errno.h>
-#include <poll.h>
-#include <zroxy/net_io.h>
 
 static void *net_memmem(const void *haystack_start, size_t haystack_len,
         		const void *needle_start, size_t needle_len);
@@ -40,139 +36,6 @@ bool net_set_nonblock_cloexec(int fd)
     if ((fdflags & FD_CLOEXEC) == 0 && fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) != 0)
         return false;
     return true;
-}
-
-static bool net_connect_one(int sfd, const struct sockaddr *addr, socklen_t len, int64_t deadline_ms)
-{
-    int flags;
-    int rc;
-
-    flags = fcntl(sfd, F_GETFL, 0);
-    if (flags < 0)
-        return false;
-    if (fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0)
-        return false;
-
-    do
-    {
-        rc = connect(sfd, addr, len);
-    } while (rc < 0 && errno == EINTR);
-
-    if (rc < 0 && errno != EINPROGRESS && errno != EALREADY)
-    {
-        fcntl(sfd, F_SETFL, flags);
-        return false;
-    }
-
-    if (rc < 0)
-    {
-        int err = 0;
-        socklen_t elen = sizeof(err);
-        if (!net_wait_fd(sfd, POLLOUT, deadline_ms) ||
-            getsockopt(sfd, SOL_SOCKET, SO_ERROR, &err, &elen) != 0 ||
-            err != 0)
-        {
-            fcntl(sfd, F_SETFL, flags);
-            return false;
-        }
-    }
-
-    if (fcntl(sfd, F_SETFL, flags) < 0)
-        return false;
-    return true;
-}
-
-bool net_connect(int *sockfd,const char *hostname, uint16_t port, int timeout_sec)
-{
-    int64_t deadline;
-    int64_t now;
-
-    *sockfd = -1;
-    now = net_mono_ms();
-    if (now < 0)
-        return false;
-    deadline = now + net_timeout_ms(timeout_sec);
-
-    /*check Hostname is IP or Domain*/
-    if(net_is_ip_literal(hostname))
-	{
-        int sfd = socket(AF_INET, SOCK_STREAM, 0);
-        if(sfd < 0)
-	    {
-	        log_error("Socks Error : Could not create socket");
-	        return false;
-	    }
-
-        struct sockaddr_in serv_addr;
-	    serv_addr.sin_family = AF_INET;
-	    serv_addr.sin_port = htons(port);
-
-        if(inet_pton(AF_INET, hostname, &serv_addr.sin_addr)<=0)
-		{
-			log_error("inet_pton error occured");
-            close(sfd);
-			return false;
-		}
-
-		if(!net_connect_one(sfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr), deadline))
-		{
-			log_error("net_connect Error : Connect Failed");
-            close(sfd);
-			return false;
-		}
-
-        *sockfd = sfd;
-        return true;
-	}
-
-    char port_str[8] = {0};
-    struct addrinfo hints;
-    struct addrinfo *addrs=NULL;
-
-    memset(&hints, 0, sizeof(hints));
-    /* IPv6 is not supported; asking for A only also skips the AAAA lookup. */
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    snprintf(port_str,7,"%i",port);
-
-    const int status = getaddrinfo(hostname, port_str, &hints, &addrs);
-    if (status != 0)
-    {
-    	log_error("%s:%s -> %s\n", hostname,port_str, gai_strerror(status));
-        return false;
-    }
-
-    int sfd = -1;
-    for (struct addrinfo *addr = addrs; addr != NULL; addr = addr->ai_next)
-    {
-        sfd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
-        if (sfd == -1)
-        {
-        	log_error("Socks Error : Could not create socket");
-            continue;
-        }
-
-        if (net_mono_ms() >= deadline)
-        {
-            close(sfd);
-            sfd = -1;
-            break;
-        }
-
-        if (net_connect_one(sfd, addr->ai_addr, addr->ai_addrlen, deadline))
-        {
-            *sockfd = sfd;
-            freeaddrinfo(addrs);
-            return true;
-        }
-
-        close(sfd);
-        sfd = -1;
-    }
-
-    freeaddrinfo(addrs);
-    return false;
 }
 
 bool net_listen_ipv4(in_addr_t addr, uint16_t Port,int *sockfd)
