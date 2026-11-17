@@ -289,7 +289,8 @@ path, then returns `1`.
 | --- | --- | --- |
 | `src/main.c` | Startup order, signal handling, shutdown | Owns top-level configuration and service handles |
 | `src/args.c` | CLI/config parsing and validation | Produces `zroxy_t` |
-| `include/zroxy/args.h` | Configuration structures and parser API | Shared by startup/services |
+| `include/zroxy/args.h` | `zroxy_t` and the parser API | Shared by startup/services |
+| `include/zroxy/settings.h` | Config types and defaults (ports, DNS host and routes) | Shared by args and the services |
 | `include/zroxy/config.h` | Length bounds | Compile-time limits |
 | `include/zroxy/version.h` | Current version and release notes | Used by monitor output |
 | `src/sni/sniproxy.c` | SOCKS priming, listener start/stop | One loop per configured port |
