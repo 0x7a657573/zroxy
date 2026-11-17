@@ -301,13 +301,7 @@ out:
 		stats_free(DnsStat);
 	}
 	free(services);
-	args_free_ports(&prg_setting);
-	args_free_dns(&prg_setting);
-	args_free_socks(&prg_setting);
-	args_free_sacl(&prg_setting);
-	args_free_monitor_token(&prg_setting);
-	free(prg_setting.run_user);
-	free(prg_setting.run_group);
+	args_free(&prg_setting);
 	if (rc == 0)
 		log_info("zroxy stopped");
 	return rc;

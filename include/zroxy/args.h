@@ -47,6 +47,8 @@ bool args_validate(zroxy_t *pgp);
 /* Parse the config file at str into ptr; false on any error. */
 bool args_parse_config(zroxy_t *ptr,char *str);
 void args_print_usage(void);
+/* Free everything the parser allocated; safe after the partial frees below. */
+void args_free(zroxy_t *ptr);
 void args_free_ports(zroxy_t *ptr);
 void args_free_dns(zroxy_t *ptr);
 void args_free_sacl(zroxy_t *ptr);
