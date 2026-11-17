@@ -2437,14 +2437,14 @@ static void test_tls_hello_builds(void)
 
 static void expect_pool(const char *name)
 {
-	sni_resolver_accounting a;
+	resolver_accounting a;
 	int sum;
-	if (!sni_resolver_test_accounting(&a)) {
+	if (!resolver_test_accounting(&a)) {
 		expect_true(false, name);
 		return;
 	}
 	sum = a.free_n + a.queued + a.running + a.done + a.cancelled + a.in_ring;
-	expect_int(sum, SNI_RESOLVER_SLOTS, name);
+	expect_int(sum, RESOLVER_SLOTS, name);
 	expect_int(a.double_free, 0, name);
 }
 
@@ -2454,29 +2454,29 @@ static void resolver_quiet(void)
 	 * Reap cancels queued slots and unpauses under one lock. Unpausing first
 	 * would let workers resolve them into a ring nobody drains.
 	 */
-	sni_resolver_test_hold_running(0);
-	sni_resolver_test_reap();
+	resolver_test_hold_running(0);
+	resolver_test_reap();
 }
 
 static void resolver_settle(const char *name)
 {
 	resolver_quiet();
-	expect_true(sni_resolver_test_wait_idle(3000) != 0, name);
+	expect_true(resolver_test_wait_idle(3000) != 0, name);
 	expect_pool(name);
 }
 
 static void release_slot(resolve_slot *slot)
 {
 	if (slot)
-		sni_resolver_release(slot->index, slot->req_id);
+		resolver_release(slot->index, slot->req_id);
 }
 
-static resolve_slot *wait_one(sni_completion_sink *sink, int ms)
+static resolve_slot *wait_one(resolver_sink *sink, int ms)
 {
 	int64_t deadline = mono_ms() + ms;
 	while (mono_ms() < deadline) {
 		resolve_slot *batch[8];
-		size_t n = sni_resolver_drain(sink, batch, 8);
+		size_t n = resolver_drain(sink, batch, 8);
 		size_t i;
 		if (n > 0) {
 			for (i = 1; i < n; i++)
@@ -2488,10 +2488,10 @@ static resolve_slot *wait_one(sni_completion_sink *sink, int ms)
 	return NULL;
 }
 
-static void set_port_test(sni_resolved_addr *addr, uint16_t port);
+static void set_port_test(resolver_addr *addr, uint16_t port);
 
 typedef struct drain_pack {
-	sni_completion_sink *sink;
+	resolver_sink *sink;
 	resolve_slot **got;
 	int *gotn;
 	int want;
@@ -2499,7 +2499,7 @@ typedef struct drain_pack {
 
 static void *race_drain(void *arg);
 
-static void fill_v4(sni_resolved_addr *out, size_t *count, const char *ip)
+static void fill_v4(resolver_addr *out, size_t *count, const char *ip)
 {
 	struct sockaddr_in in;
 	memset(&in, 0, sizeof(in));
@@ -2511,7 +2511,7 @@ static void fill_v4(sni_resolved_addr *out, size_t *count, const char *ip)
 	*count = 1;
 }
 
-static void fill_v6(sni_resolved_addr *out, size_t *count, const char *ip)
+static void fill_v6(resolver_addr *out, size_t *count, const char *ip)
 {
 	struct sockaddr_in6 in6;
 	memset(&in6, 0, sizeof(in6));
@@ -2545,7 +2545,7 @@ typedef struct hook_cfg {
 static pthread_mutex_t g_hook_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_hook_cv = PTHREAD_COND_INITIALIZER;
 
-static int test_hook(const char *hostname, int family, sni_resolved_addr *out,
+static int test_hook(const char *hostname, int family, resolver_addr *out,
 		size_t max_out, size_t *count, void *cookie)
 {
 	hook_cfg *cfg = (hook_cfg *)cookie;
@@ -2587,28 +2587,28 @@ static int test_hook(const char *hostname, int family, sni_resolved_addr *out,
 	return 0;
 }
 
-static int submit_name(sni_completion_sink *sink, const char *host, int64_t deadline,
+static int submit_name(resolver_sink *sink, const char *host, int64_t deadline,
 		int *slot, uint64_t *req)
 {
-	return sni_resolver_submit(sink, 1, 1, host, 9, AF_UNSPEC, deadline, slot, req);
+	return resolver_submit(sink, 1, 1, host, 9, AF_UNSPEC, deadline, slot, req);
 }
 
 static void test_normalize(void)
 {
-	char out[SNI_RESOLVER_HOST_MAX + 1];
+	char out[RESOLVER_HOST_MAX + 1];
 	char big[300];
 	memset(big, 'a', sizeof(big));
 	big[sizeof(big) - 1] = '\0';
-	expect_true(sni_resolver_normalize("Example.COM", out, sizeof(out)), "normalize case");
+	expect_true(resolver_normalize("Example.COM", out, sizeof(out)), "normalize case");
 	expect_true(strcmp(out, "example.com") == 0, "normalized lowercase");
-	expect_true(sni_resolver_normalize("Example.COM.", out, sizeof(out)), "normalize dot");
+	expect_true(resolver_normalize("Example.COM.", out, sizeof(out)), "normalize dot");
 	expect_true(strcmp(out, "example.com") == 0, "trailing dot stripped");
-	expect_true(!sni_resolver_normalize("", out, sizeof(out)), "empty rejected");
-	expect_true(!sni_resolver_normalize(".", out, sizeof(out)), "lone dot rejected");
-	expect_true(!sni_resolver_normalize("-bad.com", out, sizeof(out)), "leading hyphen rejected");
-	expect_true(!sni_resolver_normalize("bad-.com", out, sizeof(out)), "trailing hyphen rejected");
-	expect_true(!sni_resolver_normalize("bad..com", out, sizeof(out)), "empty label rejected");
-	expect_true(!sni_resolver_normalize(big, out, sizeof(out)), "overlong rejected");
+	expect_true(!resolver_normalize("", out, sizeof(out)), "empty rejected");
+	expect_true(!resolver_normalize(".", out, sizeof(out)), "lone dot rejected");
+	expect_true(!resolver_normalize("-bad.com", out, sizeof(out)), "leading hyphen rejected");
+	expect_true(!resolver_normalize("bad-.com", out, sizeof(out)), "trailing hyphen rejected");
+	expect_true(!resolver_normalize("bad..com", out, sizeof(out)), "empty label rejected");
+	expect_true(!resolver_normalize(big, out, sizeof(out)), "overlong rejected");
 	{
 		int pos = 0;
 		int label;
@@ -2622,19 +2622,19 @@ static void test_normalize(void)
 			big[pos++] = 'b';
 		big[253] = '\0';
 	}
-	expect_true(sni_resolver_normalize(big, out, sizeof(out)), "253 bytes accepted");
+	expect_true(resolver_normalize(big, out, sizeof(out)), "253 bytes accepted");
 }
 
 static int policy_kept(int v6, const char *ip, uint16_t port, unsigned flags)
 {
-	sni_resolved_addr addr;
+	resolver_addr addr;
 	size_t n;
 	if (v6)
 		fill_v6(&addr, &n, ip);
 	else
 		fill_v4(&addr, &n, ip);
 	set_port_test(&addr, port);
-	return (int)sni_resolver_policy_keep(&addr, 1, flags);
+	return (int)resolver_policy_keep(&addr, 1, flags);
 }
 
 static void expect_policy(int v6, const char *ip, unsigned flags, int kept, const char *what)
@@ -2646,9 +2646,9 @@ static void expect_policy(int v6, const char *ip, unsigned flags, int kept, cons
 
 static void test_policy_addresses(void)
 {
-	sni_completion_sink *sink = NULL;
-	const unsigned lo = SNI_POLICY_ALLOW_LOOPBACK;
-	const unsigned priv = SNI_POLICY_DENY_PRIVATE;
+	resolver_sink *sink = NULL;
+	const unsigned lo = RESOLVER_POLICY_ALLOW_LOOPBACK;
+	const unsigned priv = RESOLVER_POLICY_DENY_PRIVATE;
 	static const char *const v4_always[] = {
 		"0.0.0.0", "0.1.2.3", "255.255.255.255", "169.254.1.1", "224.0.0.1",
 		"239.255.255.250", "240.0.0.1", "254.1.1.1"
@@ -2668,8 +2668,8 @@ static void test_policy_addresses(void)
 		"100.63.255.255", "100.128.0.1", "223.255.255.255"
 	};
 	size_t i;
-	expect_true(sni_resolver_sink_open(SNI_SINK_LISTENER, &sink), "policy sink");
-	sni_resolver_watch_bind(sink->listener_id, "192.168.1.1", 8443);
+	expect_true(resolver_sink_open(RESOLVER_SINK_LISTENER, &sink), "policy sink");
+	resolver_watch_bind(sink->listener_id, "192.168.1.1", 8443);
 
 	/* Loopback is refused by default even with a specific-IP listener. */
 	expect_policy(0, "127.0.0.1", 0, 0, "loopback refused");
@@ -2717,28 +2717,28 @@ static void test_policy_addresses(void)
 	expect_policy(1, "fe00::1", priv, 1, "outside fc00::/7 kept");
 	expect_policy(1, "2001:db8::1", priv, 1, "global kept");
 	expect_policy(1, "2606:4700::1111", 0, 1, "global kept");
-	sni_resolver_sink_release(sink);
+	resolver_sink_release(sink);
 
 	/* A loopback listener refuses its own port even with the opt-in. */
-	expect_true(sni_resolver_sink_open(SNI_SINK_DIRECT, &sink), "loopback sink");
-	sni_resolver_watch_bind(sink->listener_id, "127.0.0.1", 9);
+	expect_true(resolver_sink_open(RESOLVER_SINK_DIRECT, &sink), "loopback sink");
+	resolver_watch_bind(sink->listener_id, "127.0.0.1", 9);
 	expect_int(policy_kept(0, "127.0.0.2", 9, lo), 0, "own port refused on 127/8 with opt-in");
 	expect_int(policy_kept(1, "::1", 9, lo), 0, "own port refused on ::1 with opt-in");
 	expect_int(policy_kept(0, "127.0.0.1", 10, lo), 1, "other loopback port kept with opt-in");
-	sni_resolver_sink_release(sink);
+	resolver_sink_release(sink);
 
 	/* A wildcard listener still refuses its own port on loopback. */
-	expect_true(sni_resolver_sink_open(SNI_SINK_DIRECT, &sink), "wildcard sink");
-	sni_resolver_watch_bind(sink->listener_id, "0.0.0.0", 1);
+	expect_true(resolver_sink_open(RESOLVER_SINK_DIRECT, &sink), "wildcard sink");
+	resolver_watch_bind(sink->listener_id, "0.0.0.0", 1);
 	expect_int(policy_kept(0, "127.0.0.1", 80, 0), 0, "wildcard rejects loopback");
 	expect_int(policy_kept(0, "127.0.0.1", 1, lo), 0, "wildcard rejects own port on loopback");
 	expect_int(policy_kept(0, "10.0.0.1", 1, 0), 0, "wildcard rejects own port");
 	expect_int(policy_kept(0, "127.0.0.1", 80, lo), 1, "wildcard allows other loopback port by opt-in");
-	sni_resolver_sink_release(sink);
+	resolver_sink_release(sink);
 	sink = NULL;
 }
 
-static void set_port_test(sni_resolved_addr *addr, uint16_t port)
+static void set_port_test(resolver_addr *addr, uint16_t port)
 {
 	struct sockaddr *sa = (struct sockaddr *)&addr->address;
 	if (sa->sa_family == AF_INET)
@@ -2749,19 +2749,19 @@ static void set_port_test(sni_resolved_addr *addr, uint16_t port)
 
 static void test_resolver_results(void)
 {
-	sni_completion_sink *sink = NULL;
+	resolver_sink *sink = NULL;
 	hook_cfg cfg;
 	resolve_slot *slot;
-	sni_resolver_counters st;
+	resolver_counters st;
 	int idx = -1;
 	uint64_t req = 0;
 	int64_t start;
 	memset(&cfg, 0, sizeof(cfg));
-	expect_true(sni_resolver_sink_open(SNI_SINK_DIRECT, &sink), "result sink");
+	expect_true(resolver_sink_open(RESOLVER_SINK_DIRECT, &sink), "result sink");
 	cfg.mode = HOOK_V4;
-	sni_resolver_test_set_hook(test_hook, &cfg);
-	sni_resolver_test_reset_stats();
-	expect_int(submit_name(sink, "v4.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "v4 submit");
+	resolver_test_set_hook(test_hook, &cfg);
+	resolver_test_reset_stats();
+	expect_int(submit_name(sink, "v4.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "v4 submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == 0 && slot->address_count == 1, "v4 result");
 	if (slot) {
@@ -2772,7 +2772,7 @@ static void test_resolver_results(void)
 	}
 	cfg.mode = HOOK_V6;
 	cfg.calls = 0;
-	expect_int(submit_name(sink, "v6.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "v6 submit");
+	expect_int(submit_name(sink, "v6.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "v6 submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == 0, "v6 result");
 	if (slot) {
@@ -2783,61 +2783,61 @@ static void test_resolver_results(void)
 	}
 	cfg.mode = HOOK_ERR;
 	cfg.err = EAI_NONAME;
-	expect_int(submit_name(sink, "none.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "noname submit");
+	expect_int(submit_name(sink, "none.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "noname submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == EAI_NONAME, "EAI_NONAME");
 	release_slot(slot);
 	cfg.err = EAI_AGAIN;
-	expect_int(submit_name(sink, "again.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "again submit");
+	expect_int(submit_name(sink, "again.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "again submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == EAI_AGAIN, "EAI_AGAIN");
 	release_slot(slot);
 	cfg.err = EAI_FAIL;
-	expect_int(submit_name(sink, "fail.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "fail submit");
+	expect_int(submit_name(sink, "fail.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "fail submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == EAI_FAIL, "EAI_FAIL");
 	release_slot(slot);
 	cfg.mode = HOOK_EINTR;
 	cfg.eintr_left = 2;
 	cfg.calls = 0;
-	sni_resolver_test_reset_stats();
-	expect_int(submit_name(sink, "eintr.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "eintr submit");
+	resolver_test_reset_stats();
+	expect_int(submit_name(sink, "eintr.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "eintr submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == 0, "EINTR then success");
-	sni_resolver_test_stats(&st);
+	resolver_test_stats(&st);
 	expect_true(st.calls >= 3, "EINTR retried");
 	release_slot(slot);
 	cfg.mode = HOOK_DELAY;
 	cfg.delay_ms = 200;
 	start = mono_ms();
-	expect_int(submit_name(sink, "slow.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "delay submit");
+	expect_int(submit_name(sink, "slow.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "delay submit");
 	expect_true(mono_ms() - start < 100, "submit does not wait for lookup");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && mono_ms() - start >= 150, "delayed lookup");
 	release_slot(slot);
-	sni_resolver_test_pause_dequeue(1);
-	sni_resolver_test_reset_stats();
+	resolver_test_pause_dequeue(1);
+	resolver_test_reset_stats();
 	cfg.mode = HOOK_V4;
 	cfg.calls = 0;
-	expect_int(submit_name(sink, "expired.test", 1, &idx, &req), SNI_SUBMIT_OK, "expired submit");
-	sni_resolver_test_pause_dequeue(0);
+	expect_int(submit_name(sink, "expired.test", 1, &idx, &req), RESOLVER_SUBMIT_OK, "expired submit");
+	resolver_test_pause_dequeue(0);
 	slot = wait_one(sink, 2000);
-	sni_resolver_test_stats(&st);
+	resolver_test_stats(&st);
 	expect_true(slot != NULL && slot->gai_error != 0, "expired result");
 	expect_int((int)st.skipped_expired, 1, "expired skipped");
 	expect_int(cfg.calls, 0, "expired did not call resolver");
 	release_slot(slot);
 	resolver_settle("after resolver results");
-	sni_resolver_sink_release(sink);
+	resolver_sink_release(sink);
 }
 
 static void test_resolver_quota_and_cancel(void)
 {
-	sni_completion_sink *a = NULL;
-	sni_completion_sink *b = NULL;
+	resolver_sink *a = NULL;
+	resolver_sink *b = NULL;
 	hook_cfg cfg;
 	resolve_slot *slot;
-	sni_resolver_counters st;
+	resolver_counters st;
 	int idx = -1;
 	uint64_t req = 0;
 	uint64_t old_req = 0;
@@ -2846,66 +2846,66 @@ static void test_resolver_quota_and_cancel(void)
 	int i;
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.mode = HOOK_V4;
-	sni_resolver_test_set_hook(test_hook, &cfg);
-	expect_true(sni_resolver_sink_open(SNI_SINK_LISTENER, &a), "quota sink A");
-	expect_true(sni_resolver_sink_open(SNI_SINK_LISTENER, &b), "quota sink B");
-	sni_resolver_test_pause_dequeue(1);
+	resolver_test_set_hook(test_hook, &cfg);
+	expect_true(resolver_sink_open(RESOLVER_SINK_LISTENER, &a), "quota sink A");
+	expect_true(resolver_sink_open(RESOLVER_SINK_LISTENER, &b), "quota sink B");
+	resolver_test_pause_dequeue(1);
 	n = 0;
-	while (submit_name(a, "full.test", mono_ms() + 5000, &idx, &req) == SNI_SUBMIT_OK)
+	while (submit_name(a, "full.test", mono_ms() + 5000, &idx, &req) == RESOLVER_SUBMIT_OK)
 		n++;
-	expect_int(n, sni_resolver_sink_quota(a), "listener A filled its quota");
+	expect_int(n, resolver_sink_quota(a), "listener A filled its quota");
 	expect_int(submit_name(a, "overflow.test", mono_ms() + 5000, &idx, &req),
-			SNI_SUBMIT_OVERFLOW, "queue overflow");
+			RESOLVER_SUBMIT_OVERFLOW, "queue overflow");
 	expect_int(submit_name(b, "other.test", mono_ms() + 5000, &idx, &req),
-			SNI_SUBMIT_OK, "listener B still has quota");
-	sni_resolver_cancel(idx, req);
-	expect_int(sni_resolver_test_fill_infra(), SNI_RESOLVER_INFRA_RESERVE, "infra reserve filled");
-	expect_int(sni_resolver_test_fill_infra(), 0, "infra reserve stops at the cap");
+			RESOLVER_SUBMIT_OK, "listener B still has quota");
+	resolver_cancel(idx, req);
+	expect_int(resolver_test_fill_infra(), RESOLVER_INFRA_RESERVE, "infra reserve filled");
+	expect_int(resolver_test_fill_infra(), 0, "infra reserve stops at the cap");
 	resolver_settle("after quota");
-	sni_resolver_test_pause_dequeue(1);
-	sni_resolver_test_reset_stats();
+	resolver_test_pause_dequeue(1);
+	resolver_test_reset_stats();
 	cfg.calls = 0;
-	expect_int(submit_name(a, "cancel.test", mono_ms() + 5000, &idx, &req), SNI_SUBMIT_OK, "cancel submit");
-	sni_resolver_cancel(idx, req);
-	sni_resolver_test_pause_dequeue(0);
+	expect_int(submit_name(a, "cancel.test", mono_ms() + 5000, &idx, &req), RESOLVER_SUBMIT_OK, "cancel submit");
+	resolver_cancel(idx, req);
+	resolver_test_pause_dequeue(0);
 	resolver_settle("after queued cancel");
-	sni_resolver_test_stats(&st);
+	resolver_test_stats(&st);
 	expect_true(st.skipped_cancelled >= 1, "cancel while queued");
 	expect_int(cfg.calls, 0, "cancelled queue did not resolve");
-	sni_resolver_test_hold_running(1);
-	expect_int(submit_name(a, "running.test", mono_ms() + 5000, &idx, &req), SNI_SUBMIT_OK, "running submit");
-	expect_true(sni_resolver_test_wait_running(1, 2000) != 0, "reached running");
-	sni_resolver_cancel(idx, req);
-	sni_resolver_test_hold_running(0);
+	resolver_test_hold_running(1);
+	expect_int(submit_name(a, "running.test", mono_ms() + 5000, &idx, &req), RESOLVER_SUBMIT_OK, "running submit");
+	expect_true(resolver_test_wait_running(1, 2000) != 0, "reached running");
+	resolver_cancel(idx, req);
+	resolver_test_hold_running(0);
 	slot = wait_one(a, 2000);
 	expect_true(slot != NULL && slot->req_id == req, "cancel while running still completes");
 	release_slot(slot);
 	release_slot(slot);
 	expect_pool("duplicate release");
-	sni_resolver_test_hold_running(1);
-	sni_resolver_test_reset_stats();
-	expect_int(submit_name(a, "closed.test", mono_ms() + 5000, &idx, &req), SNI_SUBMIT_OK, "closed submit");
-	expect_true(sni_resolver_test_wait_running(1, 2000) != 0, "closed reached running");
-	sni_resolver_sink_mark_closed(a);
-	sni_resolver_test_hold_running(0);
+	resolver_test_hold_running(1);
+	resolver_test_reset_stats();
+	expect_int(submit_name(a, "closed.test", mono_ms() + 5000, &idx, &req), RESOLVER_SUBMIT_OK, "closed submit");
+	expect_true(resolver_test_wait_running(1, 2000) != 0, "closed reached running");
+	resolver_sink_mark_closed(a);
+	resolver_test_hold_running(0);
 	usleep(50000);
 	slot = wait_one(a, 200);
 	expect_true(slot == NULL, "closed sink dropped the result");
-	sni_resolver_test_stats(&st);
+	resolver_test_stats(&st);
 	expect_true(st.closed_drops >= 1, "closed drop counted");
 	resolver_settle("after closed sink");
-	sni_resolver_sink_release(a);
+	resolver_sink_release(a);
 	a = NULL;
-	expect_true(sni_resolver_sink_open(SNI_SINK_LISTENER, &a), "recycle sink");
+	expect_true(resolver_sink_open(RESOLVER_SINK_LISTENER, &a), "recycle sink");
 	cfg.mode = HOOK_V4;
-	expect_int(submit_name(a, "recycle.test", mono_ms() + 2000, &old_idx, &old_req), SNI_SUBMIT_OK, "first id");
+	expect_int(submit_name(a, "recycle.test", mono_ms() + 2000, &old_idx, &old_req), RESOLVER_SUBMIT_OK, "first id");
 	slot = wait_one(a, 2000);
 	expect_true(slot != NULL, "first completion");
 	old_idx = slot ? slot->index : old_idx;
 	old_req = slot ? slot->req_id : old_req;
 	release_slot(slot);
-	expect_int(submit_name(a, "recycle2.test", mono_ms() + 2000, &idx, &req), SNI_SUBMIT_OK, "recycled submit");
-	sni_resolver_cancel(old_idx, old_req);
+	expect_int(submit_name(a, "recycle2.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "recycled submit");
+	resolver_cancel(old_idx, old_req);
 	slot = wait_one(a, 2000);
 	expect_true(slot != NULL && slot->req_id == req, "stale req_id did not cancel the new slot");
 	release_slot(slot);
@@ -2918,11 +2918,11 @@ static void test_resolver_quota_and_cancel(void)
 		uint64_t r2 = 0;
 		resolve_slot *first = NULL;
 		resolve_slot *second = NULL;
-		sni_resolver_test_set_hook(test_hook, &cfg);
-		expect_int(sni_resolver_submit(a, 1, 1, "first.test", 9, AF_UNSPEC,
-				mono_ms() + 3000, &i1, &r1), SNI_SUBMIT_OK, "order first");
-		expect_int(sni_resolver_submit(a, 2, 2, "second.test", 9, AF_UNSPEC,
-				mono_ms() + 3000, &i2, &r2), SNI_SUBMIT_OK, "order second");
+		resolver_test_set_hook(test_hook, &cfg);
+		expect_int(resolver_submit(a, 1, 1, "first.test", 9, AF_UNSPEC,
+				mono_ms() + 3000, &i1, &r1), RESOLVER_SUBMIT_OK, "order first");
+		expect_int(resolver_submit(a, 2, 2, "second.test", 9, AF_UNSPEC,
+				mono_ms() + 3000, &i2, &r2), RESOLVER_SUBMIT_OK, "order second");
 		/*
 		 * first.test is held in its hook, so the only completion that can
 		 * arrive now is second.test, unless the pool serialized it behind first.
@@ -2940,25 +2940,25 @@ static void test_resolver_quota_and_cancel(void)
 			release_slot(second);
 		}
 	}
-	sni_resolver_test_pause_dequeue(1);
+	resolver_test_pause_dequeue(1);
 	n = 0;
 	for (i = 0; i < 4; i++) {
-		if (submit_name(a, "ring.test", mono_ms() + 2000, &idx, &req) == SNI_SUBMIT_OK)
+		if (submit_name(a, "ring.test", mono_ms() + 2000, &idx, &req) == RESOLVER_SUBMIT_OK)
 			n++;
 	}
-	sni_resolver_test_pause_dequeue(0);
+	resolver_test_pause_dequeue(0);
 	{
 		int64_t deadline = mono_ms() + 2000;
-		sni_resolver_accounting acc;
+		resolver_accounting acc;
 		memset(&acc, 0, sizeof(acc));
 		while (mono_ms() < deadline) {
-			if (sni_resolver_test_accounting(&acc) && acc.in_ring >= n && n > 0)
+			if (resolver_test_accounting(&acc) && acc.in_ring >= n && n > 0)
 				break;
 			usleep(1000);
 		}
 		expect_true(n > 0 && acc.in_ring >= n, "completions queued in the ring");
 	}
-	sni_resolver_sink_release(a);
+	resolver_sink_release(a);
 	a = NULL;
 	resolver_settle("ring teardown freed the slots");
 	{
@@ -2966,33 +2966,33 @@ static void test_resolver_quota_and_cancel(void)
 		int gotn = 0;
 		pthread_t drainer;
 		drain_pack arg;
-		expect_true(sni_resolver_sink_open(SNI_SINK_LISTENER, &a), "race sink");
+		expect_true(resolver_sink_open(RESOLVER_SINK_LISTENER, &a), "race sink");
 		arg.sink = a;
 		arg.got = got;
 		arg.gotn = &gotn;
 		arg.want = 16;
 		cfg.mode = HOOK_V4;
-		sni_resolver_test_pause_dequeue(1);
+		resolver_test_pause_dequeue(1);
 		for (i = 0; i < 16; i++)
 			expect_int(submit_name(a, "race.test", mono_ms() + 3000, &idx, &req),
-					SNI_SUBMIT_OK, "race submit");
+					RESOLVER_SUBMIT_OK, "race submit");
 		expect_true(pthread_create(&drainer, NULL, race_drain, &arg) == 0, "drain thread");
-		sni_resolver_test_pause_dequeue(0);
+		resolver_test_pause_dequeue(0);
 		pthread_join(drainer, NULL);
 		expect_int(gotn, 16, "wakeup race delivered every result");
 		for (i = 0; i < gotn; i++)
 			release_slot(got[i]);
 		{
 			char buf[1024];
-			sni_resolver_counters before;
+			resolver_counters before;
 			int64_t wake_by;
 			memset(buf, 1, sizeof(buf));
 			memset(&before, 0, sizeof(before));
-			sni_resolver_test_reset_stats();
-			sni_resolver_test_hold_running(1);
+			resolver_test_reset_stats();
+			resolver_test_hold_running(1);
 			expect_int(submit_name(a, "eagain.test", mono_ms() + 2000, &idx, &req),
-					SNI_SUBMIT_OK, "eagain submit");
-			expect_true(sni_resolver_test_wait_running(1, 2000) != 0, "eagain worker is held");
+					RESOLVER_SUBMIT_OK, "eagain submit");
+			expect_true(resolver_test_wait_running(1, 2000) != 0, "eagain worker is held");
 			for (;;) {
 				ssize_t wr = write(a->pipe_write, buf, sizeof(buf));
 				if (wr < 0 && errno == EINTR)
@@ -3000,10 +3000,10 @@ static void test_resolver_quota_and_cancel(void)
 				if (wr <= 0)
 					break;
 			}
-			sni_resolver_test_hold_running(0);
+			resolver_test_hold_running(0);
 			wake_by = mono_ms() + 2000;
 			do {
-				sni_resolver_test_stats(&before);
+				resolver_test_stats(&before);
 				if (before.eagain_wakeups >= 1)
 					break;
 				usleep(1000);
@@ -3013,9 +3013,9 @@ static void test_resolver_quota_and_cancel(void)
 			expect_true(before.eagain_wakeups >= 1, "pipe EAGAIN counted as a wakeup");
 			release_slot(slot);
 		}
-		sni_resolver_sink_release(a);
+		resolver_sink_release(a);
 	}
-	sni_resolver_sink_release(b);
+	resolver_sink_release(b);
 	resolver_settle("quota sinks released");
 }
 
@@ -3025,7 +3025,7 @@ static void *race_drain(void *arg)
 	int64_t deadline = mono_ms() + 3000;
 	while (*job->gotn < job->want && mono_ms() < deadline) {
 		resolve_slot *batch[8];
-		size_t n = sni_resolver_drain(job->sink, batch, 8);
+		size_t n = resolver_drain(job->sink, batch, 8);
 		size_t i;
 		for (i = 0; i < n && *job->gotn < job->want; i++)
 			job->got[(*job->gotn)++] = batch[i];
@@ -3043,22 +3043,22 @@ static void test_stuck_worker_shutdown(void)
 	if (pid < 0)
 		return;
 	if (pid == 0) {
-		sni_completion_sink *sink = NULL;
+		resolver_sink *sink = NULL;
 		hook_cfg cfg;
 		int slot = -1;
 		uint64_t req = 0;
-		sni_resolver_accounting a;
+		resolver_accounting a;
 		memset(&cfg, 0, sizeof(cfg));
 		cfg.mode = HOOK_V4;
 		failures = 0;
-		sni_resolver_test_set_hook(test_hook, &cfg);
-		sni_resolver_test_hold_running(1);
-		if (!sni_resolver_sink_open(SNI_SINK_DIRECT, &sink) ||
-				submit_name(sink, "stuck.test", mono_ms() + 10000, &slot, &req) != SNI_SUBMIT_OK ||
-				!sni_resolver_test_wait_running(1, 2000) ||
-				sni_resolver_shutdown(200) != 1 ||
-				!sni_resolver_test_mutex_ok() ||
-				!sni_resolver_test_accounting(&a) ||
+		resolver_test_set_hook(test_hook, &cfg);
+		resolver_test_hold_running(1);
+		if (!resolver_sink_open(RESOLVER_SINK_DIRECT, &sink) ||
+				submit_name(sink, "stuck.test", mono_ms() + 10000, &slot, &req) != RESOLVER_SUBMIT_OK ||
+				!resolver_test_wait_running(1, 2000) ||
+				resolver_shutdown(200) != 1 ||
+				!resolver_test_mutex_ok() ||
+				!resolver_test_accounting(&a) ||
 				a.abandoned != 1)
 			_exit(1);
 		_exit(0);
@@ -3085,12 +3085,12 @@ static void test_sni_resolver_behavior(void)
 	int fd;
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.mode = HOOK_V4;
-	sni_resolver_test_set_hook(test_hook, &cfg);
-	sni_resolver_test_reset_stats();
+	resolver_test_set_hook(test_hook, &cfg);
+	resolver_test_reset_stats();
 	{
-		sni_resolved_addr one;
+		resolver_addr one;
 		size_t n = 0;
-		expect_int(sni_resolver_copy_upstream("127.0.0.1", 9, &one, &n), SNI_UP_READY,
+		expect_int(resolver_copy_upstream("127.0.0.1", 9, &one, &n), RESOLVER_UP_READY,
 				"numeric destination bypasses the resolver");
 		expect_int((int)n, 1, "numeric address count");
 		expect_int(cfg.calls, 0, "numeric lookup was not submitted");
@@ -3119,12 +3119,12 @@ static void test_sni_resolver_behavior(void)
 	expect_true(echo_roundtrip(local, PORT_REQ, sizeof(PORT_REQ) - 1, 2000) == 0,
 			"lowercase header name and Host port match");
 	expect_true(cfg.calls > calls_before, "direct hostname used the resolver");
-	sni_resolver_test_hold_running(1);
+	resolver_test_hold_running(1);
 	sni_test_reset_counters();
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "held resolve write");
 	expect_true(fd >= 0 && write_full(fd, "XXXX", 4) == 0, "extra bytes during resolve");
-	expect_true(sni_resolver_test_wait_running(1, 2000) != 0, "listener resolve is running");
+	expect_true(resolver_test_wait_running(1, 2000) != 0, "listener resolve is running");
 	waits = sni_test_wait_calls();
 	usleep(150000);
 	expect_true(sni_test_wait_calls() - waits < 40, "resolve state does not busy-loop");
@@ -3134,7 +3134,7 @@ static void test_sni_resolver_behavior(void)
 			__atomic_load_n(&echo.accepts, __ATOMIC_RELAXED), "still resolving");
 	{
 		int accepts = __atomic_load_n(&echo.accepts, __ATOMIC_RELAXED);
-		sni_resolver_test_hold_running(0);
+		resolver_test_hold_running(0);
 		expect_true(accepts >= 0, "fin during resolve kept the connection");
 		{
 			uint8_t buf[128];
@@ -3148,14 +3148,14 @@ static void test_sni_resolver_behavior(void)
 		uint8_t buf[64];
 		expect_true(live >= 0 && write_full(live, REQ, sizeof(REQ) - 1) == 0, "relay setup");
 		expect_true(live >= 0 && read_full_ms(live, buf, sizeof(REQ) - 1, 2000) == 0, "relay up");
-		sni_resolver_test_hold_running(1);
+		resolver_test_hold_running(1);
 		fd = connect_local(local, 1000);
 		expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "blocked lookup");
-		expect_true(sni_resolver_test_wait_running(1, 2000) != 0, "lookup is blocked");
+		expect_true(resolver_test_wait_running(1, 2000) != 0, "lookup is blocked");
 		expect_true(write_full(live, "PING", 4) == 0, "ping during lookup");
 		expect_true(read_full_ms(live, buf, 4, 1000) == 0 && memcmp(buf, "PING", 4) == 0,
 				"existing relay is not stalled by resolution");
-		sni_resolver_test_hold_running(0);
+		resolver_test_hold_running(0);
 		close(fd);
 		close(live);
 	}
@@ -3165,7 +3165,7 @@ static void test_sni_resolver_behavior(void)
 	fill_listener(&scfg, local, local, 2, NULL, NULL, NULL);
 	cfg.mode = HOOK_V4;
 	cfg.calls = 0;
-	sni_resolver_test_set_hook(test_hook, &cfg);
+	resolver_test_set_hook(test_hook, &cfg);
 	binder = listen_loopback(&local);
 	if (binder >= 0)
 		close(binder);
@@ -3187,7 +3187,7 @@ static void test_sni_resolver_behavior(void)
 	sni_listener_close(ls);
 	ls = NULL;
 	cfg.mode = HOOK_MAPPED;
-	sni_resolver_test_set_hook(test_hook, &cfg);
+	resolver_test_set_hook(test_hook, &cfg);
 	expect_true(sni_listener_open(&scfg, &ls), "mapped listener");
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "mapped write");
@@ -3221,7 +3221,7 @@ static void test_socks_resolver_cache(void)
 	int fd;
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.mode = HOOK_V4;
-	sni_resolver_test_set_hook(test_hook, &cfg);
+	resolver_test_set_hook(test_hook, &cfg);
 	expect_true(echo_start(&echo) == 0, "socks echo");
 	slfd = listen_loopback(&sport);
 	expect_true(slfd >= 0, "socks listen");
@@ -3229,7 +3229,7 @@ static void test_socks_resolver_cache(void)
 	job.lfd = slfd;
 	job.mode = SOCKS_NOAUTH;
 	job.upstream_port = echo.port;
-	expect_true(sni_resolver_prime_socks("socks.example", sport, 1000), "prime socks name");
+	expect_true(resolver_prime_socks("socks.example", sport, 1000), "prime socks name");
 	calls_after_prime = cfg.calls;
 	expect_true(calls_after_prime > 0, "startup lookup ran");
 	binder = listen_loopback(&local);
@@ -3248,15 +3248,15 @@ static void test_socks_resolver_cache(void)
 		int64_t now = mono_ms();
 		int live;
 		uint8_t buf[64];
-		sni_resolver_test_age_cache(now - 60000, now - 1000, now + 60000);
+		resolver_test_age_cache(now - 60000, now - 1000, now + 60000);
 		live = connect_local(local, 1000);
 		expect_true(live >= 0 && write_full(live, REQ, sizeof(REQ) - 1) == 0, "stale live write");
 		expect_true(pthread_create(&stid, NULL, socks_thread, &job) == 0, "stale socks thread");
 		expect_true(live >= 0 && read_full_ms(live, buf, sizeof(REQ) - 1, 2000) == 0, "stale cache still connects");
 		pthread_join(stid, NULL);
 		close(live);
-		sni_resolver_test_hold_running(1);
-		sni_resolver_test_age_cache(now - 60000, now - 1000, now + 60000);
+		resolver_test_hold_running(1);
+		resolver_test_age_cache(now - 60000, now - 1000, now + 60000);
 		fd = connect_local(local, 1000);
 		expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "refresh in flight");
 		expect_true(pthread_create(&stid, NULL, socks_thread, &job) == 0, "inflight socks thread");
@@ -3266,16 +3266,16 @@ static void test_socks_resolver_cache(void)
 			expect_true(read_full_ms(fd, body, sizeof(REQ) - 1, 1000) == 0, "stale cache during refresh");
 			expect_true(mono_ms() - start < 1000, "refresh did not block the connection");
 		}
-		sni_resolver_test_hold_running(0);
+		resolver_test_hold_running(0);
 		pthread_join(stid, NULL);
 		close(fd);
 		cfg.mode = HOOK_ERR;
 		cfg.err = EAI_FAIL;
-		sni_resolver_test_age_cache(mono_ms() - 60000, mono_ms() - 1000, mono_ms() + 60000);
+		resolver_test_age_cache(mono_ms() - 60000, mono_ms() - 1000, mono_ms() + 60000);
 		expect_true(pthread_create(&stid, NULL, socks_thread, &job) == 0, "refresh fail thread");
 		expect_true(echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) == 0, "refresh failure keeps the cache");
 		pthread_join(stid, NULL);
-		sni_resolver_test_age_cache(mono_ms() - 200000, mono_ms() - 1000, mono_ms() - 1000);
+		resolver_test_age_cache(mono_ms() - 200000, mono_ms() - 1000, mono_ms() - 1000);
 		fd = connect_local(local, 1000);
 		expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "stale max write");
 		if (fd >= 0) {
@@ -3293,8 +3293,8 @@ static void test_socks_resolver_cache(void)
 	cfg.mode = HOOK_ERR;
 	cfg.err = EAI_FAIL;
 	cfg.calls = 0;
-	sni_resolver_test_set_hook(test_hook, &cfg);
-	expect_true(sni_resolver_prime_socks("missing.example", 9, 300), "failed prime still returns");
+	resolver_test_set_hook(test_hook, &cfg);
+	expect_true(resolver_prime_socks("missing.example", 9, 300), "failed prime still returns");
 	slfd = listen_loopback(&sport);
 	binder = listen_loopback(&local);
 	if (binder >= 0)
@@ -3351,7 +3351,7 @@ int main(void)
 	test_resolver_quota_and_cancel();
 	test_sni_resolver_behavior();
 	test_socks_resolver_cache();
-	sni_resolver_test_set_hook(NULL, NULL);
+	resolver_test_set_hook(NULL, NULL);
 	test_tls_hello_builds();
 	expect_true(build_client_hello(hello, sizeof(hello), &hello_len, "localhost") == 0, "hello for splits");
 	test_split_prefixes((const uint8_t *)REQ, sizeof(REQ) - 1, "http host");
@@ -3395,11 +3395,11 @@ int main(void)
 	test_stress_cycles();
 	expect_true(slots_are_clear(), "process-wide slots are clear at the end");
 	{
-		sni_resolver_accounting a;
+		resolver_accounting a;
 		int sum;
-		expect_true(sni_resolver_test_accounting(&a), "final resolver accounting");
+		expect_true(resolver_test_accounting(&a), "final resolver accounting");
 		sum = a.free_n + a.queued + a.running + a.done + a.cancelled + a.in_ring;
-		expect_int(sum, SNI_RESOLVER_SLOTS, "final slot balance");
+		expect_int(sum, RESOLVER_SLOTS, "final slot balance");
 		expect_int(a.quota_used, 0, "final quota counters");
 		expect_int(a.listener_quota_assigned, 0, "listener quotas released");
 		expect_int(a.live_sinks, 0, "sinks released");

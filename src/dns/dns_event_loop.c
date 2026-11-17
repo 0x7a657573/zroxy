@@ -147,7 +147,7 @@ struct dns_event {
 	pthread_t thread;
 	int started;
 	int stop;
-	sni_completion_sink *resolver;
+	resolver_sink *resolver;
 	uint64_t generation;
 	dns_route_state_t routes[DNS_ROUTES_MAX];
 	unsigned active;	/* route that new queries go to */
@@ -1152,9 +1152,9 @@ static bool resolution_submit(dns_event_t *event, uint32_t index)
 		(*generation)++;
 		return true;
 	}
-	if (sni_resolver_submit(event->resolver, index, event->generation, host, port, AF_INET,
+	if (resolver_submit(event->resolver, index, event->generation, host, port, AF_INET,
 			mono_now() + net_timeout_ms((int)event->dns->timeout),
-			&target->slot, &target->req) == SNI_SUBMIT_OK)
+			&target->slot, &target->req) == RESOLVER_SUBMIT_OK)
 		return true;
 	target->resolve_at_ms = mono_now() + DNS_RESOLVE_RETRY_MS;
 	return false;
@@ -1173,10 +1173,10 @@ static void resolution_tick(dns_event_t *event, int64_t now)
 	}
 }
 
-static void resolver_drain(dns_event_t *event)
+static void dns_drain_resolver(dns_event_t *event)
 {
-	resolve_slot *done[SNI_RESOLVER_SLOTS];
-	size_t n = sni_resolver_drain(event->resolver, done, SNI_RESOLVER_SLOTS);
+	resolve_slot *done[RESOLVER_SLOTS];
+	size_t n = resolver_drain(event->resolver, done, RESOLVER_SLOTS);
 	size_t i;
 	int64_t now = mono_now();
 
@@ -1190,12 +1190,12 @@ static void resolver_drain(dns_event_t *event)
 		if (!slot)
 			continue;
 		if (slot->connection_generation != event->generation) {
-			sni_resolver_release(slot->index, slot->req_id);
+			resolver_release(slot->index, slot->req_id);
 			continue;
 		}
 		target = resolve_target(event, slot->connection_index, &host, &port, &generation);
 		if (!target) {
-			sni_resolver_release(slot->index, slot->req_id);
+			resolver_release(slot->index, slot->req_id);
 			continue;
 		}
 		if (target->slot == slot->index && target->req == slot->req_id) {
@@ -1220,7 +1220,7 @@ static void resolver_drain(dns_event_t *event)
 			log_error("dns resolver failed for %s; retrying", host);
 			target->resolve_at_ms = now + DNS_RESOLVE_RETRY_MS;
 		}
-		sni_resolver_release(slot->index, slot->req_id);
+		resolver_release(slot->index, slot->req_id);
 	}
 	resolution_tick(event, now);
 	schedule(event);
@@ -1379,7 +1379,7 @@ static void *event_main(void *arg)
 			case WATCH_UDP: pull_udp(event); break;
 			case WATCH_TCP_LISTEN: accept_clients(event); break;
 			case WATCH_WAKE: drain_wake(event); event->stop = 1; break;
-			case WATCH_RESOLVER: resolver_drain(event); break;
+			case WATCH_RESOLVER: dns_drain_resolver(event); break;
 			case WATCH_UPSTREAM: upstream_dispatch(event, watch->ptr, ready[i].ev); break;
 			case WATCH_CLIENT:
 				/* Closed by an earlier event of this batch; freed after it. */
@@ -1410,11 +1410,11 @@ static void event_destroy(dns_event_t *event)
 	reactor_close(&event->re);
 	for (i = 0; i < DNS_ROUTES_MAX; i++) {
 		if (event->routes[i].upstream.req)
-			sni_resolver_cancel(event->routes[i].upstream.slot, event->routes[i].upstream.req);
+			resolver_cancel(event->routes[i].upstream.slot, event->routes[i].upstream.req);
 		if (event->routes[i].socks.req)
-			sni_resolver_cancel(event->routes[i].socks.slot, event->routes[i].socks.req);
+			resolver_cancel(event->routes[i].socks.slot, event->routes[i].socks.req);
 	}
-	if (event->resolver) { sni_resolver_sink_mark_closed(event->resolver); sni_resolver_sink_release(event->resolver); }
+	if (event->resolver) { resolver_sink_mark_closed(event->resolver); resolver_sink_release(event->resolver); }
 	free(event);
 }
 
@@ -1445,7 +1445,7 @@ bool dns_event_loop_start(dnsserver_t *dns)
 	for (i = 0; i < DNS_EVENT_UPSTREAMS; i++) { event->upstreams[i].event = event; event->upstreams[i].fd = -1; event->upstreams[i].watch = (dns_watch_t){ WATCH_UPSTREAM, &event->upstreams[i] }; event->upstreams[i].state = UP_CLOSED; }
 	if (pipe(dns->wake) != 0 || !net_set_nonblock_cloexec(dns->wake[0]) || !net_set_nonblock_cloexec(dns->wake[1]) ||
 		!net_set_nonblock_cloexec(dns->local_sock) || (dns->tcp_sock >= 0 && !net_set_nonblock_cloexec(dns->tcp_sock)) ||
-		!sni_resolver_sink_open(SNI_SINK_DIRECT, &event->resolver) ||
+		!resolver_sink_open(RESOLVER_SINK_DIRECT, &event->resolver) ||
 		!reactor_open(&event->re, DNS_REACTOR_CAP, false) || !register_fixed(event)) {
 		event_destroy(event); return false;
 	}

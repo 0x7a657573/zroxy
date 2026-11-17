@@ -203,7 +203,7 @@ struct sni_engine {
 	sni_tag listen_tag;
 	sni_tag wake_tag;
 	sni_tag sink_tag;
-	sni_completion_sink *sink;
+	resolver_sink *sink;
 	uint32_t sink_interest;
 	uint32_t next_index;
 	uint64_t next_generation;
@@ -214,7 +214,7 @@ struct sni_listener {
 	pthread_mutex_t mu;
 	pthread_cond_t cv;
 	sni_engine *eng;
-	sni_completion_sink *sink;
+	resolver_sink *sink;
 	int ready;
 	int ok;
 };
@@ -649,7 +649,7 @@ static void conn_kill(sni_engine *e, sni_conn *c, int reason)
 	c->dead = 1;
 	hello_unlink(e, c);
 	if (c->pending_req_id != 0) {
-		sni_resolver_cancel(c->resolve_slot, c->pending_req_id);
+		resolver_cancel(c->resolve_slot, c->pending_req_id);
 		c->pending_req_id = 0;
 	}
 	drop_watched(e, &c->client_fd, &c->client_interest, &c->client_tag);
@@ -884,7 +884,7 @@ static void socks_begin(sni_engine *e, sni_conn *c)
 	socks_pump(e, c);
 }
 
-static void set_addr_port(sni_resolved_addr *addr, uint16_t port)
+static void set_addr_port(resolver_addr *addr, uint16_t port)
 {
 	struct sockaddr *sa = (struct sockaddr *)&addr->address;
 	if (sa->sa_family == AF_INET) {
@@ -896,7 +896,7 @@ static void set_addr_port(sni_resolved_addr *addr, uint16_t port)
 	}
 }
 
-static bool install_addrs(sni_conn *c, const sni_resolved_addr *in, size_t n)
+static bool install_addrs(sni_conn *c, const resolver_addr *in, size_t n)
 {
 	size_t i;
 	c->naddr = 0;
@@ -914,15 +914,15 @@ static bool install_addrs(sni_conn *c, const sni_resolved_addr *in, size_t n)
 	return c->naddr > 0;
 }
 
-static bool install_checked(sni_conn *c, sni_resolved_addr *in, size_t n, uint16_t port)
+static bool install_checked(sni_conn *c, resolver_addr *in, size_t n, uint16_t port)
 {
 	size_t i;
 	size_t kept;
 	for (i = 0; i < n; i++)
 		set_addr_port(&in[i], port);
-	kept = sni_resolver_policy_keep(in, n,
-		(c->cfg.allow_loopback ? SNI_POLICY_ALLOW_LOOPBACK : 0u) |
-		(c->cfg.deny_private ? SNI_POLICY_DENY_PRIVATE : 0u));
+	kept = resolver_policy_keep(in, n,
+		(c->cfg.allow_loopback ? RESOLVER_POLICY_ALLOW_LOOPBACK : 0u) |
+		(c->cfg.deny_private ? RESOLVER_POLICY_DENY_PRIVATE : 0u));
 	return install_addrs(c, in, kept);
 }
 
@@ -1030,9 +1030,9 @@ static void submit_resolve(sni_engine *e, sni_conn *c, const char *host, uint16_
 	}
 	c->resolve_deadline = now + (int64_t)c->io_ms;
 	conn_set_state(e, c, SNI_ST_RESOLVE);
-	rc = sni_resolver_submit(e->sink, c->index, c->generation, host, port,
+	rc = resolver_submit(e->sink, c->index, c->generation, host, port,
 			AF_INET, c->resolve_deadline, &slot, &req);
-	if (rc != SNI_SUBMIT_OK) {
+	if (rc != RESOLVER_SUBMIT_OK) {
 		log_trace("resolve_overflow");
 		conn_kill(e, c, SNI_CLOSE_RESOLVE);
 		return;
@@ -1045,7 +1045,7 @@ static void submit_resolve(sni_engine *e, sni_conn *c, const char *host, uint16_
 
 static void begin_upstream(sni_engine *e, sni_conn *c)
 {
-	sni_resolved_addr got[SNI_RESOLVER_ADDR_MAX];
+	resolver_addr got[RESOLVER_ADDR_MAX];
 	size_t n = 0;
 	int st;
 	if (c->cfg.Socks) {
@@ -1053,8 +1053,8 @@ static void begin_upstream(sni_engine *e, sni_conn *c)
 			conn_kill(e, c, SNI_CLOSE_SOCKS);
 			return;
 		}
-		st = sni_resolver_copy_upstream(c->cfg.Socks->host, c->cfg.Socks->port, got, &n);
-		if (st != SNI_UP_READY || !install_addrs(c, got, n)) {
+		st = resolver_copy_upstream(c->cfg.Socks->host, c->cfg.Socks->port, got, &n);
+		if (st != RESOLVER_UP_READY || !install_addrs(c, got, n)) {
 			log_trace("socks_unresolved");
 			conn_kill(e, c, SNI_CLOSE_RESOLVE);
 			return;
@@ -1084,7 +1084,7 @@ static sni_conn *find_pending(sni_engine *e, const resolve_slot *slot)
 
 static void apply_resolve(sni_engine *e, resolve_slot *slot)
 {
-	sni_resolved_addr addrs[SNI_RESOLVER_ADDR_MAX];
+	resolver_addr addrs[RESOLVER_ADDR_MAX];
 	sni_conn *c;
 	size_t count;
 	int err;
@@ -1098,14 +1098,14 @@ static void apply_resolve(sni_engine *e, resolve_slot *slot)
 	port = slot->port;
 	err = slot->gai_error;
 	count = slot->address_count;
-	if (count > SNI_RESOLVER_ADDR_MAX)
-		count = SNI_RESOLVER_ADDR_MAX;
+	if (count > RESOLVER_ADDR_MAX)
+		count = RESOLVER_ADDR_MAX;
 	if (count > 0)
 		memcpy(addrs, slot->addresses, count * sizeof(addrs[0]));
 	c = find_pending(e, slot);
 	if (c)
 		c->pending_req_id = 0;
-	sni_resolver_release(index, req);
+	resolver_release(index, req);
 	if (!c)
 		return;
 	if (err != 0 || count == 0) {
@@ -1123,16 +1123,16 @@ static void apply_resolve(sni_engine *e, resolve_slot *slot)
 
 static void drain_resolve(sni_engine *e)
 {
-	resolve_slot *batch[SNI_RESOLVER_SLOTS];
+	resolve_slot *batch[RESOLVER_SLOTS];
 	size_t n;
 	size_t i;
 	if (!e->sink)
 		return;
 	do {
-		n = sni_resolver_drain(e->sink, batch, SNI_RESOLVER_SLOTS);
+		n = resolver_drain(e->sink, batch, RESOLVER_SLOTS);
 		for (i = 0; i < n; i++)
 			apply_resolve(e, batch[i]);
-	} while (n == SNI_RESOLVER_SLOTS);
+	} while (n == RESOLVER_SLOTS);
 }
 
 static bool copy_host(char *dst, const char *src)
@@ -1147,10 +1147,10 @@ static bool copy_host(char *dst, const char *src)
 static bool host_ready(sni_engine *e, sni_conn *c)
 {
 	char raw[ZROXY_MAX_HOSTNAME];
-	char norm[SNI_RESOLVER_HOST_MAX + 1];
+	char norm[RESOLVER_HOST_MAX + 1];
 	if (!net_get_host(c->hello, c->hello_len, raw, (uint16_t)ZROXY_MAX_HOSTNAME))
 		return false;
-	if (!sni_resolver_normalize(raw, norm, sizeof(norm)) || !copy_host(c->host, norm)) {
+	if (!resolver_normalize(raw, norm, sizeof(norm)) || !copy_host(c->host, norm)) {
 		conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 		return true;
 	}
@@ -1652,7 +1652,7 @@ static void sni_engine_run(sni_engine *e)
 			break;
 	}
 	if (e->sink)
-		sni_resolver_sink_mark_closed(e->sink);
+		resolver_sink_mark_closed(e->sink);
 	{
 		sni_conn *c;
 		for (c = e->head; c != NULL; c = c->next)
@@ -1674,9 +1674,9 @@ static void sni_engine_deinit(sni_engine *e)
 			react_del(e, e->sink->pipe_read);
 			e->sink_interest = 0;
 		}
-		sni_resolver_sink_mark_closed(e->sink);
+		resolver_sink_mark_closed(e->sink);
 		drain_resolve(e);
-		sni_resolver_sink_release(e->sink);
+		resolver_sink_release(e->sink);
 		e->sink = NULL;
 	}
 	while (c) {
@@ -1722,10 +1722,10 @@ static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg
 	e->sink_tag.kind = SNI_TAG_SINK;
 	e->sink_tag.eng = e;
 	e->sink_tag.fd = -1;
-	if (!sni_resolver_sink_open(listen_fd >= 0 ? SNI_SINK_LISTENER : SNI_SINK_DIRECT,
+	if (!resolver_sink_open(listen_fd >= 0 ? RESOLVER_SINK_LISTENER : RESOLVER_SINK_DIRECT,
 			&e->sink))
 		goto fail;
-	sni_resolver_watch_bind(e->sink->listener_id, e->cfg.Port.bindip, e->cfg.Port.local_port);
+	resolver_watch_bind(e->sink->listener_id, e->cfg.Port.bindip, e->cfg.Port.local_port);
 	if (!reactor_open(&e->re, SNI_POLL_MAX, SNI_USE_POLL))
 		goto fail;
 	if (pipe(pipes) != 0)
@@ -1885,7 +1885,7 @@ void sni_listener_close(sni_listener *ls)
 	pthread_mutex_unlock(&ls->mu);
 	pthread_join(ls->thread, NULL);
 	if (ls->sink) {
-		sni_resolver_sink_release(ls->sink);
+		resolver_sink_release(ls->sink);
 		ls->sink = NULL;
 	}
 	pthread_cond_destroy(&ls->cv);

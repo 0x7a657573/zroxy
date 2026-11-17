@@ -1,5 +1,5 @@
 /*
- * Process-wide DNS resolver for the SNI data plane.
+ * Process-wide hostname resolver shared by the SNI and DNS data planes.
  *
  * Four worker threads and 128 slots are created once. Nothing in this pool
  * grows with the connection count. Workers call getaddrinfo() and never touch
@@ -29,10 +29,10 @@
 #include <stdint.h>
 #include <sys/socket.h>
 
-#define SNI_RESOLVER_THREADS 4
-#define SNI_RESOLVER_SLOTS 128
-#define SNI_RESOLVER_DIRECT_RESERVE 3
-#define SNI_RESOLVER_INFRA_RESERVE 8
+#define RESOLVER_THREADS 4
+#define RESOLVER_SLOTS 128
+#define RESOLVER_DIRECT_RESERVE 3
+#define RESOLVER_INFRA_RESERVE 8
 /*
  * One listener may hold this many client lookups. The rest of the client
  * budget stays available for listeners that register later, so one listener
@@ -40,26 +40,26 @@
  * 8 infrastructure reserves (104 + 13 + 3 + 8 = 128) and covers the existing
  * 100-connection burst on a single listener.
  */
-#define SNI_RESOLVER_LISTENER_QUOTA 104
-#define SNI_RESOLVER_ADDR_MAX 8
-#define SNI_RESOLVER_HOST_MAX 253
-#define SNI_INFRA_REFRESH_MS 30000
-#define SNI_INFRA_MAX_STALE_MS 120000
-#define SNI_INFRA_STARTUP_MS 1500
+#define RESOLVER_LISTENER_QUOTA 104
+#define RESOLVER_ADDR_MAX 8
+#define RESOLVER_HOST_MAX 253
+#define RESOLVER_INFRA_REFRESH_MS 30000
+#define RESOLVER_INFRA_MAX_STALE_MS 120000
+#define RESOLVER_INFRA_STARTUP_MS 1500
 
-#define SNI_SINK_LISTENER 1
-#define SNI_SINK_DIRECT 2
+#define RESOLVER_SINK_LISTENER 1
+#define RESOLVER_SINK_DIRECT 2
 
-#define SNI_RESOLVE_CLIENT 1
-#define SNI_RESOLVE_INFRA 2
+#define RESOLVER_KIND_CLIENT 1
+#define RESOLVER_KIND_INFRA 2
 
-#define SNI_SUBMIT_OK 0
-#define SNI_SUBMIT_OVERFLOW -1
-#define SNI_SUBMIT_BADNAME -2
+#define RESOLVER_SUBMIT_OK 0
+#define RESOLVER_SUBMIT_OVERFLOW -1
+#define RESOLVER_SUBMIT_BADNAME -2
 
-#define SNI_UP_READY 0
-#define SNI_UP_UNRESOLVED 1
-#define SNI_UP_NEED_RESOLVE 2
+#define RESOLVER_UP_READY 0
+#define RESOLVER_UP_UNRESOLVED 1
+#define RESOLVER_UP_NEED_RESOLVE 2
 
 typedef enum {
 	RESOLVE_FREE = 0,
@@ -69,12 +69,12 @@ typedef enum {
 	RESOLVE_CANCELLED
 } resolve_state;
 
-typedef struct sni_completion_sink sni_completion_sink;
+typedef struct resolver_sink resolver_sink;
 
-typedef struct sni_resolved_addr {
+typedef struct resolver_addr {
 	struct sockaddr_storage address;
 	socklen_t length;
-} sni_resolved_addr;
+} resolver_addr;
 
 typedef struct resolve_slot {
 	uint64_t req_id;
@@ -85,12 +85,12 @@ typedef struct resolve_slot {
 	int request_class;
 	int gai_error;
 	int64_t deadline_ms;
-	char hostname[SNI_RESOLVER_HOST_MAX + 1];
+	char hostname[RESOLVER_HOST_MAX + 1];
 	uint16_t port;
 	int family_policy;
 	size_t address_count;
-	sni_resolved_addr addresses[SNI_RESOLVER_ADDR_MAX];
-	sni_completion_sink *sink;
+	resolver_addr addresses[RESOLVER_ADDR_MAX];
+	resolver_sink *sink;
 	int index;
 	int in_ring;
 	int holds_ref;
@@ -98,7 +98,7 @@ typedef struct resolve_slot {
 	struct resolve_slot *qnext;
 } resolve_slot;
 
-struct sni_completion_sink {
+struct resolver_sink {
 	pthread_mutex_t mutex;
 	int pipe_read;
 	int pipe_write;
@@ -115,7 +115,7 @@ struct sni_completion_sink {
 	int quota_used;
 };
 
-typedef struct sni_resolver_accounting {
+typedef struct resolver_accounting {
 	int free_n;
 	int queued;
 	int running;
@@ -132,69 +132,69 @@ typedef struct sni_resolver_accounting {
 	int live_sinks;
 	int abandoned;
 	int listener_quota_assigned;
-} sni_resolver_accounting;
+} resolver_accounting;
 
-bool sni_resolver_start(void);
+bool resolver_start(void);
 
-typedef struct sni_resolver_stats {
+typedef struct resolver_stats {
 	int threads;
 	int slots;
 	int slots_in_use;
 	uint32_t lookups;         /* getaddrinfo calls, retries after EINTR included */
 	uint32_t lookup_failures; /* lookups that returned an error or no address */
 	uint32_t ring_full;       /* completions dropped because a sink's ring was full */
-} sni_resolver_stats;
+} resolver_stats;
 
 /*
  * Snapshot for the monitor. Takes the pool mutex once; before the pool is
  * started only the fixed sizes are filled in. Safe to call at any time.
  */
-void sni_resolver_get_stats(sni_resolver_stats *out);
+void resolver_get_stats(resolver_stats *out);
 
 /*
  * Bounded wait for workers to leave getaddrinfo(). On timeout the pool is
  * left allocated: mutexes, slots, and threads stay valid until process exit.
  * Returns 0 when the pool was destroyed, 1 when it was abandoned.
  */
-int sni_resolver_shutdown(int timeout_ms);
+int resolver_shutdown(int timeout_ms);
 
 /* Lowercase ASCII, strip one trailing dot, reject a hostname the proxy will not resolve. */
-bool sni_resolver_normalize(const char *in, char *out, size_t out_cap);
+bool resolver_normalize(const char *in, char *out, size_t out_cap);
 
-bool sni_resolver_sink_open(int kind, sni_completion_sink **out);
-void sni_resolver_sink_mark_closed(sni_completion_sink *sink);
-void sni_resolver_sink_release(sni_completion_sink *sink);
+bool resolver_sink_open(int kind, resolver_sink **out);
+void resolver_sink_mark_closed(resolver_sink *sink);
+void resolver_sink_release(resolver_sink *sink);
 
 /* Drain the wakeup pipe, then every slot currently in the ring. */
-size_t sni_resolver_drain(sni_completion_sink *sink, resolve_slot **out, size_t max_out);
+size_t resolver_drain(resolver_sink *sink, resolve_slot **out, size_t max_out);
 
-int sni_resolver_submit(sni_completion_sink *sink, uint32_t connection_index,
+int resolver_submit(resolver_sink *sink, uint32_t connection_index,
 		uint64_t connection_generation, const char *hostname, uint16_t port,
 		int family, int64_t deadline_ms, int *slot_index, uint64_t *req_id);
 
-void sni_resolver_cancel(int slot_index, uint64_t req_id);
-void sni_resolver_release(int slot_index, uint64_t req_id);
+void resolver_cancel(int slot_index, uint64_t req_id);
+void resolver_release(int slot_index, uint64_t req_id);
 
 /* Register the listener bind used for self-connect checks. IPv4 only. */
-void sni_resolver_watch_bind(uint32_t listener_id, const char *bindip, uint16_t port);
-void sni_resolver_unwatch_bind(uint32_t listener_id);
+void resolver_watch_bind(uint32_t listener_id, const char *bindip, uint16_t port);
+void resolver_unwatch_bind(uint32_t listener_id);
 
-/* Destination policy flags for sni_resolver_policy_keep. */
-#define SNI_POLICY_ALLOW_LOOPBACK 0x1u	/* dial 127.0.0.0/8 and ::1 */
-#define SNI_POLICY_DENY_PRIVATE   0x2u	/* also refuse private ranges */
+/* Destination policy flags for resolver_policy_keep. */
+#define RESOLVER_POLICY_ALLOW_LOOPBACK 0x1u	/* dial 127.0.0.0/8 and ::1 */
+#define RESOLVER_POLICY_DENY_PRIVATE   0x2u	/* also refuse private ranges */
 
 /*
  * Rewrite IPv4-mapped IPv6 to IPv4, drop addresses the proxy must not dial,
  * and compact the array. Always removed: unspecified and 0.0.0.0/8,
  * 255.255.255.255, 169.254/16, multicast, 240/4, fe80::/10, fec0::/10,
  * IPv4-compatible (::a.b.c.d) and NAT64 (64:ff9b::/96) forms of those, and
- * self-connect targets. Loopback is removed unless SNI_POLICY_ALLOW_LOOPBACK
+ * self-connect targets. Loopback is removed unless RESOLVER_POLICY_ALLOW_LOOPBACK
  * is set (a loopback target on a listener's own port still goes). Private
  * ranges (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) are kept unless
- * SNI_POLICY_DENY_PRIVATE is set. Only used for addresses resolved from
+ * RESOLVER_POLICY_DENY_PRIVATE is set. Only used for addresses resolved from
  * client-supplied names, never for the operator's SOCKS or DNS upstream.
  */
-size_t sni_resolver_policy_keep(sni_resolved_addr *addrs, size_t count, unsigned flags);
+size_t resolver_policy_keep(resolver_addr *addrs, size_t count, unsigned flags);
 
 /*
  * SOCKS startup. A numeric host is stored as a bypass. A hostname is looked
@@ -202,41 +202,41 @@ size_t sni_resolver_policy_keep(sni_resolved_addr *addrs, size_t count, unsigned
  * start when the lookup fails; new SOCKS connections then fail immediately.
  * Returns false only when the pool itself cannot start.
  */
-bool sni_resolver_prime_socks(const char *host, uint16_t port, int wait_ms);
+bool resolver_prime_socks(const char *host, uint16_t port, int wait_ms);
 
 /* Numeric bypass, fresh or stale cache, or "still needs a client lookup". */
-int sni_resolver_copy_upstream(const char *host, uint16_t port,
-		sni_resolved_addr *out, size_t *count);
+int resolver_copy_upstream(const char *host, uint16_t port,
+		resolver_addr *out, size_t *count);
 
 #ifdef SNI_TEST_HOOKS
-typedef int (*sni_resolve_hook)(const char *hostname, int family,
-		sni_resolved_addr *out, size_t max_out, size_t *count, void *cookie);
+typedef int (*resolver_hook)(const char *hostname, int family,
+		resolver_addr *out, size_t max_out, size_t *count, void *cookie);
 
-typedef struct sni_resolver_counters {
+typedef struct resolver_counters {
 	uint32_t calls;
 	uint32_t skipped_expired;
 	uint32_t skipped_cancelled;
 	uint32_t eagain_wakeups;
 	uint32_t closed_drops;
 	uint32_t ring_full;
-} sni_resolver_counters;
+} resolver_counters;
 
-void sni_resolver_test_set_hook(sni_resolve_hook hook, void *cookie);
-void sni_resolver_test_stats(sni_resolver_counters *out);
-void sni_resolver_test_reset_stats(void);
-void sni_resolver_test_pause_dequeue(int pause);
-void sni_resolver_test_hold_running(int hold);
-int sni_resolver_test_wait_running(int want, int timeout_ms);
-bool sni_resolver_test_accounting(sni_resolver_accounting *out);
-int sni_resolver_test_mutex_ok(void);
-void sni_resolver_test_age_cache(int64_t last_success_ms, int64_t refresh_after_ms,
+void resolver_test_set_hook(resolver_hook hook, void *cookie);
+void resolver_test_stats(resolver_counters *out);
+void resolver_test_reset_stats(void);
+void resolver_test_pause_dequeue(int pause);
+void resolver_test_hold_running(int hold);
+int resolver_test_wait_running(int want, int timeout_ms);
+bool resolver_test_accounting(resolver_accounting *out);
+int resolver_test_mutex_ok(void);
+void resolver_test_age_cache(int64_t last_success_ms, int64_t refresh_after_ms,
 		int64_t max_stale_ms);
-int sni_resolver_sink_quota(const sni_completion_sink *sink);
+int resolver_sink_quota(const resolver_sink *sink);
 /* Queue infrastructure slots until the reserve is full. Caller should pause dequeue. */
-int sni_resolver_test_fill_infra(void);
+int resolver_test_fill_infra(void);
 /* Mark queued slots cancelled and let workers free them. */
-void sni_resolver_test_reap(void);
-int sni_resolver_test_wait_idle(int timeout_ms);
+void resolver_test_reap(void);
+int resolver_test_wait_idle(int timeout_ms);
 #endif
 
 #endif /* RESOLVER_H_ */

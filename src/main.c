@@ -16,6 +16,7 @@
 #include <zroxy/sniproxy.h>
 #include <zroxy/monitor.h>
 #include <zroxy/filter.h>
+#include <zroxy/resolver.h>
 #include <zroxy/dnsserver.h>
 #include <zroxy/args.h>
 #include <zroxy/priv.h>
@@ -195,7 +196,7 @@ int main(int argc, const char **argv)
 
 	if(monitor)
 	{
-		if (!monitor_add_section(monitor, "Resolver", sni_resolver_stats_json, NULL))
+		if (!monitor_add_section(monitor, "Resolver", resolver_stats_json, NULL))
 			log_error("monitor resolver section failed");
 	}
 
