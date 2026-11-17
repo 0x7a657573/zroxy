@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <zroxy/dnsproxy.h>
+#include "dns_internal.h"
 
 static int failures;
 

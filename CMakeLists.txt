@@ -90,6 +90,12 @@ zroxy_add_module(zroxy_monitor
 zroxy_add_module(zroxy_dns
     SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dns_event_loop.c src/dns/dnsserver.c
     DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats zroxy_monitor)
+target_include_directories(zroxy_dns PRIVATE ${PROJECT_SOURCE_DIR}/src/dns)
+
+# DNS's own header stays private to src/dns/; tests that reach into it
+# link zroxy_dns_internal.
+add_library(zroxy_dns_internal INTERFACE)
+target_include_directories(zroxy_dns_internal INTERFACE ${PROJECT_SOURCE_DIR}/src/dns)
 
 # The SNI engine's own headers (event loop, resolver) stay private to
 # src/sni/; tests that drive the engine directly link zroxy_sni_internal.
@@ -169,8 +175,8 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(acl               tests/test_acl.c              zroxy_net)
     zroxy_add_unit_test(fdlimit          tests/test_fdlimit.c          zroxy_net)
     zroxy_add_unit_test(dns_rate          tests/test_dns_rate.c         zroxy_dns)
-    zroxy_add_unit_test(dns_throttle     tests/test_dns_throttle.c     zroxy_dns)
-    zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args)
+    zroxy_add_unit_test(dns_throttle     tests/test_dns_throttle.c     zroxy_dns zroxy_dns_internal)
+    zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args zroxy_dns_internal)
     zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net)
     zroxy_add_unit_test(socks5_codec     tests/test_socks5_codec.c     zroxy_net)
     zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)

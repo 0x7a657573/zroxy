@@ -1,21 +1,18 @@
 /*
- * dnsproxy.h
+ * dns_internal.h
  *
  *  Created on: Jun 3, 2021
  *      Author: zeus
  */
 
-#ifndef DNSPROXY_H_
-#define DNSPROXY_H_
+#ifndef DNS_INTERNAL_H_
+#define DNS_INTERNAL_H_
 #include <stdint.h>
 #include <stdbool.h>
 #include <zroxy/config.h>
-#include <sys/select.h>
-#include <arpa/inet.h>
 #include <zroxy/dnsserver.h>
 #include <zroxy/filter.h>
 #include <zroxy/dnscache.h>
-#include <pthread.h>
 
 struct Message;
 
@@ -95,4 +92,4 @@ bool dnsproxy_test_throttle_take(log_throttle_t *t, int64_t now_ms,
 		int64_t interval_ms, uint32_t *dropped);
 bool dns_stats_json(void *ctx, char **ptr, char *end);
 
-#endif /* DNSPROXY_H_ */
+#endif /* DNS_INTERNAL_H_ */

@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 
-#include <zroxy/dnsproxy.h>
+#include "dns_internal.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
