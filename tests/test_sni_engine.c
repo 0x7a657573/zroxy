@@ -1600,6 +1600,53 @@ static void test_oversize_hello(void)
 	close(lfd);
 }
 
+static void test_hello_with_trailing_data(void)
+{
+	echo_srv echo;
+	sni_listener *ls = NULL;
+	SniServer_t cfg;
+	statistics_t *st = NULL;
+	uint16_t local = 0;
+	int binder;
+	int fd;
+	uint8_t hello[256];
+	size_t hello_len = 0;
+	size_t total;
+	uint8_t *msg;
+	uint8_t *back;
+	size_t i;
+	expect_true(echo_start(&echo) == 0, "trailing echo");
+	binder = listen_loopback(&local);
+	if (binder >= 0)
+		close(binder);
+	stats_init(&st, "sni-trailing");
+	fill_listener(&cfg, local, echo.port, 5, st, NULL, NULL);
+	expect_true(sni_listener_open(&cfg, &ls), "trailing listener");
+	expect_true(build_client_hello(hello, sizeof(hello), &hello_len, "localhost") == 0, "trailing hello");
+	total = hello_len + 16384;
+	msg = malloc(total);
+	back = malloc(total);
+	expect_true(msg && back, "trailing buffers");
+	if (msg && back) {
+		memcpy(msg, hello, hello_len);
+		for (i = hello_len; i < total; i++)
+			msg[i] = (uint8_t)(i * 31u + 7u);
+		fd = connect_local(local, 1000);
+		expect_true(fd >= 0, "trailing connect");
+		if (fd >= 0) {
+			expect_true(write_full(fd, msg, total) == 0, "trailing write");
+			expect_true(read_full_ms(fd, back, total, 5000) == 0, "trailing echoed back");
+			expect_true(memcmp(msg, back, total) == 0, "trailing bytes unchanged");
+			close(fd);
+		}
+	}
+	free(msg);
+	free(back);
+	sni_listener_close(ls);
+	echo_stop(&echo);
+	state_drop(st);
+}
+
 static void test_alloc_failure(void)
 {
 	echo_srv echo;
@@ -3332,6 +3379,7 @@ int main(void)
 	test_half_close();
 	test_upstream_half_close();
 	test_oversize_hello();
+	test_hello_with_trailing_data();
 	test_alloc_failure();
 	test_stats_once();
 	test_whitelist_and_ip();
