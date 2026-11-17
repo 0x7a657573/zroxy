@@ -1054,13 +1054,16 @@ def _udp_owned_by(pid, port):
 
 
 class ZroxyProcess:
-    def __init__(self, args, log_path, tcp_ports, udp_ports, ready_timeout=5.0):
+    def __init__(self, args, log_path, tcp_ports, udp_ports, ready_timeout=5.0,
+                 env=None):
         self.log_path = log_path
         self.binary = zroxy_binary()
         self.log_fh = open(log_path, "wb", buffering=0)
+        child_env = None if env is None else {**os.environ, **env}
         try:
             self.proc = subprocess.Popen(
                 [self.binary, *args],
+                env=child_env,
                 stdout=self.log_fh,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
@@ -1206,8 +1209,9 @@ class Lab:
         self.servers.append(server)
         return server
 
-    def zroxy(self, args, tcp_ports=(), udp_ports=(), ready_timeout=5.0):
+    def zroxy(self, args, tcp_ports=(), udp_ports=(), ready_timeout=5.0, env=None):
         log_path = self.path("zroxy-%s.log" % len(self.procs))
-        proc = ZroxyProcess(args, log_path, tcp_ports, udp_ports, ready_timeout)
+        proc = ZroxyProcess(args, log_path, tcp_ports, udp_ports, ready_timeout,
+                            env)
         self.procs.append(proc)
         return proc
