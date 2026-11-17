@@ -16,7 +16,6 @@
 #include <zroxy/net.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-#include <netinet/tcp.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <poll.h>
@@ -40,27 +39,6 @@ bool net_set_nonblock_cloexec(int fd)
         return false;
     if ((fdflags & FD_CLOEXEC) == 0 && fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) != 0)
         return false;
-    return true;
-}
-
-bool net_enable_keepalive(int sock) 
-{
-    int yes = 1;
-    if(setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(int)) != 0)
-        return false;
-
-    int idle = 1;
-    if(setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(int)) != 0)
-        return false;
-
-    int interval = 1;
-    if(setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(int)) != 0)
-        return false;
-
-    int maxpkt = 10;
-    if(setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &maxpkt, sizeof(int)) != 0)
-        return false;
-
     return true;
 }
 
