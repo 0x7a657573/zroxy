@@ -25,6 +25,8 @@
 #include <pwd.h>
 #include <grp.h>
 #include <zroxy/config.h>
+#include <zroxy/socks.h>
+#include <zroxy/acl.h>
 
 #define ARGS_MAX_IDENT 255
 #define ARGS_MAX_TOKEN 256

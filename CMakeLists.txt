@@ -120,7 +120,7 @@ target_include_directories(zroxy_sni PRIVATE ${PROJECT_SOURCE_DIR}/src/sni)
 
 zroxy_add_module(zroxy_args
     SOURCES src/args.c
-    DEPS zroxy_log zroxy_sni zroxy_dns)
+    DEPS zroxy_log zroxy_net)
 
 # ---------------------------------------------------------------------------
 # Executable
@@ -181,7 +181,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(fdlimit          tests/test_fdlimit.c          zroxy_net)
     zroxy_add_unit_test(dns_rate          tests/test_dns_rate.c         zroxy_dns)
     zroxy_add_unit_test(dns_throttle     tests/test_dns_throttle.c     zroxy_dns zroxy_dns_internal)
-    zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args zroxy_dns_internal)
+    zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args zroxy_dns zroxy_dns_internal)
     zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net)
     zroxy_add_unit_test(socks5_codec     tests/test_socks5_codec.c     zroxy_net)
     zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)

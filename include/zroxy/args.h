@@ -10,8 +10,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/types.h>
-#include <zroxy/sniproxy.h>
-#include <zroxy/dnsserver.h>
+#include <zroxy/settings.h>
 
 #define DEF_CONFIG_PATH	"zroxy.conf"
 
