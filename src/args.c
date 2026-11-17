@@ -146,6 +146,14 @@ void args_free(zroxy_t *ptr)
 	args_free_monitor_token(ptr);
 	free(ptr->WhitePath);
 	ptr->WhitePath = NULL;
+	free(ptr->monitorPort);
+	ptr->monitorPort = NULL;
+	free(ptr->monitor_token_file);
+	ptr->monitor_token_file = NULL;
+	free(ptr->socks_pass_file);
+	ptr->socks_pass_file = NULL;
+	free(ptr->dsocks_pass_file);
+	ptr->dsocks_pass_file = NULL;
 	free(ptr->run_user);
 	ptr->run_user = NULL;
 	free(ptr->run_group);
