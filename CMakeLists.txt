@@ -89,7 +89,7 @@ zroxy_add_module(zroxy_monitor
 
 zroxy_add_module(zroxy_dns
     SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dns_event_loop.c src/dns/dnsserver.c
-    DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats zroxy_monitor)
+    DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats)
 target_include_directories(zroxy_dns PRIVATE ${PROJECT_SOURCE_DIR}/src/dns)
 
 # DNS's own header stays private to src/dns/; tests that reach into it
