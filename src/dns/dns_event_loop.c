@@ -1063,7 +1063,7 @@ static void accept_clients(dns_event_t *event)
 			return;
 		}
 		if ((event->dns->acl_count > 0 &&
-				!dns_acl_allows(event->dns->acl, event->dns->acl_count,
+				!acl_allows(event->dns->acl, event->dns->acl_count,
 					ntohl(peer.sin_addr.s_addr))) ||
 			event->client_count >= DNS_EVENT_CLIENTS || !net_set_nonblock_cloexec(fd)) {
 			(void)__atomic_fetch_add(&event->dns->tcp_refused, 1u, __ATOMIC_RELAXED);
@@ -1096,7 +1096,7 @@ static void pull_udp(dns_event_t *event)
 			if (errno != EAGAIN && errno != EWOULDBLOCK) log_error("dns recvfrom failed: %s", strerror(errno));
 			return;
 		}
-		if (event->dns->acl_count > 0 && !dns_acl_allows(event->dns->acl, event->dns->acl_count,
+		if (event->dns->acl_count > 0 && !acl_allows(event->dns->acl, event->dns->acl_count,
 				ntohl(peer.sin_addr.s_addr))) { __atomic_fetch_add(&event->dns->acl_dropped, 1u, __ATOMIC_RELAXED); continue; }
 		if (!dns_rate_take(&event->dns->rate, ntohl(peer.sin_addr.s_addr), mono_now())) { __atomic_fetch_add(&event->dns->rate_dropped, 1u, __ATOMIC_RELAXED); continue; }
 		if (n < DNS_HEADER_SIZE || (size_t)n > sizeof(query) || (query[2] & 0x80) != 0) continue;

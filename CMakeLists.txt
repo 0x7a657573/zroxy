@@ -59,7 +59,7 @@ zroxy_add_module(zroxy_priv
     DEPS zroxy_log)
 
 zroxy_add_module(zroxy_net
-    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c src/net/socks5_codec.c src/net/fdlimit.c
+    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c src/net/socks5_codec.c src/net/fdlimit.c src/net/acl.c
     DEPS zroxy_log)
 
 # Readiness reactor (epoll or poll) shared by the SNI and DNS event loops.
@@ -88,7 +88,7 @@ zroxy_add_module(zroxy_monitor
     DEPS zroxy_stats zroxy_net)
 
 zroxy_add_module(zroxy_dns
-    SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsacl.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dns_event_loop.c src/dns/dnsserver.c
+    SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dns_event_loop.c src/dns/dnsserver.c
     DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats zroxy_monitor)
 
 # The SNI engine's own headers (event loop, resolver) stay private to
@@ -166,7 +166,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(filter_whitelist tests/test_filter_whitelist.c zroxy_filter)
     zroxy_add_unit_test(dns_codec        tests/test_dns_codec.c        zroxy_dns)
     zroxy_add_unit_test(dns_cache        tests/test_dns_cache.c        zroxy_dns)
-    zroxy_add_unit_test(dns_acl           tests/test_dns_acl.c          zroxy_dns)
+    zroxy_add_unit_test(acl               tests/test_acl.c              zroxy_net)
     zroxy_add_unit_test(fdlimit          tests/test_fdlimit.c          zroxy_net)
     zroxy_add_unit_test(dns_rate          tests/test_dns_rate.c         zroxy_dns)
     zroxy_add_unit_test(dns_throttle     tests/test_dns_throttle.c     zroxy_dns)

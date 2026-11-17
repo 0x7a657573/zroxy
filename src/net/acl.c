@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <zroxy/dnsacl.h>
+#include <zroxy/acl.h>
 
 static const char *skip_space(const char *p)
 {
@@ -20,7 +20,7 @@ static const char *trim_end(const char *begin, const char *end)
 	return end;
 }
 
-bool dns_acl_parse(const char *spec, dns_cidr_t *out, size_t cap, size_t *count)
+bool acl_parse(const char *spec, zroxy_cidr_t *out, size_t cap, size_t *count)
 {
 	const char *p;
 	size_t used = 0;
@@ -79,7 +79,7 @@ bool dns_acl_parse(const char *spec, dns_cidr_t *out, size_t cap, size_t *count)
 	return used > 0;
 }
 
-bool dns_acl_allows(const dns_cidr_t *acl, size_t n, uint32_t ip_host_order)
+bool acl_allows(const zroxy_cidr_t *acl, size_t n, uint32_t ip_host_order)
 {
 	size_t i;
 	if (!acl)

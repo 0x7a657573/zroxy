@@ -14,7 +14,7 @@
 #include <zroxy/monitor.h>
 #include <sys/socket.h>
 #include <zroxy/filter.h>
-#include <zroxy/dnsacl.h>
+#include <zroxy/acl.h>
 #include <zroxy/dnsrate.h>
 
 #define DNS_LOCAL_TTL_DEFAULT	300
@@ -54,7 +54,7 @@ typedef struct
 	bool		  listen_set;
 	uint32_t	  cache_entries;
 	uint32_t	  local_ttl;
-	dns_cidr_t	  *acl;
+	zroxy_cidr_t	  *acl;
 	size_t	  acl_count;
 	bool		  acl_set;
 	uint32_t	  rate_qps;
