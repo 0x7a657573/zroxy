@@ -63,9 +63,9 @@ typedef struct
 
 struct dnsserver;
 
-/* Bind, start workers and the receive loop. NULL on failure. */
+/* Bind the sockets and start the single event-loop thread. NULL on failure. */
 struct dnsserver *dnsserver_start(dnshost_t *config);
-/* Stop receiving, drain queued queries, join all threads and free. */
+/* Stop the event loop, join its thread and free. */
 void dnsserver_stop(struct dnsserver *dns);
 
 #endif /* DNSSERVER_H_ */
