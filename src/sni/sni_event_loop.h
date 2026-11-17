@@ -49,6 +49,7 @@ typedef struct {
 	int eintr_wait;
 	int fail_wait;      /* forced non-EINTR wait failures (loop exits) */
 	int fail_allocs;
+	int fail_accept;    /* forced EMFILE returns from accept() */
 } sni_test_faults;
 
 void sni_test_set_faults(const sni_test_faults *faults);
@@ -60,6 +61,7 @@ uint32_t sni_test_eagain_count(void);
 uint32_t sni_test_wait_calls(void);
 void sni_test_set_hello_idle_ms(int ms);
 uint32_t sni_test_relay_yields(void);
+uint32_t sni_test_accept_pauses(void);
 void sni_test_set_relay_budget(uint32_t bytes); /* 0 restores the default */
 #endif
 
