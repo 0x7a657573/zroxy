@@ -36,8 +36,7 @@ struct dnsserver *dnsserver_start(dnshost_t *conf)
 		localdns_free(dns);
 		return NULL;
 	}
-	if (dns->Stat)
-		stats_set_extra(dns->Stat, dns_stats_json, dns);
+	stats_set_extra(dns->Stat, dns_stats_json, dns);
 
 	log_info("dns server start on %s:%d",conf->Local.ip,conf->Local.port);
 	return dns;
@@ -48,8 +47,7 @@ void dnsserver_stop(struct dnsserver *dns)
 	if (!dns)
 		return;
 	dns_event_loop_stop(dns);
-	if (dns->Stat)
-		stats_set_extra(dns->Stat, NULL, NULL);
+	stats_set_extra(dns->Stat, NULL, NULL);
 	localdns_free(dns);
 	log_info("dns server stopped");
 }

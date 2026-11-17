@@ -42,6 +42,7 @@ void stats_init(statistics_t **self,char *name);
 /* Only when no thread can touch it any more. */
 void stats_free(statistics_t *self);
 
+/* The functions below accept a NULL statistics object and do nothing. */
 void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx);
 void stats_open_connection(statistics_t *self);
 
