@@ -1,14 +1,11 @@
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <zroxy/dns.h>
 #include <zroxy/dnscache.h>
 #include <zroxy/log.h>
-#include <zroxy/net_io.h>
 
 static int failures = 0;
 
@@ -198,85 +195,71 @@ static void test_lru_eviction(void)
     dnscache_free(c);
 }
 
-typedef struct
-{
-    dnscache_t *cache;
-    dnscache_flight *flight;
-    uint8_t query[64];
-    size_t qlen;
-    int64_t deadline;
-    uint8_t out[DNS_UDP_MAX_PAYLOAD];
-    size_t full;
-} follower_t;
-
-static void *follow_thread(void *arg)
-{
-    follower_t *fw = (follower_t *)arg;
-    fw->full = dnscache_follow(fw->cache, fw->flight, fw->query, fw->qlen, fw->deadline,
-                               fw->out, sizeof(fw->out));
-    return NULL;
-}
-
 static void test_coalescing(void)
 {
     dnscache_t *c = dnscache_create(16);
     uint8_t q[64];
+    uint8_t fq[64];
     uint8_t r[128];
     uint8_t out[DNS_UDP_MAX_PAYLOAD];
     size_t qlen;
+    size_t fqlen;
     size_t rlen;
     size_t n = 0;
     dnscache_flight *lead = NULL;
-    follower_t fw;
-    pthread_t tid;
+    dnscache_flight *follow = NULL;
+    dnscache_counters counters;
 
     if (!c)
         return;
     qlen = build_query(q, 'd', 0x0101);
-    expect_int(dnscache_begin(c, q, qlen, net_mono_ms(), out, sizeof(out), &n, &lead), DNSCACHE_LEAD,
+    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD,
                "first query leads");
 
-    memset(&fw, 0, sizeof(fw));
-    fw.cache = c;
-    fw.qlen = build_query(fw.query, 'D', 0x0202);
-    fw.deadline = net_mono_ms() + 2000;
-    expect_int(dnscache_begin(c, fw.query, fw.qlen, net_mono_ms(), out, sizeof(out), &n, &fw.flight),
+    fqlen = build_query(fq, 'D', 0x0202);
+    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow),
                DNSCACHE_FOLLOW, "same question follows");
-    expect_true(pthread_create(&tid, NULL, follow_thread, &fw) == 0, "start follower");
-    usleep(50000);
-    rlen = build_reply(r, q, qlen, 0, 60);
-    dnscache_finish(c, lead, r, rlen, rlen, net_mono_ms());
-    pthread_join(tid, NULL);
-    expect_int((long)fw.full, (long)rlen, "follower gets the leader's reply");
-    expect_true(fw.out[0] == 0x02 && fw.out[1] == 0x02 && fw.out[13] == 'D',
-                "follower reply carries its own id and spelling");
+    expect_true(follow == lead, "follower shares the leader's flight");
+    dnscache_get_counters(c, &counters);
+    expect_int((long)counters.shared, 1, "shared counter");
 
-    /* A failed fetch fails its followers too. */
+    rlen = build_reply(r, q, qlen, 0, 60);
+    dnscache_finish(c, lead, r, rlen, rlen, 1000);
+    /* The finished flight is not offered to new queries while a follower holds it. */
+    dnscache_abandon_follower(c, follow);
+    expect_int((long)dnscache_count(c), 1, "leader's reply stored");
+    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow), DNSCACHE_HIT,
+               "follower's question now hits");
+    expect_int((long)n, (long)rlen, "hit length");
+    expect_true(out[0] == 0x02 && out[1] == 0x02 && out[13] == 'D',
+                "hit carries the follower's id and spelling");
+
+    /* A failed fetch stores nothing; its followers are released and the next query leads. */
     qlen = build_query(q, 'e', 1);
-    dnscache_begin(c, q, qlen, net_mono_ms(), out, sizeof(out), &n, &lead);
-    fw.qlen = build_query(fw.query, 'e', 2);
-    expect_int(dnscache_begin(c, fw.query, fw.qlen, net_mono_ms(), out, sizeof(out), &n, &fw.flight),
+    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD, "lead a fetch that fails");
+    fqlen = build_query(fq, 'e', 2);
+    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow),
                DNSCACHE_FOLLOW, "follow a fetch that will fail");
-    dnscache_finish(c, lead, NULL, 0, 0, net_mono_ms());
-    fw.deadline = net_mono_ms() + 2000;
-    expect_int((long)dnscache_follow(c, fw.flight, fw.query, fw.qlen, fw.deadline, out, sizeof(out)), 0,
-               "follower of a failed fetch gets nothing");
+    dnscache_finish(c, lead, NULL, 0, 0, 1000);
+    dnscache_abandon_follower(c, follow);
+    expect_int((long)dnscache_count(c), 1, "failed fetch stores nothing");
+    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD,
+               "query after a failed fetch leads");
+    dnscache_finish(c, lead, NULL, 0, 0, 1000);
 
-    /* A follower stops waiting at its deadline. */
+    /* A follower may let go before the leader finishes; the leader still fills the cache. */
     qlen = build_query(q, 'f', 1);
-    dnscache_begin(c, q, qlen, net_mono_ms(), out, sizeof(out), &n, &lead);
-    fw.qlen = build_query(fw.query, 'f', 2);
-    dnscache_begin(c, fw.query, fw.qlen, net_mono_ms(), out, sizeof(out), &n, &fw.flight);
-    {
-        int64_t start = net_mono_ms();
-        expect_int((long)dnscache_follow(c, fw.flight, fw.query, fw.qlen, start + 100, out, sizeof(out)), 0,
-                   "follower times out");
-        expect_true(net_mono_ms() - start < 1000, "follower timeout is bounded");
-    }
+    dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead);
+    fqlen = build_query(fq, 'f', 2);
+    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow), DNSCACHE_FOLLOW,
+               "follow a slow fetch");
+    dnscache_abandon_follower(c, follow);
     rlen = build_reply(r, q, qlen, 0, 60);
-    dnscache_finish(c, lead, r, rlen, rlen, net_mono_ms());
-    expect_int(dnscache_begin(c, q, qlen, net_mono_ms(), out, sizeof(out), &n, &lead), DNSCACHE_HIT,
+    dnscache_finish(c, lead, r, rlen, rlen, 1000);
+    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_HIT,
                "late leader still fills the cache");
+    dnscache_get_counters(c, &counters);
+    expect_int((long)counters.shared, 3, "shared counter after three follows");
     dnscache_free(c);
 }
 

@@ -5,8 +5,8 @@
  *
  * Entries are complete upstream replies of at most DNS_UDP_MAX_PAYLOAD bytes,
  * kept for their smallest TTL (capped) and evicted least recently used first.
- * While one worker fetches a name, workers with the same query wait for its
- * reply instead of asking upstream again.
+ * While one request fetches a name, requests with the same query attach to it
+ * instead of asking upstream again; the caller completes them from the reply.
  *
  * One mutex guards everything; no upstream I/O happens with it held.
  */
@@ -42,7 +42,7 @@ typedef enum
 {
 	DNSCACHE_HIT = 0,	/* the reply is in out */
 	DNSCACHE_LEAD,		/* fetch it, then call dnscache_finish */
-	DNSCACHE_FOLLOW,	/* another worker fetches it; call dnscache_follow */
+	DNSCACHE_FOLLOW,	/* another request fetches it; attach to it, then dnscache_abandon_follower */
 	DNSCACHE_BYPASS		/* not cacheable or no flight slot: forward alone */
 } dnscache_result;
 
@@ -59,20 +59,12 @@ dnscache_result dnscache_begin(dnscache_t *cache, const uint8_t *query, size_t q
 /*
  * Leader: publish the reply (resp holds the first stored of full_len bytes;
  * full_len 0 means the fetch failed) and store it when cacheable. Followers
- * see at most DNS_UDP_MAX_PAYLOAD bytes of it.
+ * are not given the reply; the caller hands it to them.
  */
 void dnscache_finish(dnscache_t *cache, dnscache_flight *flight, const uint8_t *resp,
 		size_t stored, size_t full_len, int64_t now_ms);
 
-/*
- * Follower: wait for the leader until deadline_ms. Returns the reply's full
- * length, or 0 when the leader failed or the wait timed out. The first
- * min(full, cap) bytes are in out, with the query's id and question.
- */
-size_t dnscache_follow(dnscache_t *cache, dnscache_flight *flight, const uint8_t *query, size_t qlen,
-		int64_t deadline_ms, uint8_t *out, size_t cap);
-
-/* Release a follower that is going to be completed by an event loop instead. */
+/* Release a follower once the caller has attached it to the leader. */
 void dnscache_abandon_follower(dnscache_t *cache, dnscache_flight *flight);
 
 size_t dnscache_count(dnscache_t *cache);
