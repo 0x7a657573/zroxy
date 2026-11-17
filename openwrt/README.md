@@ -103,7 +103,7 @@ UCI options and the zroxy keys they write:
 | `main` | `list listen` | `PORT` (one line each) |
 | `main` | `white`, `openproxy`, `allowloopback`, `denyprivate` | `WHITE`, `OPENPROXY`, `ALLOWLOOPBACK`, `DENYPRIVATE` |
 | `main` | `socks`, `socks_pass_file` | `SOCKS`, `SOCKSPASSFILE` |
-| `main` | `snitimeout`, `sniidletimeout` | `SNITIMEOUT`, `SNIIDLETIMEOUT` |
+| `main` | `snitimeout`, `sniidletimeout`, `snimaxconn` | `SNITIMEOUT`, `SNIIDLETIMEOUT`, `SNIMAXCONN` |
 | `main` | `log`, `user`, `group` | `LOG`, `USER`, `GROUP` |
 | `dns` | `enabled` | when `0`, no DNS keys are written |
 | `dns` | `listen` | `LDNS` |

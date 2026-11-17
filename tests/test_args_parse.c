@@ -703,6 +703,74 @@ static void test_sni_idle_timeout(void)
     }
 }
 
+static void test_sni_max_connections(void)
+{
+    zroxy_t cfg = {0};
+    char a0[] = "zroxy";
+    char a1[] = "-n";
+    char a2[] = "4096";
+    const char *argv[] = {a0, a1, a2};
+    const char *bad[] = {"0", "65536", "-1", "abc", "10x"};
+    size_t i;
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 3, argv), "SNI connection limit parses");
+    expect_int(cfg.snimaxconn, 4096, "SNI connection limit value");
+    free_settings(&cfg);
+
+    {
+        zroxy_t d = {0};
+        char l1[] = "-l";
+        char l2[] = "2";
+        const char *dargv[] = {a0, l1, l2};
+        reset_getopt();
+        expect_true(args_init(&d, 3, dargv), "defaults parse for SNI limit");
+        expect_int(d.snimaxconn, 1024, "SNI connection limit defaults to 1024");
+        free_settings(&d);
+    }
+
+    {
+        zroxy_t top = {0};
+        char t1[] = "--snimaxconn";
+        char t2[] = "65535";
+        const char *targv[] = {a0, t1, t2};
+        reset_getopt();
+        expect_true(args_init(&top, 3, targv), "SNI connection limit maximum parses");
+        expect_int(top.snimaxconn, 65535, "SNI connection limit maximum value");
+        free_settings(&top);
+    }
+
+    for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+    {
+        zroxy_t invalid = {0};
+        char b1[] = "--snimaxconn";
+        char b2[16];
+        const char *bad_argv[] = {a0, b1, b2};
+        snprintf(b2, sizeof(b2), "%s", bad[i]);
+        reset_getopt();
+        expect_true(!args_init(&invalid, 3, bad_argv), "invalid SNI connection limit rejects");
+        free_settings(&invalid);
+    }
+
+    {
+        zroxy_t file_cfg = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        write_all_or_fail(fd, "SNIMAXCONN = 2000\n");
+        close(fd);
+        expect_true(args_parse_config(&file_cfg, template_path), "config SNIMAXCONN parses");
+        expect_int(file_cfg.snimaxconn, 2000, "config SNIMAXCONN value");
+        unlink(template_path);
+        free_settings(&file_cfg);
+    }
+}
+
 static void test_destination_policy_options(void)
 {
     zroxy_t cfg = {0};
@@ -1904,6 +1972,7 @@ int main(void)
     test_dns_validation();
     test_dns_connection_limit();
     test_sni_idle_timeout();
+    test_sni_max_connections();
     test_dns_cache_and_ttl_ranges();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();

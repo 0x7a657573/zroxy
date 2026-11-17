@@ -147,6 +147,7 @@ static bool parse_dns_connections(zroxy_t *ptr,char *str);
 static bool parse_log_level(zroxy_t *ptr,char *str);
 static bool parse_sni_timeout(zroxy_t *ptr,char *str);
 static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str);
+static bool parse_sni_max_conn(zroxy_t *ptr,char *str);
 static bool parse_bool(char *str, bool *out);
 
 static dnshost_t *dns_config(zroxy_t *ptr)
@@ -198,6 +199,7 @@ static arg_option options[] =
 	{ "sockspassfile", 'S', "PATH", required_argument, "read the SOCKS5 password from the first line of PATH (spec: USER@HOST[:PORT])", OPTION_SECTION_SNI },
 	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
 	{ "sniidletimeout", 'I', "SECONDS", required_argument, "close a relay idle this long, 1..86400 (default: 300)", OPTION_SECTION_SNI },
+	{ "snimaxconn", 'n', "COUNT", required_argument, "maximum concurrent SNI connections, 1..65535 (default: 1024)", OPTION_SECTION_SNI },
 	{ "allowloopback", 'L', "yes|no", required_argument, "let client-supplied names reach loopback upstreams (default: no)", OPTION_SECTION_SNI },
 	{ "denyprivate", 'P', "yes|no", required_argument, "refuse client-supplied names that resolve to private addresses (default: no)", OPTION_SECTION_SNI },
 	{ "white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI },
@@ -479,6 +481,7 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 {
 	pgp->snitimeout = 30;
 	pgp->sniidletimeout = 300;
+	pgp->snimaxconn = SNI_CONN_LIMIT_DEFAULT;
 	pgp->allow_loopback = false;
 	pgp->deny_private = false;
 	pgp->open_proxy = false;
@@ -706,6 +709,7 @@ static int parse_opt(int key, char *arg, void *userprm)
 		case 'G': if (!parse_secret_path(&setting->run_group,arg)) return -1; break;
 		case 'O': if (!parse_bool(arg, &setting->open_proxy)) return -1; break;
 		case 'I': if (!parse_sni_idle_timeout(setting,arg)) return -1; break;
+		case 'n': if (!parse_sni_max_conn(setting,arg)) return -1; break;
 		case 'h': args_print_usage(); exit(0);
 		default: return -1;
     }
@@ -1547,6 +1551,15 @@ static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str)
 	if (!parse_i32_range(str, &timeout, 1, 86400))
 		return false;
 	ptr->sniidletimeout = timeout;
+	return true;
+}
+
+static bool parse_sni_max_conn(zroxy_t *ptr,char *str)
+{
+	int count;
+	if (!parse_i32_range(str, &count, 1, SNI_CONN_LIMIT_MAX))
+		return false;
+	ptr->snimaxconn = count;
 	return true;
 }
 
