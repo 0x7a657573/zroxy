@@ -1190,11 +1190,6 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 		}
 		note_client_read(c->hello_len - before);
 		c->last_hello = net_mono_ms();
-		if (c->hello_len >= SNI_HELLO_CAP) {
-			log_error("Host Buffer OverFlow");
-			conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
-			return;
-		}
 		if (host_ready(e, c))
 			return;
 	}
