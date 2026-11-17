@@ -271,6 +271,8 @@ start_service() {
 	procd_set_param respawn 3600 5 5
 	procd_set_param stderr 1
 	procd_set_param no_new_privs 1
+	# two descriptors per SNI connection; zroxy sizes its own limit to SNIMAXCONN
+	procd_set_param limits nofile="65536 65536"
 	[ "$jail" -eq 1 ] && setup_jail "$config_file"
 	procd_close_instance
 }

@@ -59,7 +59,7 @@ zroxy_add_module(zroxy_priv
     DEPS zroxy_log)
 
 zroxy_add_module(zroxy_net
-    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c src/net/socks5_codec.c
+    SOURCES src/net/net.c src/net/net_io.c src/net/socks.c src/net/socks5_codec.c src/net/fdlimit.c
     DEPS zroxy_log)
 
 # Readiness reactor (epoll or poll) shared by the SNI and DNS event loops.
@@ -167,6 +167,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(dns_codec        tests/test_dns_codec.c        zroxy_dns)
     zroxy_add_unit_test(dns_cache        tests/test_dns_cache.c        zroxy_dns)
     zroxy_add_unit_test(dns_acl           tests/test_dns_acl.c          zroxy_dns)
+    zroxy_add_unit_test(fdlimit          tests/test_fdlimit.c          zroxy_net)
     zroxy_add_unit_test(dns_rate          tests/test_dns_rate.c         zroxy_dns)
     zroxy_add_unit_test(dns_throttle     tests/test_dns_throttle.c     zroxy_dns)
     zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args)
