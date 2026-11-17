@@ -13,8 +13,8 @@ The main implementation areas are:
   event-loop and resolver headers are private to this directory);
 - `src/dns/` — local UDP/TCP DNS service and upstream TCP forwarding;
 - `src/stats/` — counters and the HTTP JSON monitor;
-- `src/net/` — sockets, bounded I/O, hostname extraction, and the SOCKS5
-  client codec and blocking helper;
+- `src/net/` — sockets, bounded I/O, hostname extraction, the SOCKS5
+  client codec and blocking helper, the CIDR ACL, and open-file limit sizing;
 - `src/filter/` — whitelist loading, matching, and reload;
 - `src/log/` — logging and log synchronization.
 
@@ -296,9 +296,11 @@ path, then returns `1`.
 | `src/sni/sni_event_loop.h` | Event-loop API and test hooks (private) | Joinable listener: open/close |
 | `src/sni/sni_resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
 | `src/sni/sni_resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
-| `src/sni/sniclient.c` | SNI connection cap and test entry point | 1024 live-connection slots |
+| `src/sni/sniclient.c` | SNI connection cap and test entry point | `SNIMAXCONN` live-connection slots (default 1024) |
 | `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |
 | `src/net/net.c` | IPv4 listen/connect, HTTP/TLS host extraction | Protocol-independent socket helpers |
+| `src/net/acl.c` | IPv4 CIDR list parse and match | Shared by `DACL` and `SACL`; host-order addresses |
+| `src/net/fdlimit.c` | Open-file limit sizing | Pure sizing functions plus one `setrlimit` call; never fails startup |
 | `src/net/net_io.c` | Exact and deadline-bounded I/O | Shared timeout behavior |
 | `src/net/socks5_codec.c` | Sans-IO SOCKS5 client handshake | Owns no fd; shared by the blocking helper, the SNI loop and the DNS loop |
 | `src/net/socks.c` | Blocking SOCKS5 client helper | Drives the codec with deadline-bounded I/O (legacy/test paths) |
@@ -433,19 +435,45 @@ shared reactor as a runtime flag. The DNS loop uses the same reactor. The loop d
 ```mermaid
 flowchart TD
     A[listen fd readable] --> B[accept client fd]
-    B --> C{set nonblocking + CLOEXEC}
+    B --> S{SACL allows the peer?}
+    S -- no: AclDenied --> X
+    S -- yes --> C{set nonblocking + CLOEXEC}
     C -- no --> X[close client fd]
     C -- yes --> D{acquire SNI slot}
-    D -- no: 1024 live slots --> X
-    D -- yes --> E[allocate sni_conn]
+    D -- no: cap reached --> V{oldest HELLO of this loop?}
+    V -- none --> X
+    V -- yes --> W[close it, release its slot]
+    W --> D2{acquire SNI slot}
+    D2 -- no: another loop took it --> X
+    D2 -- yes --> E[allocate sni_conn]
+    D -- yes --> E
     E -- allocation failure --> F[release slot + close fd]
     E -- success --> G[state = HELLO]
     G --> H[arm client readable event]
     H --> I[event loop]
 ```
 
-The 1024 limit is a limit on live SNI connection objects, not a number of
-threads. The accepted socket is closed immediately when the cap is full.
+The cap (`SNIMAXCONN`, default 1024) is a limit on live SNI connection objects,
+not a number of threads. `main` lowers it at startup if the open-file limit
+cannot serve two descriptors per connection (`fdlimit_apply`), and
+`sni_worker_limit` returns that effective value, which the monitor reports.
+
+`SACL` is checked right after `accept`, before a slot is taken: a client
+outside the list is closed and counted as `AclDenied`. With no list every
+client is allowed.
+
+The cap is process-wide but a loop can close only its own connections. When
+`sni_worker_acquire` fails, the accepting loop takes the head of its FIFO of
+connections still in `HELLO` (linked when a connection starts, unlinked in
+`conn_set_state` when it leaves `HELLO` and in `conn_kill`), closes it with the
+`Evicted` reason, which releases its slot, and acquires again. A connection in
+`HELLO` has no resolver request, upstream or SOCKS state. If the loop has no
+`HELLO` connection, or another loop takes the freed slot first, the new socket
+is closed as `Refused`.
+
+When `accept` fails with `EMFILE` or `ENFILE` the loop removes the listen fd
+from the reactor and sets a 100 ms resume time that `engine_timeout` honors; it
+never sleeps. The error is logged at most once per second per listener.
 
 ### Connection state machine
 
@@ -960,7 +988,7 @@ Important lock-order rules:
 ```mermaid
 flowchart LR
     Input[untrusted input] --> Limits[parser and buffer limits]
-    Limits --> Conn[1024 SNI connection slots]
+    Limits --> Conn[SNIMAXCONN SNI connection slots,\ndefault 1024]
     Limits --> Resolver[128 resolver slots]
     Limits --> DNSR[2048 DNS requests]
     Limits --> DNSU[96 DNS upstream connections]
@@ -974,7 +1002,8 @@ Current important bounds are:
 
 | Resource | Bound | Enforcement point |
 | --- | ---: | --- |
-| SNI live connections | 1024 | `sni_worker_acquire` |
+| SNI live connections | 1024 default, configurable 1..65535 (`SNIMAXCONN`), lowered to fit `RLIMIT_NOFILE` | `sni_worker_acquire` |
+| Descriptors per SNI connection | 2 | `fdlimit_needed` |
 | SNI initial buffer | 8192 bytes | `SNI_HELLO_CAP` |
 | SNI client-to-upstream relay buffer | 8192 bytes | `SNI_RELAY_CAP` |
 | SNI upstream-to-client relay buffer | 8192 bytes | `SNI_RELAY_CAP` |
@@ -1039,7 +1068,9 @@ reported by the monitor:
 | handshake timeout | `HandshakeTimeouts` | `SNITIMEOUT` expires while reading the hello, resolving, connecting, or negotiating SOCKS |
 | idle timeout | `IdleTimeouts` | `SNIIDLETIMEOUT` expires on an established relay with nothing pending |
 | stall timeout | `StallTimeouts` | buffered relay data could not be written within `SNITIMEOUT` |
-| refused | `Refused` | counted at accept, before a connection object exists or when registering it fails: the 1024 cap, an allocation failure, or a socket option failure |
+| evicted | `Evicted` | the cap was full and this connection, the loop's oldest still in the hello state, was closed to make room |
+| acl denied | `AclDenied` | counted at accept, before a slot or connection object exists: the peer is outside `SACL` |
+| refused | `Refused` | counted at accept, before a connection object exists or when registering it fails: the full cap, an allocation failure, or a socket option failure; with the cap full, only when the loop has no hello-state connection to evict |
 
 `Relayed` is incremented when the relay state is entered. The counters are
 word-sized atomics shared by every listener and are updated without locks.
@@ -1112,6 +1143,8 @@ The test layout mirrors the major boundaries:
 | `test_filter_whitelist` | whitelist matching: exact, suffix, generic patterns, case, no prefix match |
 | `test_dns_codec` | bounded DNS decode/encode |
 | `test_args_parse` | CLI/config parsing and limits |
+| `test_acl` | CIDR list parsing and matching |
+| `test_fdlimit` | open-file limit sizing and the lowered SNI cap |
 | `test_socks5_codec` | sans-IO SOCKS5 codec: greeting, auth, request forms, reply types, errors |
 | `test_socks_handshake` | SOCKS5 handshake and deadlines |
 | `test_sni_forwarding` | direct/SOCKS forwarding entry point |
@@ -1155,7 +1188,11 @@ These are the rules future changes should preserve or update explicitly:
     threads. DNS must not create a thread per query.
 11. Descriptors must be removed from the event backend before close and set to
     `-1` afterward.
-12. Documentation must distinguish implemented behavior, tested behavior, and
+12. The SNI event-loop thread must not sleep when `accept` runs out of
+    descriptors; it pauses the listener and keeps serving connections. Only a
+    connection in `HELLO` may be evicted, and its slot is released before the
+    new connection takes one.
+13. Documentation must distinguish implemented behavior, tested behavior, and
     unverified or environment-dependent behavior.
 
 ## Known limitations and open design work
