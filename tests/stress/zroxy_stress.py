@@ -35,7 +35,7 @@ def read_define(path, name):
 
 def worker_limits():
     return {
-        "sni": read_define(os.path.join(ROOT, "src", "sni", "sniclient.c"), "SNI_MAX_WORKERS"),
+        "sni": read_define(os.path.join(ROOT, "include", "zroxy", "sniproxy.h"), "SNI_CONN_LIMIT_DEFAULT"),
         "dns": 1,
         "monitor": read_define(os.path.join(ROOT, "src", "stats", "monitor.c"), "MON_MAX_WORKERS"),
     }
