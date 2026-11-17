@@ -108,7 +108,7 @@ target_include_directories(zroxy_sni_internal INTERFACE ${PROJECT_SOURCE_DIR}/sr
 
 set(ZROXY_SNI_SOURCES
     src/sni/sniproxy.c
-    src/sni/sniclient.c
+    src/sni/sni_conn_limit.c
     src/sni/sni_event_loop.c
 )
 set(ZROXY_SNI_DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats)

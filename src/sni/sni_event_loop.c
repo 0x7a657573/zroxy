@@ -1932,6 +1932,17 @@ void sni_connection_run(sniclient_t *client)
 	sni_engine_run(&eng);
 	sni_engine_deinit(&eng);
 }
+
+void *sni_client_handler(void *arg)
+{
+	sniclient_t *client = (sniclient_t *)arg;
+	if (!client)
+		return NULL;
+	sni_connection_run(client);
+	sni_conn_release();
+	free(client);
+	return NULL;
+}
 #endif /* SNI_TEST_HOOKS */
 
 #ifdef SNI_TEST_HOOKS

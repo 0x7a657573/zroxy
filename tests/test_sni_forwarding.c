@@ -14,7 +14,7 @@
 
 #include <zroxy/log.h>
 #include <zroxy/sniproxy.h>
-#include "sniclient.h"
+#include "sni_event_loop.h"
 
 static int failures = 0;
 

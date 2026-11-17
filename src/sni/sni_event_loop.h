@@ -19,10 +19,6 @@
 #include <netinet/in.h>
 #include <zroxy/sniproxy.h>
 
-#ifdef SNI_TEST_HOOKS
-#include "sniclient.h"
-#endif
-
 /* Same bound the previous handler used for the initial client read. */
 #define SNI_HELLO_CAP 0x2000u
 #define SNI_RELAY_CAP 0x2000u
@@ -36,6 +32,18 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out);
 void sni_listener_close(sni_listener *ls);
 
 #ifdef SNI_TEST_HOOKS
+/* Single-connection path; compiled only into the SNI_TEST_HOOKS libraries. */
+typedef struct
+{
+	int		 connid;
+	struct sockaddr_in cli;
+	socklen_t addr_len;
+	SniServer_t SniConfig;
+} sniclient_t;
+
+/* Thread entry: run one client via sni_connection_run, release its slot, free it. */
+void *sni_client_handler(void *arg);
+
 /*
  * Run one already-accepted client to completion on the calling thread.
  * Closes client->connid and stores -1. Does not free client and does not
