@@ -1,19 +1,12 @@
 /*
- * SniClient.c
+ * sni_conn_limit.c
  *
- *  Created on: Jan 29, 2020
- *      Author: zeus
- *
- * The connection cap defaults to 1024 and is set once at startup with
- * sni_conn_set_limit. Those slots are connections on the listener event
- * loop, not pthreads. Under SNI_TEST_HOOKS the file also has sni_client_handler,
- * which drives one connection on the calling thread through the same state
- * machine.
+ * Process-wide cap on SNI connections. It defaults to 1024 and is set once at
+ * startup with sni_conn_set_limit. Slots are connections on the listener
+ * event loop, not pthreads.
  */
-#include <stdlib.h>
 #include <pthread.h>
-#include "sniclient.h"
-#include "sni_event_loop.h"
+#include <zroxy/sniproxy.h>
 
 static pthread_mutex_t sni_conn_mu = PTHREAD_MUTEX_INITIALIZER;
 static int sni_conns = 0;
@@ -59,16 +52,3 @@ void sni_conn_release(void)
 		sni_conns--;
 	pthread_mutex_unlock(&sni_conn_mu);
 }
-
-#ifdef SNI_TEST_HOOKS
-void *sni_client_handler(void *arg)
-{
-	sniclient_t *client = (sniclient_t *)arg;
-	if (!client)
-		return NULL;
-	sni_connection_run(client);
-	sni_conn_release();
-	free(client);
-	return NULL;
-}
-#endif /* SNI_TEST_HOOKS */
