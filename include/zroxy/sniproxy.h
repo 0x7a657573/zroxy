@@ -15,17 +15,7 @@
 #include <zroxy/statistics.h>
 #include <zroxy/filter.h>
 #include <zroxy/socks.h>
-
-#define SNI_CONN_LIMIT_DEFAULT 1024
-#define SNI_CONN_LIMIT_MAX 65535
-
-typedef struct
-{
-	char	 bindip[ZROXY_MAX_IP_TEXT];
-	uint16_t local_port;
-	uint16_t remote_port;
-	void 	 *next;
-}lport_t;
+#include <zroxy/settings.h>
 
 typedef struct
 {
