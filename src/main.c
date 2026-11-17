@@ -37,10 +37,19 @@ typedef struct
 	void (*reload)(void *handle);	/* NULL when SIGHUP means nothing to it */
 }service_t;
 
-static void stop_whitelist(void *h) { filter_free(h); }
-static void reload_whitelist(void *h) { filter_reload(h); }
 static bool monitor_clean = true;	/* false when monitor_stop gave up on its workers */
+static void reload_whitelist(void *h) { filter_reload(h); }
 static void stop_monitor(void *h) { monitor_clean = monitor_stop(h); }
+static void stop_whitelist(void *h)
+{
+	/* the monitor's Whitelist section may still run in a worker that never finished */
+	if (!monitor_clean)
+	{
+		log_warn("whitelist left allocated: monitor clients are still running");
+		return;
+	}
+	filter_free(h);
+}
 static void stop_dns(void *h) { dnsserver_stop(h); }
 static void stop_sni(void *h) { sniproxy_stop(h); }
 
