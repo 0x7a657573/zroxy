@@ -13,6 +13,7 @@
 
 #include <zroxy/log.h>
 #include <zroxy/socks.h>
+#include "test_support.h"
 
 static int failures = 0;
 

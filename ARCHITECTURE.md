@@ -305,12 +305,12 @@ path, then returns `1`.
 | `src/resolver/resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
 | `src/sni/sniclient.c` | SNI connection cap and test entry point | `SNIMAXCONN` live-connection slots (default 1024) |
 | `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |
-| `src/net/net.c` | IPv4 listen/connect, HTTP/TLS host extraction | Protocol-independent socket helpers |
+| `src/net/net.c` | IPv4 listen, HTTP/TLS host extraction | Protocol-independent socket helpers |
 | `src/net/acl.c` | IPv4 CIDR list parse and match | Shared by `DACL` and `SACL`; host-order addresses |
 | `src/net/fdlimit.c` | Open-file limit sizing | Pure sizing functions plus one `setrlimit` call; never fails startup |
-| `src/net/net_io.c` | Exact and deadline-bounded I/O | Shared timeout behavior |
+| `src/net/net_io.c` | Deadline-bounded write and wait helpers | Shared timeout behavior |
 | `src/net/socks5_codec.c` | Sans-IO SOCKS5 client handshake | Owns no fd; shared by the blocking helper, the SNI loop and the DNS loop |
-| `src/net/socks.c` | Blocking SOCKS5 client helper | Drives the codec with deadline-bounded I/O (legacy/test paths) |
+| `tests/support/socks_client.c` | Blocking SOCKS5 client helper | Test-only; drives the codec with deadline-bounded I/O |
 | `src/dns/dnsserver.c` | DNS service socket start/stop | Owns listener sockets and shutdown sequencing |
 | `src/dns/dns_event_loop.c` | Non-blocking DNS state machines | Owns DNS listener, client, upstream, resolver and wake fds; registers them in the shared reactor |
 | `src/dns/dnsproxy.c` | DNS local answers and legacy test helpers | Shared request validation and reply construction |

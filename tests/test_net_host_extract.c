@@ -10,6 +10,7 @@
 #include <zroxy/config.h>
 #include <zroxy/log.h>
 #include <zroxy/net.h>
+#include "test_support.h"
 
 static int failures = 0;
 
