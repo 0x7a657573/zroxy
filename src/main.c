@@ -16,7 +16,7 @@
 #include <zroxy/sniproxy.h>
 #include <zroxy/monitor.h>
 #include <zroxy/filter.h>
-#include <zroxy/dnsproxy.h>
+#include <zroxy/dnsserver.h>
 #include <zroxy/args.h>
 #include <zroxy/priv.h>
 #include <zroxy/fdlimit.h>
