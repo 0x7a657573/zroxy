@@ -6,8 +6,9 @@
  *
  * The connection cap defaults to 1024 and is set once at startup with
  * sni_worker_set_limit. Those slots are connections on the listener event
- * loop, not pthreads. sni_client_handler remains for tests: it
- * drives one connection on the calling thread through the same state machine.
+ * loop, not pthreads. Under SNI_TEST_HOOKS the file also has sni_client_handler,
+ * which drives one connection on the calling thread through the same state
+ * machine.
  */
 #include <stdlib.h>
 #include <pthread.h>
@@ -59,6 +60,7 @@ void sni_worker_release(void)
 	pthread_mutex_unlock(&sni_worker_mu);
 }
 
+#ifdef SNI_TEST_HOOKS
 void *sni_client_handler(void *arg)
 {
 	sniclient_t *client = (sniclient_t *)arg;
@@ -69,3 +71,4 @@ void *sni_client_handler(void *arg)
 	free(client);
 	return NULL;
 }
+#endif /* SNI_TEST_HOOKS */

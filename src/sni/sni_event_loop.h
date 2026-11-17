@@ -16,7 +16,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <netinet/in.h>
+#include <zroxy/sniproxy.h>
+
+#ifdef SNI_TEST_HOOKS
 #include "sniclient.h"
+#endif
 
 /* Same bound the previous handler used for the initial client read. */
 #define SNI_HELLO_CAP 0x2000u
@@ -30,6 +35,7 @@ typedef struct sni_listener sni_listener;
 bool sni_listener_open(const SniServer_t *cfg, sni_listener **out);
 void sni_listener_close(sni_listener *ls);
 
+#ifdef SNI_TEST_HOOKS
 /*
  * Run one already-accepted client to completion on the calling thread.
  * Closes client->connid and stores -1. Does not free client and does not
@@ -38,7 +44,6 @@ void sni_listener_close(sni_listener *ls);
  */
 void sni_connection_run(sniclient_t *client);
 
-#ifdef SNI_TEST_HOOKS
 typedef struct {
 	int read_limit;     /* 0 = full reads, else max bytes per read */
 	int write_limit;    /* 0 = full writes, else max bytes per write */
