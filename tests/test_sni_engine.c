@@ -1923,6 +1923,75 @@ static void test_stall_stays_responsive(void)
 	expect_true(slots_are_clear(), "stall test released slots");
 }
 
+/*
+ * accept() running out of descriptors pauses the listener for a while. The
+ * loop must keep relaying an established connection meanwhile, and the
+ * pending client must be served once accepting resumes.
+ */
+static void test_accept_pause(void)
+{
+	echo_srv echo;
+	sni_listener *ls = NULL;
+	SniServer_t cfg;
+	sni_test_faults faults;
+	uint16_t local = 0;
+	int binder;
+	int a;
+	int b;
+	int rounds = 0;
+	int served = 0;
+	int64_t start;
+	int64_t slowest = 0;
+	uint8_t buf[sizeof(REQ)];
+	expect_true(echo_start(&echo) == 0, "pause echo");
+	binder = listen_loopback(&local);
+	if (binder >= 0)
+		close(binder);
+	fill_listener(&cfg, local, echo.port, 30, NULL, NULL, NULL);
+	expect_true(sni_listener_open(&cfg, &ls), "pause listener");
+	a = connect_local(local, 2000);
+	expect_true(a >= 0 && write_full(a, REQ, sizeof(REQ) - 1) == 0, "open relayed connection");
+	expect_true(a >= 0 && read_full_ms(a, buf, sizeof(REQ) - 1, 2000) == 0, "relay is up");
+	sni_test_reset_counters();
+	memset(&faults, 0, sizeof(faults));
+	faults.fail_accept = 2;
+	sni_test_set_faults(&faults);
+	start = mono_ms();
+	b = connect_local(local, 2000);
+	expect_true(b >= 0 && write_full(b, REQ, sizeof(REQ) - 1) == 0, "queue client while accept fails");
+	while (b >= 0 && a >= 0 && mono_ms() - start < 3000) {
+		int64_t t0 = mono_ms();
+		uint8_t one = 'x';
+		uint8_t back = 0;
+		if (write_full(a, &one, 1) != 0 || read_full_ms(a, &back, 1, 1000) != 0 || back != 'x') {
+			expect_true(false, "relayed connection keeps echoing while accept is paused");
+			break;
+		}
+		if (mono_ms() - t0 > slowest)
+			slowest = mono_ms() - t0;
+		rounds++;
+		if (wait_fd(b, POLLIN, 0) == 0) {
+			served = read_full_ms(b, buf, sizeof(REQ) - 1, 1000) == 0 &&
+				memcmp(buf, REQ, sizeof(REQ) - 1) == 0;
+			break;
+		}
+		usleep(5000);
+	}
+	sni_test_clear_faults();
+	expect_true(served, "queued client is served after accepting resumes");
+	expect_true(mono_ms() - start >= 150, "client waited out two pauses");
+	expect_true(rounds >= 5, "loop kept relaying during the pause");
+	expect_true(slowest < 80, "relay was not blocked by the pause");
+	expect_int((int)sni_test_accept_pauses(), 2, "accept paused once per failure");
+	if (a >= 0)
+		close(a);
+	if (b >= 0)
+		close(b);
+	sni_listener_close(ls);
+	echo_stop(&echo);
+	expect_true(slots_are_clear(), "pause test released slots");
+}
+
 static void test_connection_cap(void)
 {
 	sni_listener *ls = NULL;
@@ -3063,6 +3132,7 @@ int main(void)
 	test_listener_self_exit();
 	test_load_and_threads();
 	test_stall_stays_responsive();
+	test_accept_pause();
 	test_connection_cap();
 	test_stress_cycles();
 	expect_true(slots_are_clear(), "process-wide slots are clear at the end");

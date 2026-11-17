@@ -27,6 +27,9 @@
  * Plan:
  * - sni_listener_open listens, then one joinable thread runs sni_engine_run
  *   until sni_listener_close wakes it.
+ * - accept() running out of descriptors (EMFILE/ENFILE) takes the listen fd out
+ *   of the reactor for SNI_ACCEPT_PAUSE_MS; the loop keeps serving its
+ *   connections and re-arms the listener from its timeout handling.
  * - accept() only allocates a connection and arms it. The 1024 slot cap stays
  *   a connection limit (sni_worker_acquire), not a thread count.
  * - Mutable connection fields are touched only on that event-loop thread.
@@ -49,6 +52,10 @@
 #define SNI_RELAY_BUDGET (256u * 1024u)
 #define SNI_ADDR_MAX 16
 #define SNI_POLL_MAX 4096
+/* How long the listener stays unarmed after accept() runs out of descriptors. */
+#define SNI_ACCEPT_PAUSE_MS 100
+/* The out-of-descriptors error is logged at most this often per listener. */
+#define SNI_ACCEPT_LOG_MS 1000
 
 #ifdef SNI_FORCE_POLL
 #define SNI_USE_POLL true
@@ -175,6 +182,9 @@ struct sni_engine {
 	int wake_r;
 	int wake_w;
 	uint32_t listen_interest;
+	int accept_paused;
+	int64_t accept_resume_at;
+	int64_t accept_log_at;
 	uint32_t wake_interest;
 	int stop;
 	SniServer_t cfg;
@@ -220,6 +230,8 @@ static int g_eintr_connect;
 static int g_eintr_wait;
 static int g_fail_wait;
 static int g_fail_allocs;
+static int g_fail_accept;
+static uint32_t g_accept_pauses;
 static uint32_t g_client_bytes;
 static uint32_t g_max_pending;
 static uint32_t g_eagain;
@@ -268,12 +280,18 @@ static void note_relay_yield(void)
 {
 	__atomic_fetch_add(&g_relay_yields, 1u, __ATOMIC_RELAXED);
 }
+
+static void note_accept_pause(void)
+{
+	__atomic_fetch_add(&g_accept_pauses, 1u, __ATOMIC_RELAXED);
+}
 #else
 static void note_client_read(uint32_t n) { (void)n; }
 static void note_pending(uint32_t n) { (void)n; }
 static void note_eagain(void) { }
 static void note_wait(void) { }
 static void note_relay_yield(void) { }
+static void note_accept_pause(void) { }
 #endif
 
 static bool set_nb_cloexec(int fd)
@@ -317,6 +335,17 @@ static ssize_t io_write(int fd, const void *buf, size_t len)
 #else
 	return write(fd, buf, len);
 #endif
+}
+
+static int io_accept(int fd)
+{
+#ifdef SNI_TEST_HOOKS
+	if (take_one(&g_fail_accept)) {
+		errno = EMFILE;
+		return -1;
+	}
+#endif
+	return accept(fd, NULL, NULL);
 }
 
 static int io_connect(int fd, const struct sockaddr *sa, socklen_t len)
@@ -1263,19 +1292,63 @@ static bool conn_start(sni_engine *e, sni_conn *c)
 	return true;
 }
 
+/*
+ * Out of descriptors: a level-triggered listener would fire again at once, so
+ * take it out of the reactor and let engine_timeout bring it back.
+ */
+static void accept_pause(sni_engine *e)
+{
+	int64_t now = net_mono_ms();
+
+	if (now < 0)
+		return;
+	if (now >= e->accept_log_at) {
+		log_error("server accept() out of file descriptors, pausing accept for %d ms",
+			SNI_ACCEPT_PAUSE_MS);
+		e->accept_log_at = now + SNI_ACCEPT_LOG_MS;
+	}
+	(void)watch(e, e->listen_fd, 0, &e->listen_interest, &e->listen_tag);
+	e->accept_paused = 1;
+	e->accept_resume_at = now + SNI_ACCEPT_PAUSE_MS;
+	note_accept_pause();
+}
+
+static void accept_resume(sni_engine *e)
+{
+	int64_t now;
+
+	if (!e->accept_paused)
+		return;
+	now = net_mono_ms();
+	if (now >= 0 && now < e->accept_resume_at)
+		return;
+	e->accept_paused = 0;
+	if (e->listen_fd < 0)
+		return;
+	if (!watch(e, e->listen_fd, SNI_EV_IN, &e->listen_interest, &e->listen_tag)) {
+		log_error("sni listener re-arm failed: %s", strerror(errno));
+		if (now >= 0) {
+			e->accept_paused = 1;
+			e->accept_resume_at = now + SNI_ACCEPT_PAUSE_MS;
+		}
+	}
+}
+
 static void accept_clients(sni_engine *e)
 {
 	for (;;) {
-		int fd = accept(e->listen_fd, NULL, NULL);
+		int fd = io_accept(e->listen_fd);
 		sni_conn *c;
 		if (fd < 0) {
 			if (errno == EINTR)
 				continue;
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
 				break;
+			if (errno == EMFILE || errno == ENFILE) {
+				accept_pause(e);
+				break;
+			}
 			log_error("server accept() %i: %s", errno, strerror(errno));
-			if (errno == EMFILE || errno == ENFILE)
-				usleep(10000);
 			break;
 		}
 		if (!set_nb_cloexec(fd)) {
@@ -1392,6 +1465,8 @@ static int engine_timeout(sni_engine *e)
 			consider(c->deadline, &best, &have);
 		}
 	}
+	if (e->accept_paused)
+		consider(e->accept_resume_at, &best, &have);
 	if (!have)
 		return -1;
 	if (best <= now)
@@ -1459,6 +1534,7 @@ static void sni_engine_run(sni_engine *e)
 		n = react_wait(e, ready, 64, engine_timeout(e));
 		if (n < 0) {
 			if (errno == EINTR) {
+				accept_resume(e);
 				expire_conns(e);
 				reap(e);
 				continue;
@@ -1468,6 +1544,7 @@ static void sni_engine_run(sni_engine *e)
 		}
 		for (i = 0; i < n; i++)
 			dispatch_one(e, &ready[i]);
+		accept_resume(e);
 		expire_conns(e);
 		reap(e);
 		if (e->listen_fd < 0 && e->head == NULL)
@@ -1775,6 +1852,7 @@ void sni_test_set_faults(const sni_test_faults *faults)
 	__atomic_store_n(&g_eintr_wait, faults->eintr_wait, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_fail_wait, faults->fail_wait, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_fail_allocs, faults->fail_allocs, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_fail_accept, faults->fail_accept, __ATOMIC_RELAXED);
 }
 
 void sni_test_clear_faults(void)
@@ -1789,6 +1867,7 @@ void sni_test_reset_counters(void)
 	__atomic_store_n(&g_eagain, 0u, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_wait_calls, 0u, __ATOMIC_RELAXED);
 	__atomic_store_n(&g_relay_yields, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_accept_pauses, 0u, __ATOMIC_RELAXED);
 }
 
 uint32_t sni_test_client_bytes(void)
@@ -1816,6 +1895,11 @@ void sni_test_set_hello_idle_ms(int ms)
 	if (ms <= 0)
 		ms = SNI_HELLO_IDLE_MS;
 	__atomic_store_n(&g_hello_idle_ms, ms, __ATOMIC_RELAXED);
+}
+
+uint32_t sni_test_accept_pauses(void)
+{
+	return __atomic_load_n(&g_accept_pauses, __ATOMIC_RELAXED);
 }
 
 uint32_t sni_test_relay_yields(void)
