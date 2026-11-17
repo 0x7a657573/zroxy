@@ -19,6 +19,7 @@
 #include <zroxy/dnsproxy.h>
 #include <zroxy/args.h>
 #include <zroxy/priv.h>
+#include <zroxy/fdlimit.h>
 
 static zroxy_t prg_setting = {0};
 
@@ -127,6 +128,27 @@ int main(int argc, const char **argv)
 
 	for (lport_t *p = prg_setting.ports; p; p = p->next)
 		listener_count++;
+	/*
+	 * Raise the open-file limit before any socket is made. A limit that stays
+	 * too low only lowers the SNI cap; it never stops startup.
+	 */
+	if (listener_count > 0)
+	{
+		fdlimit_plan plan = {
+			.sni_conns = prg_setting.snimaxconn,
+			.sni_listeners = (int)listener_count,
+			.dns_enabled = prg_setting.dnsserver != NULL,
+			.dns_upstreams = prg_setting.dnsserver ? prg_setting.dnsserver->upstream_connections : 0,
+			.monitor_enabled = prg_setting.monitorPort != NULL
+		};
+		int cap = prg_setting.snimaxconn;
+		unsigned long soft = fdlimit_apply(&plan, &cap);
+		if (cap < prg_setting.snimaxconn)
+			log_warn("open-file limit %lu serves only %d SNI connections, not the configured %d; raise LimitNOFILE or ulimit -n",
+				soft, cap, prg_setting.snimaxconn);
+		prg_setting.snimaxconn = cap;
+	}
+
 	/* whitelist, monitor, DNS and one entry per SNI listener */
 	services = calloc(listener_count + 3, sizeof(*services));
 	if (!services)
