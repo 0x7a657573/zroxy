@@ -30,6 +30,9 @@
  * - accept() running out of descriptors (EMFILE/ENFILE) takes the listen fd out
  *   of the reactor for SNI_ACCEPT_PAUSE_MS; the loop keeps serving its
  *   connections and re-arms the listener from its timeout handling.
+ * - A full connection cap evicts the loop's own oldest connection that is still
+ *   in HELLO (an intrusive FIFO list, O(1)), or refuses when it has none. A
+ *   connection past HELLO is never evicted.
  * - accept() only allocates a connection and arms it. The 1024 slot cap stays
  *   a connection limit (sni_worker_acquire), not a thread count.
  * - Mutable connection fields are touched only on that event-loop thread.
@@ -103,7 +106,8 @@ enum {
 	SNI_CLOSE_CONNECT,
 	SNI_CLOSE_HANDSHAKE_TIMEOUT,
 	SNI_CLOSE_IDLE_TIMEOUT,
-	SNI_CLOSE_STALL_TIMEOUT
+	SNI_CLOSE_STALL_TIMEOUT,
+	SNI_CLOSE_EVICTED
 };
 
 typedef struct sni_engine sni_engine;
@@ -123,6 +127,10 @@ typedef struct sni_addr {
 
 struct sni_conn {
 	sni_conn *next;
+	/* FIFO of connections still in HELLO, oldest first (see hello_link). */
+	sni_conn *hello_prev;
+	sni_conn *hello_next;
+	int in_hello_list;
 	sni_engine *eng;
 	sni_tag client_tag;
 	sni_tag up_tag;
@@ -189,6 +197,8 @@ struct sni_engine {
 	int stop;
 	SniServer_t cfg;
 	sni_conn *head;
+	sni_conn *hello_head;
+	sni_conn *hello_tail;
 	sni_tag listen_tag;
 	sni_tag wake_tag;
 	sni_tag sink_tag;
@@ -521,6 +531,7 @@ static struct {
 	uint32_t handshake_timeout;
 	uint32_t idle_timeout;
 	uint32_t stall_timeout;
+	uint32_t evicted;
 } g_sni_close;
 
 static void count_close(int reason)
@@ -538,6 +549,7 @@ static void count_close(int reason)
 	case SNI_CLOSE_HANDSHAKE_TIMEOUT: counter = &g_sni_close.handshake_timeout; break;
 	case SNI_CLOSE_IDLE_TIMEOUT: counter = &g_sni_close.idle_timeout; break;
 	case SNI_CLOSE_STALL_TIMEOUT: counter = &g_sni_close.stall_timeout; break;
+	case SNI_CLOSE_EVICTED: counter = &g_sni_close.evicted; break;
 	default: return;
 	}
 	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
@@ -563,7 +575,8 @@ bool sni_stats_json(void *ctx, char **ptr, char *end)
 		"\"ConnectFailures\" : %" PRIu32 ",\n"
 		"\"HandshakeTimeouts\" : %" PRIu32 ",\n"
 		"\"IdleTimeouts\" : %" PRIu32 ",\n"
-		"\"StallTimeouts\" : %" PRIu32,
+		"\"StallTimeouts\" : %" PRIu32 ",\n"
+		"\"Evicted\" : %" PRIu32,
 		sni_worker_limit(),
 		__atomic_load_n(&g_sni_close.relayed, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.refused, __ATOMIC_RELAXED),
@@ -575,11 +588,51 @@ bool sni_stats_json(void *ctx, char **ptr, char *end)
 		__atomic_load_n(&g_sni_close.connect, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.handshake_timeout, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.idle_timeout, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.stall_timeout, __ATOMIC_RELAXED));
+		__atomic_load_n(&g_sni_close.stall_timeout, __ATOMIC_RELAXED),
+		__atomic_load_n(&g_sni_close.evicted, __ATOMIC_RELAXED));
 	if (n < 0 || (size_t)n >= left)
 		return false;
 	*ptr += n;
 	return true;
+}
+
+static void hello_link(sni_engine *e, sni_conn *c)
+{
+	if (c->in_hello_list)
+		return;
+	c->hello_prev = e->hello_tail;
+	c->hello_next = NULL;
+	if (e->hello_tail)
+		e->hello_tail->hello_next = c;
+	else
+		e->hello_head = c;
+	e->hello_tail = c;
+	c->in_hello_list = 1;
+}
+
+static void hello_unlink(sni_engine *e, sni_conn *c)
+{
+	if (!c->in_hello_list)
+		return;
+	if (c->hello_prev)
+		c->hello_prev->hello_next = c->hello_next;
+	else
+		e->hello_head = c->hello_next;
+	if (c->hello_next)
+		c->hello_next->hello_prev = c->hello_prev;
+	else
+		e->hello_tail = c->hello_prev;
+	c->hello_prev = NULL;
+	c->hello_next = NULL;
+	c->in_hello_list = 0;
+}
+
+/* Every move out of HELLO goes through here, so the list holds HELLO only. */
+static void conn_set_state(sni_engine *e, sni_conn *c, int state)
+{
+	if (state != SNI_ST_HELLO)
+		hello_unlink(e, c);
+	c->state = state;
 }
 
 static void conn_kill(sni_engine *e, sni_conn *c, int reason)
@@ -587,6 +640,7 @@ static void conn_kill(sni_engine *e, sni_conn *c, int reason)
 	if (!c || c->dead)
 		return;
 	c->dead = 1;
+	hello_unlink(e, c);
 	if (c->pending_req_id != 0) {
 		sni_resolver_cancel(c->resolve_slot, c->pending_req_id);
 		c->pending_req_id = 0;
@@ -728,7 +782,7 @@ static void enter_relay(sni_engine *e, sni_conn *c)
 		conn_kill(e, c, SNI_CLOSE_NONE);
 		return;
 	}
-	c->state = SNI_ST_RELAY;
+	conn_set_state(e, c, SNI_ST_RELAY);
 	(void)__atomic_fetch_add(&g_sni_close.relayed, 1u, __ATOMIC_RELAXED);
 	if (c->hello_len > SNI_RELAY_CAP) {
 		conn_kill(e, c, SNI_CLOSE_NONE);
@@ -813,7 +867,7 @@ static void socks_pump(sni_engine *e, sni_conn *c)
 
 static void socks_begin(sni_engine *e, sni_conn *c)
 {
-	c->state = SNI_ST_SOCKS;
+	conn_set_state(e, c, SNI_ST_SOCKS);
 	if (!socks5_client_init(&c->socks, c->cfg.Socks->user, c->cfg.Socks->pass, c->host,
 			c->cfg.Port.remote_port)) {
 		conn_kill(e, c, SNI_CLOSE_SOCKS);
@@ -909,7 +963,7 @@ static void try_connect(sni_engine *e, sni_conn *c)
 		if (rc < 0 && (errno == EINPROGRESS || errno == EALREADY)) {
 			c->up_fd = fd;
 			c->up_tag.fd = fd;
-			c->state = SNI_ST_CONNECT;
+			conn_set_state(e, c, SNI_ST_CONNECT);
 			if (!conn_arm(e, c))
 				conn_kill(e, c, SNI_CLOSE_NONE);
 			return;
@@ -968,7 +1022,7 @@ static void submit_resolve(sni_engine *e, sni_conn *c, const char *host, uint16_
 		return;
 	}
 	c->resolve_deadline = now + (int64_t)c->io_ms;
-	c->state = SNI_ST_RESOLVE;
+	conn_set_state(e, c, SNI_ST_RESOLVE);
 	rc = sni_resolver_submit(e->sink, c->index, c->generation, host, port,
 			AF_INET, c->resolve_deadline, &slot, &req);
 	if (rc != SNI_SUBMIT_OK) {
@@ -1285,6 +1339,7 @@ static bool conn_start(sni_engine *e, sni_conn *c)
 {
 	c->next = e->head;
 	e->head = c;
+	hello_link(e, c);
 	if (!conn_arm(e, c)) {
 		conn_kill(e, c, SNI_CLOSE_REFUSED);
 		return false;
@@ -1334,6 +1389,31 @@ static void accept_resume(sni_engine *e)
 	}
 }
 
+/*
+ * The cap is process-wide but a loop can close only its own connections.
+ * Close this loop's oldest connection still in HELLO, which has no hostname,
+ * resolver request or upstream, and report whether one was closed. conn_kill
+ * releases its slot, so the caller can take it right after.
+ */
+static bool evict_oldest_hello(sni_engine *e)
+{
+	sni_conn *victim = e->hello_head;
+
+	if (!victim || victim->dead || victim->state != SNI_ST_HELLO)
+		return false;
+	conn_kill(e, victim, SNI_CLOSE_EVICTED);
+	return true;
+}
+
+static bool take_slot(sni_engine *e)
+{
+	if (sni_worker_acquire())
+		return true;
+	if (!evict_oldest_hello(e))
+		return false;
+	return sni_worker_acquire();
+}
+
 static void accept_clients(sni_engine *e)
 {
 	for (;;) {
@@ -1356,7 +1436,7 @@ static void accept_clients(sni_engine *e)
 			close(fd);
 			continue;
 		}
-		if (!sni_worker_acquire()) {
+		if (!take_slot(e)) {
 			log_error("refusing SNI connection");
 			count_close(SNI_CLOSE_REFUSED);
 			close(fd);

@@ -1992,6 +1992,145 @@ static void test_accept_pause(void)
 	expect_true(slots_are_clear(), "pause test released slots");
 }
 
+static uint32_t sni_counter(const char *name)
+{
+	char buf[1024];
+	char key[48];
+	char *p = buf;
+	char *at;
+	memset(buf, 0, sizeof(buf));
+	if (!sni_stats_json(NULL, &p, buf + sizeof(buf)))
+		return 0;
+	snprintf(key, sizeof(key), "\"%s\" : ", name);
+	at = strstr(buf, key);
+	return at ? (uint32_t)strtoul(at + strlen(key), NULL, 10) : 0;
+}
+
+static int wait_active(statistics_t *st, int target, int timeout_ms)
+{
+	int64_t deadline = mono_ms() + timeout_ms;
+	stat_t snap;
+	do {
+		stats_get(st, &snap);
+		if ((int)snap.ActiveConnection == target)
+			return 0;
+		usleep(5000);
+	} while (mono_ms() < deadline);
+	return -1;
+}
+
+/* Full cap, every slot an idle handshake: the oldest one makes room. */
+static void test_evict_idle_hello(void)
+{
+	enum { CAP = 3 };
+	echo_srv echo;
+	sni_listener *ls = NULL;
+	SniServer_t cfg;
+	statistics_t *st = NULL;
+	uint16_t local = 0;
+	int binder;
+	int idle[CAP];
+	int fresh;
+	int i;
+	uint32_t evicted0;
+	uint32_t refused0;
+	uint8_t sink[8];
+	size_t got = 99;
+	uint8_t back[sizeof(REQ)];
+	expect_true(echo_start(&echo) == 0, "evict echo");
+	binder = listen_loopback(&local);
+	if (binder >= 0)
+		close(binder);
+	stats_init(&st, "sni-evict");
+	fill_listener(&cfg, local, echo.port, 30, st, NULL, NULL);
+	sni_test_set_hello_idle_ms(60000);
+	sni_worker_set_limit(CAP);
+	expect_true(sni_listener_open(&cfg, &ls), "evict listener");
+	for (i = 0; i < CAP; i++) {
+		idle[i] = connect_local(local, 2000);
+		expect_true(idle[i] >= 0 && write(idle[i], "G", 1) == 1, "idle handshake");
+		expect_int(wait_active(st, i + 1, 2000), 0, "handshake counted");
+	}
+	evicted0 = sni_counter("Evicted");
+	refused0 = sni_counter("Refused");
+	fresh = connect_local(local, 2000);
+	expect_true(fresh >= 0 && write_full(fresh, REQ, sizeof(REQ) - 1) == 0, "new client at the cap");
+	expect_true(fresh >= 0 && read_full_ms(fresh, back, sizeof(REQ) - 1, 3000) == 0 &&
+			memcmp(back, REQ, sizeof(REQ) - 1) == 0, "new client is served");
+	expect_true(read_eof_ms(idle[0], sink, sizeof(sink), &got, 3000) == 0 && got == 0,
+			"the oldest handshake was closed");
+	for (i = 1; i < CAP; i++)
+		expect_true(wait_fd(idle[i], POLLIN, 50) != 0, "younger handshakes stay open");
+	expect_int((int)(sni_counter("Evicted") - evicted0), 1, "Evicted counts the closed handshake");
+	expect_int((int)(sni_counter("Refused") - refused0), 0, "eviction is not a refusal");
+	expect_int(wait_active(st, CAP, 2000), 0, "active stays at the cap");
+	for (i = 0; i < CAP; i++)
+		close(idle[i]);
+	close(fresh);
+	expect_int(wait_active(st, 0, 3000), 0, "evict test drained");
+	sni_listener_close(ls);
+	sni_test_set_hello_idle_ms(SNI_HELLO_IDLE_MS);
+	sni_worker_set_limit(SNI_CONN_LIMIT_DEFAULT);
+	echo_stop(&echo);
+	state_drop(st);
+	expect_true(slots_are_clear(), "evict test released slots");
+}
+
+/* Full cap with every connection relaying: nothing is evicted, the new one is refused. */
+static void test_no_evict_when_relaying(void)
+{
+	enum { CAP = 2 };
+	echo_srv echo;
+	sni_listener *ls = NULL;
+	SniServer_t cfg;
+	statistics_t *st = NULL;
+	uint16_t local = 0;
+	int binder;
+	int live[CAP];
+	int extra;
+	int i;
+	uint32_t evicted0;
+	uint32_t refused0;
+	uint8_t buf[sizeof(REQ)];
+	uint8_t sink[8];
+	size_t got = 99;
+	expect_true(echo_start(&echo) == 0, "no-evict echo");
+	binder = listen_loopback(&local);
+	if (binder >= 0)
+		close(binder);
+	stats_init(&st, "sni-noevict");
+	fill_listener(&cfg, local, echo.port, 30, st, NULL, NULL);
+	sni_worker_set_limit(CAP);
+	expect_true(sni_listener_open(&cfg, &ls), "no-evict listener");
+	for (i = 0; i < CAP; i++) {
+		live[i] = connect_local(local, 2000);
+		expect_true(live[i] >= 0 && write_full(live[i], REQ, sizeof(REQ) - 1) == 0, "relay client");
+		expect_true(live[i] >= 0 && read_full_ms(live[i], buf, sizeof(REQ) - 1, 2000) == 0, "relay is up");
+	}
+	expect_int(wait_active(st, CAP, 2000), 0, "cap is full");
+	evicted0 = sni_counter("Evicted");
+	refused0 = sni_counter("Refused");
+	extra = connect_local(local, 2000);
+	expect_true(extra >= 0, "extra client connects");
+	if (extra >= 0) {
+		expect_true(read_eof_ms(extra, sink, sizeof(sink), &got, 3000) == 0 && got == 0, "extra client is refused");
+		close(extra);
+	}
+	expect_int((int)(sni_counter("Refused") - refused0), 1, "Refused counts the extra client");
+	expect_int((int)(sni_counter("Evicted") - evicted0), 0, "relaying connections are not evicted");
+	for (i = 0; i < CAP; i++) {
+		expect_true(write_full(live[i], "y", 1) == 0 && read_full_ms(live[i], buf, 1, 2000) == 0 && buf[0] == 'y',
+				"relays still work");
+		close(live[i]);
+	}
+	expect_int(wait_active(st, 0, 3000), 0, "no-evict test drained");
+	sni_listener_close(ls);
+	sni_worker_set_limit(SNI_CONN_LIMIT_DEFAULT);
+	echo_stop(&echo);
+	state_drop(st);
+	expect_true(slots_are_clear(), "no-evict test released slots");
+}
+
 static void test_connection_cap(void)
 {
 	sni_listener *ls = NULL;
@@ -2001,7 +2140,7 @@ static void test_connection_cap(void)
 	int *fds;
 	int i;
 	int opened = 0;
-	int refused;
+	int extra;
 	int base;
 	struct rlimit rl;
 	stat_t snap;
@@ -2059,19 +2198,31 @@ static void test_connection_cap(void)
 		} while (mono_ms() < deadline);
 	}
 	expect_int(count_threads(), base + 1, "1024 connections did not add threads");
-	refused = connect_local(local, 1000);
-	expect_true(refused >= 0, "refused connect still completes the handshake");
-	if (refused >= 0) {
+	/* Every slot is an idle handshake, so one more client evicts the oldest. */
+	extra = connect_local(local, 1000);
+	expect_true(extra >= 0, "extra connect completes the handshake");
+	if (extra >= 0) {
 		uint8_t sink[8];
 		size_t got = 99;
-		expect_true(read_eof_ms(refused, sink, sizeof(sink), &got, 5000) == 0, "cap refusal closes");
-		expect_true(got == 0, "cap refusal has no payload");
-		close(refused);
+		expect_true(write(extra, "G", 1) == 1, "extra client sends a byte");
+		expect_true(read_eof_ms(fds[0], sink, sizeof(sink), &got, 5000) == 0, "full cap evicts the oldest handshake");
+		expect_true(got == 0, "evicted handshake has no payload");
+	}
+	{
+		int64_t deadline = mono_ms() + 5000;
+		do {
+			stats_get(st, &snap);
+			if (snap.TotalConnection >= 1025)
+				break;
+			usleep(5000);
+		} while (mono_ms() < deadline);
 	}
 	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 1024, "active matches the cap");
 	for (i = 0; i < opened; i++)
 		close(fds[i]);
+	if (extra >= 0)
+		close(extra);
 	{
 		int64_t deadline = mono_ms() + 15000;
 		do {
@@ -2083,7 +2234,7 @@ static void test_connection_cap(void)
 	}
 	stats_get(st, &snap);
 	expect_int((int)snap.ActiveConnection, 0, "cap connections drained");
-	expect_int((int)snap.TotalConnection, 1024, "refused connection was not counted");
+	expect_int((int)snap.TotalConnection, 1025, "the evicting connection was counted");
 	expect_int(count_threads(), base + 1, "threads after draining the cap");
 	sni_listener_close(ls);
 	sni_test_set_hello_idle_ms(SNI_HELLO_IDLE_MS);
@@ -3133,6 +3284,8 @@ int main(void)
 	test_load_and_threads();
 	test_stall_stays_responsive();
 	test_accept_pause();
+	test_evict_idle_hello();
+	test_no_evict_when_relaying();
 	test_connection_cap();
 	test_stress_cycles();
 	expect_true(slots_are_clear(), "process-wide slots are clear at the end");
