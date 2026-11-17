@@ -14,6 +14,9 @@
 #include <zroxy/filter.h>
 #include <zroxy/socks.h>
 
+#define SNI_CONN_LIMIT_DEFAULT 1024
+#define SNI_CONN_LIMIT_MAX 65535
+
 typedef struct
 {
 	char	 bindip[ZROXY_MAX_IP_TEXT];
@@ -57,6 +60,8 @@ bool sni_worker_acquire(void);
 void sni_worker_release(void);
 /* The connection cap shared by every listener. */
 int sni_worker_limit(void);
+/* Set the cap, clamped to 1..SNI_CONN_LIMIT_MAX. Call before listeners start. */
+void sni_worker_set_limit(int limit);
 
 /*
  * stats_extra_fn for the SNI_Server monitor object: appends the connection

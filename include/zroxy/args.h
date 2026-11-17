@@ -30,6 +30,7 @@ typedef struct
 	dnshost_t	*dnsserver;
 	int			snitimeout;
 	int			sniidletimeout;
+	int			snimaxconn;
 	bool		allow_loopback;
 	bool		deny_private;
 	bool		open_proxy;

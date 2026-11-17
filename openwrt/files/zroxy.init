@@ -195,6 +195,7 @@ generate_conf() {
 	zr_opt SOCKSPASSFILE main socks_pass_file
 	zr_opt SNITIMEOUT main snitimeout
 	zr_opt SNIIDLETIMEOUT main sniidletimeout
+	zr_opt SNIMAXCONN main snimaxconn
 	zr_bool ALLOWLOOPBACK main allowloopback
 	zr_bool DENYPRIVATE main denyprivate
 	zr_opt WHITE main white
