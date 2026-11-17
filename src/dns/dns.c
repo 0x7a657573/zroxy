@@ -39,7 +39,7 @@ typedef struct
 typedef struct
 {
   uint8_t *p;
-  uint8_t *end; /* NULL disables the limit; callers that know the size must set it. */
+  uint8_t *end;
 } dns_writer;
 
 static bool reader_u8(dns_reader *r, uint8_t *out)
@@ -61,8 +61,6 @@ static bool reader_u16(dns_reader *r, uint16_t *out)
 
 static bool writer_need(dns_writer *w, size_t n)
 {
-  if (w->end == NULL)
-    return true;
   if (n > (size_t)(w->end - w->p))
     return false;
   return true;
@@ -428,19 +426,6 @@ static bool dns_encode_into(struct Message *msg, dns_writer *w)
     return false;
   if (!encode_resource_records(msg->additionals, w))
     return false;
-  return true;
-}
-
-bool dns_encode_msg(struct Message *msg, uint8_t **buffer)
-{
-  dns_writer w;
-  if (!buffer || !*buffer)
-    return false;
-  w.p = *buffer;
-  w.end = NULL;
-  if (!dns_encode_into(msg, &w))
-    return false;
-  *buffer = w.p;
   return true;
 }
 
