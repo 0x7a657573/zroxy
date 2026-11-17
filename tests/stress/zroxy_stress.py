@@ -329,13 +329,13 @@ def early_close(args, proc, upstream, port, hello, failures):
 
 
 def proxy_timeout(args, lab, hello, failures):
-    """Separate process: the relay timeout is fixed for the life of a zroxy."""
+    """Separate process: the relay idle timeout (-I) is fixed for the life of a zroxy."""
     started = time.monotonic()
     count = min(args.connections, 8)
     upstream = lab.tcp_server(mode="blackhole", read_exact=len(hello), hold_timeout=3.0)
     port = zroxy_lab.free_tcp_port()
     proc = lab.zroxy(
-        ["-l", "3", "-o", "1", "-L", "yes", "-O", "yes", "-p", "127.0.0.1:%s@%s" % (port, upstream.port)],
+        ["-l", "3", "-o", "1", "-I", "1", "-L", "yes", "-O", "yes", "-p", "127.0.0.1:%s@%s" % (port, upstream.port)],
         tcp_ports=[port],
     )
 
@@ -386,17 +386,18 @@ def overload(args, proc, dns_up, ldns, mon_port, limits, failures, anomalies, ba
         time.sleep(0.05)
     if peak > baseline + limits["dns"] + THREAD_SLACK:
         failures.append("DNS event-loop threads exceeded cap: peak %s baseline %s cap %s" % (peak, baseline, limits["dns"]))
-    settle = threads_of(proc.proc.pid)
-    # A request may make one retry, each bounded by the configured DNS timeout.
+    # DNS runs in one event loop, so no thread is created per query. In-flight
+    # queries are dropped at the request deadline (2 x DTIMEOUT, here 2 s with
+    # -t 1); poll the monitor until ActiveConnection drains to 0, with margin.
     deadline = time.monotonic() + 7.0
-    while time.monotonic() < deadline:
-        settle = threads_of(proc.proc.pid)
-        if settle is not None and settle <= baseline + THREAD_SLACK:
-            break
-        time.sleep(0.05)
+    active = None
     try:
-        doc = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"]
-        active = doc.get("DNS_Server", {}).get("ActiveConnection")
+        while True:
+            doc = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"]
+            active = doc.get("DNS_Server", {}).get("ActiveConnection")
+            if not (type(active) is int and active > 0) or time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
         if type(active) is int and active > 0:
             anomalies.append(
                 "DNS ActiveConnection stayed at %s after overloaded queries were dropped or finished"
