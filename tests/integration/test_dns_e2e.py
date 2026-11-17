@@ -24,7 +24,7 @@ def _answer_with(ip):
 
 
 def _start(lab, upstream, ldns, dtimeout="1", socks=None, connections=None,
-           upstream_addr=None, socks_addr=None, cache_size=None):
+           upstream_addr=None, socks_addr=None, cache_size=None, env=None):
     args = [
         "-l", "0",
         "-d", "127.0.0.1:%s" % ldns,
@@ -37,7 +37,7 @@ def _start(lab, upstream, ldns, dtimeout="1", socks=None, connections=None,
         args.extend(["-C", str(connections)])
     if cache_size is not None:
         args.extend(["-e", str(cache_size)])
-    return lab.zroxy(args, udp_ports=[ldns])
+    return lab.zroxy(args, udp_ports=[ldns], env=env)
 
 
 def _expect_exact(ldns, query, timeout):
@@ -203,13 +203,17 @@ def test_dns_bounded_failures():
         proc.check_alive()
 
 
+# The windows depend on the system resolver; RES_OPTIONS caps each lookup.
+RESOLVER_ENV = {"RES_OPTIONS": "timeout:1 attempts:1"}
+
+
 def _expect_resolution_retry(proc, host):
     needle = "dns resolver failed for %s; retrying" % host
-    if not proc.wait_log(needle, 4.0):
+    if not proc.wait_log(needle, 10.0):
         raise AssertionError("resolver failure was not reported for %s\n%s" %
                              (host, proc.log_text()))
     failures = proc.count_log(needle)
-    if not proc.wait_log(needle, 2.5, after=failures):
+    if not proc.wait_log(needle, 6.0, after=failures):
         raise AssertionError("resolver did not retry %s\n%s" % (host, proc.log_text()))
     proc.check_alive()
 
@@ -222,7 +226,7 @@ def test_dns_hostname_resolution_retries():
         upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
         ldns = zroxy_lab.free_udp_port()
         proc = _start(lab, upstream, ldns, dtimeout="1",
-                      upstream_addr="%s:53" % upstream_host)
+                      upstream_addr="%s:53" % upstream_host, env=RESOLVER_ENV)
         _expect_resolution_retry(proc, upstream_host)
         errors = proc.count_log("NO DATA")
         _expect_bounded_failure(proc, ldns,
@@ -233,7 +237,7 @@ def test_dns_hostname_resolution_retries():
         upstream = lab.dns_server(mode="reply", response_fn=_answer_with(UPSTREAM_IP))
         ldns = zroxy_lab.free_udp_port()
         proc = _start(lab, upstream, ldns, dtimeout="1",
-                      socks_addr="%s:1080" % socks_host)
+                      socks_addr="%s:1080" % socks_host, env=RESOLVER_ENV)
         _expect_resolution_retry(proc, socks_host)
         errors = proc.count_log("NO DATA")
         _expect_bounded_failure(proc, ldns,
