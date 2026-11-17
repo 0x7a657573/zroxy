@@ -27,7 +27,7 @@
 #include <zroxy/log.h>
 #include <zroxy/net.h>
 #include "sni_event_loop.h"
-#include "sni_resolver.h"
+#include "resolver.h"
 #include "sniclient.h"
 #include <zroxy/sniproxy.h>
 #include <zroxy/statistics.h>
