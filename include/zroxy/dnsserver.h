@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <zroxy/config.h>
 #include <zroxy/socks.h>
-#include <zroxy/monitor.h>
+#include <zroxy/statistics.h>
 #include <sys/socket.h>
 #include <zroxy/filter.h>
 #include <zroxy/acl.h>
