@@ -31,6 +31,8 @@ typedef struct
 	int			snitimeout;
 	int			sniidletimeout;
 	int			snimaxconn;
+	zroxy_cidr_t *sacl;
+	size_t		sacl_count;
 	bool		allow_loopback;
 	bool		deny_private;
 	bool		open_proxy;
@@ -46,6 +48,7 @@ bool args_validate(zroxy_t *pgp);
 void args_print_usage(void);
 void args_free_ports(zroxy_t *ptr);
 void args_free_dns(zroxy_t *ptr);
+void args_free_sacl(zroxy_t *ptr);
 void args_free_socks(zroxy_t *ptr);
 void args_free_monitor_token(zroxy_t *ptr);
 void args_scrub_argv(void);

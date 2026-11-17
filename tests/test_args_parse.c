@@ -62,6 +62,7 @@ static void free_settings(zroxy_t *cfg)
 {
     args_free_ports(cfg);
     args_free_dns(cfg);
+    args_free_sacl(cfg);
     if (cfg->socks)
     {
         free(cfg->socks->host);
@@ -766,6 +767,65 @@ static void test_sni_max_connections(void)
         close(fd);
         expect_true(args_parse_config(&file_cfg, template_path), "config SNIMAXCONN parses");
         expect_int(file_cfg.snimaxconn, 2000, "config SNIMAXCONN value");
+        unlink(template_path);
+        free_settings(&file_cfg);
+    }
+}
+
+static void test_sni_acl(void)
+{
+    zroxy_t cfg = {0};
+    char a0[] = "zroxy";
+    char a1[] = "--sacl";
+    char a2[] = "10.0.0.0/8, 192.168.1.0/24";
+    const char *argv[] = {a0, a1, a2};
+
+    reset_getopt();
+    expect_true(args_init(&cfg, 3, argv), "SACL parses");
+    expect_int((int)cfg.sacl_count, 2, "SACL entry count");
+    if (cfg.sacl_count == 2)
+    {
+        expect_true(acl_allows(cfg.sacl, cfg.sacl_count, 0x0a010203u), "SACL allows 10.1.2.3");
+        expect_true(acl_allows(cfg.sacl, cfg.sacl_count, 0xc0a80105u), "SACL allows 192.168.1.5");
+        expect_true(!acl_allows(cfg.sacl, cfg.sacl_count, 0xc0a80205u), "SACL denies 192.168.2.5");
+    }
+    free_settings(&cfg);
+
+    {
+        zroxy_t d = {0};
+        char l1[] = "-l";
+        char l2[] = "2";
+        const char *dargv[] = {a0, l1, l2};
+        reset_getopt();
+        expect_true(args_init(&d, 3, dargv), "defaults parse for SACL");
+        expect_true(d.sacl == NULL && d.sacl_count == 0, "SACL is unset by default");
+        free_settings(&d);
+    }
+
+    {
+        zroxy_t invalid = {0};
+        char b1[] = "-N";
+        char b2[] = "10.0.0.0";
+        const char *bad_argv[] = {a0, b1, b2};
+        reset_getopt();
+        expect_true(!args_init(&invalid, 3, bad_argv), "SACL without a prefix rejects");
+        free_settings(&invalid);
+    }
+
+    {
+        zroxy_t file_cfg = {0};
+        char template_path[] = "/tmp/zroxy_args_test_XXXXXX";
+        int fd = mkstemp(template_path);
+        if (fd < 0)
+        {
+            fprintf(stderr, "FAIL: mkstemp failed: %s\n", strerror(errno));
+            failures++;
+            return;
+        }
+        write_all_or_fail(fd, "SACL = 127.0.0.0/8\n");
+        close(fd);
+        expect_true(args_parse_config(&file_cfg, template_path), "config SACL parses");
+        expect_int((int)file_cfg.sacl_count, 1, "config SACL entry count");
         unlink(template_path);
         free_settings(&file_cfg);
     }
@@ -1973,6 +2033,7 @@ int main(void)
     test_dns_connection_limit();
     test_sni_idle_timeout();
     test_sni_max_connections();
+    test_sni_acl();
     test_dns_cache_and_ttl_ranges();
     test_config_rejects_blank_value();
     test_config_minimal_cleanup_safe();

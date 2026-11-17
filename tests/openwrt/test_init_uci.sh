@@ -126,7 +126,7 @@ CUR=main
 opt white /etc/zroxy/whitelist.txt; opt openproxy 0; opt allowloopback yes
 opt denyprivate 1; opt socks user@127.0.0.1:1080
 opt socks_pass_file /etc/zroxy/socks.pass; opt sniidletimeout 120
-opt snimaxconn 4096
+opt snimaxconn 4096; lst sacl 192.168.1.0/24; lst sacl 10.0.0.0/8
 opt user zroxy; opt group nogroup
 lst listen 192.168.1.1:8443@443,8080@80
 run_ok lan_whitelist_socks "LOG = 2
@@ -139,6 +139,7 @@ SOCKSPASSFILE = /etc/zroxy/socks.pass
 SNITIMEOUT = 30
 SNIIDLETIMEOUT = 120
 SNIMAXCONN = 4096
+SACL = 192.168.1.0/24,10.0.0.0/8
 ALLOWLOOPBACK = yes
 DENYPRIVATE = yes
 WHITE = /etc/zroxy/whitelist.txt

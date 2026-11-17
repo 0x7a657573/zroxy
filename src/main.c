@@ -231,6 +231,8 @@ int main(int argc, const char **argv)
 	Xconf.sniidletimeout = prg_setting.sniidletimeout;
 	Xconf.allow_loopback = prg_setting.allow_loopback;
 	Xconf.deny_private = prg_setting.deny_private;
+	Xconf.acl = prg_setting.sacl;
+	Xconf.acl_count = prg_setting.sacl_count;
 	/*if Set Socks proxy*/
 	if(prg_setting.socks)
 	{
@@ -278,6 +280,7 @@ out:
 	args_free_ports(&prg_setting);
 	args_free_dns(&prg_setting);
 	args_free_socks(&prg_setting);
+	args_free_sacl(&prg_setting);
 	args_free_monitor_token(&prg_setting);
 	free(prg_setting.run_user);
 	free(prg_setting.run_group);

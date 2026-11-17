@@ -9,7 +9,9 @@
 #define SNIPROXY_H_
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <zroxy/config.h>
+#include <zroxy/acl.h>
 #include <zroxy/statistics.h>
 #include <zroxy/filter.h>
 #include <zroxy/socks.h>
@@ -40,6 +42,9 @@ typedef struct
 	bool		 allow_loopback;
 	/* Refuse resolved private addresses (default off). */
 	bool		 deny_private;
+	/* Client networks allowed to connect; owned by the caller. No list allows all. */
+	const zroxy_cidr_t *acl;
+	size_t		 acl_count;
 }SniServer_t;
 
 typedef struct

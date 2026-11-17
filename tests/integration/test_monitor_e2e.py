@@ -66,6 +66,7 @@ SNI_CLOSE_KEYS = (
     "IdleTimeouts",
     "StallTimeouts",
     "Evicted",
+    "AclDenied",
 )
 
 

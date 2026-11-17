@@ -101,6 +101,7 @@ UCI options and the zroxy keys they write:
 | --- | --- | --- |
 | `main` | `enabled`, `jail` | service control only |
 | `main` | `list listen` | `PORT` (one line each) |
+| `main` | `list sacl` | `SACL` (joined with commas) |
 | `main` | `white`, `openproxy`, `allowloopback`, `denyprivate` | `WHITE`, `OPENPROXY`, `ALLOWLOOPBACK`, `DENYPRIVATE` |
 | `main` | `socks`, `socks_pass_file` | `SOCKS`, `SOCKSPASSFILE` |
 | `main` | `snitimeout`, `sniidletimeout`, `snimaxconn` | `SNITIMEOUT`, `SNIIDLETIMEOUT`, `SNIMAXCONN` |
