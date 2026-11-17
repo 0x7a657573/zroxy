@@ -23,8 +23,6 @@ typedef struct
 	sockshost_t	 *Socks;
 	statistics_t *sta;
 	filter_t	 *wlist;
-	bool UserInternalDNS;
-	char DNSServer[20];
 	int			 snitimeout;
 	/* Relay idle limit in seconds; 0 falls back to snitimeout. */
 	int			 sniidletimeout;
@@ -36,12 +34,6 @@ typedef struct
 	const zroxy_cidr_t *acl;
 	size_t		 acl_count;
 }SniServer_t;
-
-typedef struct
-{
-	SniServer_t SniConfig;
-	int			sockfd;
-}server_t;
 
 
 
