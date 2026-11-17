@@ -2,7 +2,7 @@
 #define DNS_EVENT_LOOP_H_
 
 #include <stdbool.h>
-#include <zroxy/dnsproxy.h>
+#include "dns_internal.h"
 
 /* The loop owns all DNS sockets until dns_event_loop_stop joins it. */
 bool dns_event_loop_start(dnsserver_t *dns);

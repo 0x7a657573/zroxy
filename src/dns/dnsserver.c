@@ -8,7 +8,7 @@
 
 #include <zroxy/log.h>
 #include <stdlib.h>
-#include <zroxy/dnsproxy.h>
+#include "dns_internal.h"
 #include "dns_event_loop.h"
 
 struct dnsserver *dnsserver_start(dnshost_t *conf)

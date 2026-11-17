@@ -8,7 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <zroxy/dnsproxy.h>
+#include "dns_internal.h"
 #include <pwd.h>
 #include <grp.h>
 
