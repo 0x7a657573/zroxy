@@ -13,8 +13,8 @@ sni_listener *sniproxy_start(SniServer_t *Sni)
 	sni_listener *ls = NULL;
 
 	if (Sni->Socks && Sni->Socks->host && Sni->Socks->host[0] != '\0') {
-		if (!sni_resolver_prime_socks(Sni->Socks->host, Sni->Socks->port,
-				SNI_INFRA_STARTUP_MS))
+		if (!resolver_prime_socks(Sni->Socks->host, Sni->Socks->port,
+				RESOLVER_INFRA_STARTUP_MS))
 			return NULL;
 	}
 

@@ -23,10 +23,10 @@ static filter_t *whitelist;
 /* The engine's steps after a host was extracted. */
 static void after_extract(const char *raw)
 {
-	char norm[SNI_RESOLVER_HOST_MAX + 1];
+	char norm[RESOLVER_HOST_MAX + 1];
 	size_t n;
 
-	if (!sni_resolver_normalize(raw, norm, sizeof(norm)))
+	if (!resolver_normalize(raw, norm, sizeof(norm)))
 		return;
 	n = strlen(norm);
 	if (n == 0 || n >= ZROXY_MAX_HOSTNAME)
