@@ -174,7 +174,7 @@ use the key names in the last column.
 | `-a`, `--monitortimeout` | seconds | Incomplete monitor-header timeout | `MONITORTIMEOUT` |
 | `-o`, `--snitimeout` | seconds | SNI handshake, connect, and write-stall timeout | `SNITIMEOUT` |
 | `-I`, `--sniidletimeout` | `1..86400` | Close a relay with no traffic after this many seconds (default 300) | `SNIIDLETIMEOUT` |
-| `-n`, `--snimaxconn` | `1..65535` | Maximum concurrent SNI connections across all listeners (default 1024); each uses two descriptors | `SNIMAXCONN` |
+| `-n`, `--snimaxconn` | `1..65535` | Maximum concurrent SNI connections across all listeners (default 1024); each uses two descriptors, see [SNI connection limits](#sni-connection-limits) | `SNIMAXCONN` |
 | `-N`, `--sacl` | `CIDR[,CIDR...]` | IPv4 networks allowed to use the SNI listeners; other clients are closed at once. Unset allows everyone | `SACL` |
 | `-L`, `--allowloopback` | `yes`/`no` | Let names from clients resolve to loopback (127.0.0.0/8, `::1`) upstreams; default `no`, for tests and local backends only | `ALLOWLOOPBACK` |
 | `-P`, `--denyprivate` | `yes`/`no` | Also refuse names that resolve to private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); default `no` | `DENYPRIVATE` |
@@ -304,6 +304,48 @@ example.com
 api-?.example.org
 ```
 
+### SNI connection limits
+
+`SNIMAXCONN` (default 1024, at most 65535) caps the live SNI connections of
+all listeners together. Each connection holds two descriptors, a client and an
+upstream, so zroxy sizes the process open-file limit at startup: it raises the
+soft `RLIMIT_NOFILE` toward `2 x SNIMAXCONN` plus the DNS, monitor and listener
+descriptors it needs, never above the hard limit. If the limit is still too low
+zroxy does not fail. It lowers the cap to what the limit can serve, logs a
+warning that names both numbers, and reports the lowered cap as
+`ConnectionLimit` in the monitor. The sample systemd unit sets
+`LimitNOFILE=65536` and the OpenWrt init script sets the same procd limit.
+
+When the cap is full, a new client does not wait behind silent ones: the
+listener closes its own oldest connection that is still reading its hello
+(no hostname yet) and accepts the new one, counted as `Evicted`. Connections
+that are resolving, connecting, negotiating SOCKS or relaying are never
+evicted; if the listener has no handshake to evict, the new client is refused
+(`Refused`). If `accept` runs out of descriptors, the listener stops accepting
+for 100 ms while its established connections keep relaying.
+
+`SACL` (`--sacl`) takes the same IPv4 CIDR list as `DACL`. A client outside the
+list is closed right after accept and counted as `AclDenied`. With no `SACL`,
+every client is allowed.
+
+zroxy has no per-source-address connection limit: use the firewall. This
+nftables rule rejects a new connection to the SNI ports when its source
+already has 64 (adjust the ports and the number; not tested in this tree):
+
+```text
+table inet zroxy_limits {
+    chain input {
+        type filter hook input priority 0; policy accept;
+        tcp dport { 443, 8443 } ct state new \
+            meter sni_per_source { ip saddr ct count over 64 } \
+            reject with tcp reset
+    }
+}
+```
+
+On OpenWrt, fw4 uses nftables, so the same rule can go in a
+`/usr/share/nftables.d/table-post/` snippet or a custom `nftables` include.
+
 ### Signals
 
 | Signal | Effect |
@@ -405,9 +447,9 @@ ends by EOF or reset from either side is counted under none of them.
 
 | Key | Meaning |
 | --- | --- |
-| `ConnectionLimit` | Maximum simultaneous connections (1024, shared by all listeners) |
+| `ConnectionLimit` | Maximum simultaneous connections shared by all listeners: `SNIMAXCONN`, lowered at startup if the open-file limit is too small |
 | `Relayed` | Connections that reached the relay: upstream connected, and SOCKS5 done if configured |
-| `Refused` | Rejected at accept: the cap was reached or an allocation failed |
+| `Refused` | Rejected at accept: the cap was reached with no handshake to evict, or an allocation failed |
 | `NoHostname` | No usable SNI or HTTP `Host`: the client left first, malformed or oversized hello, an IP literal |
 | `Blocked` | Hostname rejected by the whitelist |
 | `UnsafeDestination` | Resolved only to rejected addresses (loopback, link-local, ...; see `ALLOWLOOPBACK` and `DENYPRIVATE`) |
@@ -417,6 +459,8 @@ ends by EOF or reset from either side is counted under none of them.
 | `HandshakeTimeouts` | `SNITIMEOUT` expired before the relay started (hello, resolve, connect, SOCKS) |
 | `IdleTimeouts` | `SNIIDLETIMEOUT` expired on an established relay |
 | `StallTimeouts` | An established relay could not write for `SNITIMEOUT` |
+| `Evicted` | A handshake still waiting for its hostname was closed to make room at the cap |
+| `AclDenied` | Client outside `SACL`, closed right after accept (not counted as a connection) |
 
 `DNS_Server` and `SNI_Server` each carry `UpTime`, `MaxConnection`,
 `ActiveConnection`, `TotalConnection`, `TotalRx`, and `TotalTx`. The DNS
@@ -603,6 +647,7 @@ The default suite includes unit, process, and loopback integration tests:
 - `dns_codec`
 - `dns_cache`
 - `acl`
+- `fdlimit`
 - `dns_rate`
 - `dns_throttle`
 - `args_parse`
@@ -714,7 +759,7 @@ are connection objects on that loop, not one pthread per client. Linux uses
 
 Current important bounds include:
 
-- up to 1024 concurrent SNI connections;
+- up to `SNIMAXCONN` concurrent SNI connections (default 1024);
 - fixed 8 KiB buffers for the initial data and each relay direction;
 - a process-wide resolver pool with 4 threads and 128 resolver slots;
 - up to 32 monitor workers;
@@ -731,7 +776,7 @@ loopback or private network, read [`SECURITY.md`](SECURITY.md).
 
 In particular:
 
-- SNI listeners do not authenticate clients.
+- SNI listeners do not authenticate clients; `SACL` limits them by source network.
 - The monitor is local by default, but a token is required when it is exposed
   to a broader network.
 - The whitelist is not a universal default-deny firewall for every protocol.
