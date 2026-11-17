@@ -170,7 +170,6 @@ struct Message
 */
 /*decode dns message*/
 bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size);
-bool dns_encode_msg(struct Message *msg, uint8_t **buffer);
 /* Encode into buffer[0, capacity). *written is the byte count on success. */
 bool dns_encode_msg_n(struct Message *msg, uint8_t *buffer, size_t capacity, size_t *written);
 

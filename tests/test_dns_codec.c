@@ -85,13 +85,13 @@ static void test_transaction_id_preserved_on_encode(void)
 {
     struct Message msg = {0};
     uint8_t out[512] = {0};
-    uint8_t *p = out;
+    size_t written = 0;
     bool decoded = dns_decode_msg(&msg, k_query_example_com, (int)sizeof(k_query_example_com));
 
     expect_true(decoded, "decode before re-encode");
     if (decoded)
     {
-        bool encoded = dns_encode_msg(&msg, &p);
+        bool encoded = dns_encode_msg_n(&msg, out, sizeof(out), &written);
         expect_true(encoded, "re-encode decoded query");
         if (encoded)
         {
@@ -154,7 +154,7 @@ static void test_encode_local_a_response(void)
     struct ResourceRecord a = {0};
     struct Message msg = {0};
     uint8_t out[512] = {0};
-    uint8_t *p = out;
+    size_t written = 0;
 
     q.qName = "example.com";
     q.qType = A_Resource_RecordType;
@@ -182,7 +182,7 @@ static void test_encode_local_a_response(void)
     msg.questions = &q;
     msg.answers = &a;
 
-    expect_true(dns_encode_msg(&msg, &p), "encode local A response");
+    expect_true(dns_encode_msg_n(&msg, out, sizeof(out), &written), "encode local A response");
 
     expect_u8(out[0], 0x12, "response id high byte");
     expect_u8(out[1], 0x34, "response id low byte");
@@ -265,7 +265,7 @@ static void test_encode_dns_flags(void)
     struct Question q = {0};
     struct Message msg = {0};
     uint8_t out[512] = {0};
-    uint8_t *p = out;
+    size_t written = 0;
 
     q.qName = "example.com";
     q.qType = A_Resource_RecordType;
@@ -282,7 +282,7 @@ static void test_encode_dns_flags(void)
     msg.qdCount = 1;
     msg.questions = &q;
 
-    expect_true(dns_encode_msg(&msg, &p), "encode dns flags");
+    expect_true(dns_encode_msg_n(&msg, out, sizeof(out), &written), "encode dns flags");
     expect_u8(out[2], 0x85, "flags high byte");
     expect_u8(out[3], 0x80, "flags low byte");
 }
