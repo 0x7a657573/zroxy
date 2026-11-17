@@ -16,7 +16,7 @@ The main implementation areas are:
 - `src/dns/` — local UDP/TCP DNS service and upstream TCP forwarding;
 - `src/stats/` — counters and the HTTP JSON monitor;
 - `src/net/` — sockets, bounded I/O, hostname extraction, the SOCKS5
-  client codec and blocking helper, the CIDR ACL, and open-file limit sizing;
+  client codec, the CIDR ACL, and open-file limit sizing;
 - `src/filter/` — whitelist loading, matching, and reload;
 - `src/log/` — logging and log synchronization.
 
@@ -303,13 +303,13 @@ path, then returns `1`.
 | `src/sni/sni_event_loop.h` | Event-loop API and test hooks (private) | Joinable listener: open/close |
 | `src/resolver/resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
 | `src/resolver/resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
-| `src/sni/sniclient.c` | SNI connection cap and test entry point | `SNIMAXCONN` live-connection slots (default 1024) |
+| `src/sni/sni_conn_limit.c` | Process-wide SNI connection cap | `SNIMAXCONN` live-connection slots (default 1024) |
 | `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |
 | `src/net/net.c` | IPv4 listen, HTTP/TLS host extraction | Protocol-independent socket helpers |
 | `src/net/acl.c` | IPv4 CIDR list parse and match | Shared by `DACL` and `SACL`; host-order addresses |
 | `src/net/fdlimit.c` | Open-file limit sizing | Pure sizing functions plus one `setrlimit` call; never fails startup |
 | `src/net/net_io.c` | Deadline-bounded write and wait helpers | Shared timeout behavior |
-| `src/net/socks5_codec.c` | Sans-IO SOCKS5 client handshake | Owns no fd; shared by the blocking helper, the SNI loop and the DNS loop |
+| `src/net/socks5_codec.c` | Sans-IO SOCKS5 client handshake | Owns no fd; shared by the test SOCKS client, the SNI loop and the DNS loop |
 | `tests/support/socks_client.c` | Blocking SOCKS5 client helper | Test-only; drives the codec with deadline-bounded I/O |
 | `src/dns/dnsserver.c` | DNS service socket start/stop | Owns listener sockets and shutdown sequencing |
 | `src/dns/dns_event_loop.c` | Non-blocking DNS state machines | Owns DNS listener, client, upstream, resolver and wake fds; registers them in the shared reactor |
@@ -372,8 +372,8 @@ flowchart TB
 - After startup, the SNI event-loop thread owns its listening socket, wake pipe,
   resolver completion pipe, accepted client sockets, and upstream sockets.
 - SNI connection objects are allocated and freed by the same event-loop thread.
-- `socks5_connect` owns the descriptor it creates during its operation. Failure
-  paths close it and store `-1`.
+- The test-only `socks5_connect` (`tests/support`) owns the descriptor it
+  creates during its operation. Failure paths close it and store `-1`.
 - The DNS service stores aliases to the configuration's SOCKS and whitelist
   objects. Its `localdns_free` function does not free those aliases.
 - Monitor workers close their client descriptor exactly once and release their
@@ -465,14 +465,14 @@ flowchart TD
 The cap (`SNIMAXCONN`, default 1024) is a limit on live SNI connection objects,
 not a number of threads. `main` lowers it at startup if the open-file limit
 cannot serve two descriptors per connection (`fdlimit_apply`), and
-`sni_worker_limit` returns that effective value, which the monitor reports.
+`sni_conn_limit` returns that effective value, which the monitor reports.
 
 `SACL` is checked right after `accept`, before a slot is taken: a client
 outside the list is closed and counted as `AclDenied`. With no list every
 client is allowed.
 
 The cap is process-wide but a loop can close only its own connections. When
-`sni_worker_acquire` fails, the accepting loop takes the head of its FIFO of
+`sni_conn_acquire` fails, the accepting loop takes the head of its FIFO of
 connections still in `HELLO` (linked when a connection starts, unlinked in
 `conn_set_state` when it leaves `HELLO` and in `conn_kill`), closes it with the
 `Evicted` reason, which releases its slot, and acquires again. A connection in
@@ -1011,7 +1011,7 @@ Current important bounds are:
 
 | Resource | Bound | Enforcement point |
 | --- | ---: | --- |
-| SNI live connections | 1024 default, configurable 1..65535 (`SNIMAXCONN`), lowered to fit `RLIMIT_NOFILE` | `sni_worker_acquire` |
+| SNI live connections | 1024 default, configurable 1..65535 (`SNIMAXCONN`), lowered to fit `RLIMIT_NOFILE` | `sni_conn_acquire` |
 | Descriptors per SNI connection | 2 | `fdlimit_needed` |
 | SNI initial buffer | 8192 bytes | `SNI_HELLO_CAP` |
 | SNI client-to-upstream relay buffer | 8192 bytes | `SNI_RELAY_CAP` |

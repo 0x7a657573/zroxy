@@ -677,7 +677,7 @@ seed corpus in `tests/fuzz/corpus/<name>/`:
 | --- | --- |
 | `sni_host` | TLS SNI and HTTP Host extraction, then `resolver_normalize` and the whitelist match |
 | `dns` | DNS message decode and encode, error, truncate, cache key, TTL, age and reply-match helpers |
-| `socks` | SOCKS5 replies, read by `socks5_connect` from a loopback stand-in server |
+| `socks` | SOCKS5 server replies fed to the sans-IO client codec (`socks5_codec.c`), for every offered authentication and request form |
 | `monitor_request` | monitor request line, end of header and Bearer token checks |
 | `config` | config-file parser (`args.c`) and whitelist file parser and matcher |
 
