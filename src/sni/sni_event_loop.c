@@ -34,7 +34,7 @@
  *   in HELLO (an intrusive FIFO list, O(1)), or refuses when it has none. A
  *   connection past HELLO is never evicted.
  * - accept() only allocates a connection and arms it. The 1024 slot cap stays
- *   a connection limit (sni_worker_acquire), not a thread count.
+ *   a connection limit (sni_conn_acquire), not a thread count.
  * - Mutable connection fields are touched only on that event-loop thread.
  * - HELLO reads until net_get_host, overflow, EOF, or the old hello deadline
  *   (absolute net_timeout_ms plus a 5s gap with no bytes).
@@ -47,7 +47,7 @@
  *   its buffer is full, and shutdown(SHUT_WR) after a peer EOF is flushed.
  *   One pump moves at most SNI_RELAY_BUDGET bytes, then level-triggered
  *   readiness brings the connection back on a later wait.
- * - stats_close_connection and sni_worker_release run once, from conn_kill.
+ * - stats_close_connection and sni_conn_release run once, from conn_kill.
  */
 
 #define SNI_SOCKS_CAP 600u
@@ -583,7 +583,7 @@ bool sni_stats_json(void *ctx, char **ptr, char *end)
 		"\"StallTimeouts\" : %" PRIu32 ",\n"
 		"\"Evicted\" : %" PRIu32 ",\n"
 		"\"AclDenied\" : %" PRIu32,
-		sni_worker_limit(),
+		sni_conn_limit(),
 		__atomic_load_n(&g_sni_close.relayed, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.refused, __ATOMIC_RELAXED),
 		__atomic_load_n(&g_sni_close.no_hostname, __ATOMIC_RELAXED),
@@ -661,7 +661,7 @@ static void conn_kill(sni_engine *e, sni_conn *c, int reason)
 	if (c->close_stats)
 		stats_close_connection(c->cfg.sta, c->rx, c->tx);
 	if (c->slot_held) {
-		sni_worker_release();
+		sni_conn_release();
 		c->slot_held = 0;
 	}
 }
@@ -1409,11 +1409,11 @@ static bool evict_oldest_hello(sni_engine *e)
 
 static bool take_slot(sni_engine *e)
 {
-	if (sni_worker_acquire())
+	if (sni_conn_acquire())
 		return true;
 	if (!evict_oldest_hello(e))
 		return false;
-	return sni_worker_acquire();
+	return sni_conn_acquire();
 }
 
 /* No ACL allows every client. A list matches IPv4 peers only; the listeners are IPv4. */
@@ -1467,7 +1467,7 @@ static void accept_clients(sni_engine *e)
 		if (!c) {
 			log_error("malloc failed for sni connection");
 			count_close(SNI_CLOSE_REFUSED);
-			sni_worker_release();
+			sni_conn_release();
 			close(fd);
 			continue;
 		}

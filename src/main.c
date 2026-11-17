@@ -241,7 +241,7 @@ int main(int argc, const char **argv)
 		}
 	}
 
-	sni_worker_set_limit(prg_setting.snimaxconn);
+	sni_conn_set_limit(prg_setting.snimaxconn);
 	memset(&Xconf, 0, sizeof(Xconf));
 	Xconf.sta = SniStat;
 	Xconf.wlist = whitelist;

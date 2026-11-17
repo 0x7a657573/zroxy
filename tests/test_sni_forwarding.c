@@ -333,7 +333,7 @@ static void test_stalled_upstream_releases_worker(void)
     client->SniConfig.Port.remote_port = ntohs(addr.sin_port);
     client->SniConfig.snitimeout = 1;
     client->SniConfig.allow_loopback = true;
-    expect_true(sni_worker_acquire(), "reserve one SNI worker");
+    expect_true(sni_conn_acquire(), "reserve one SNI connection slot");
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = on_sni_alarm;
     sigemptyset(&sa.sa_mask);
@@ -342,7 +342,7 @@ static void test_stalled_upstream_releases_worker(void)
     if (pthread_create(&sni_tid, NULL, sni_client_handler, client) != 0)
     {
         alarm(0);
-        sni_worker_release();
+        sni_conn_release();
         expect_true(false, "start stalled handler");
         close(pair[0]);
         close(pair[1]);
@@ -360,38 +360,38 @@ static void test_stalled_upstream_releases_worker(void)
     close(listen_fd);
     pthread_join(up_tid, NULL);
 
-    while (sni_worker_acquire())
+    while (sni_conn_acquire())
         n++;
     expect_true(n == 1024, "stalled SNI worker released its slot");
     for (i = 0; i < n; i++)
-        sni_worker_release();
+        sni_conn_release();
 }
 
-static void test_worker_limit_is_configurable(void)
+static void test_conn_limit_is_configurable(void)
 {
     int n = 0;
     int i;
 
-    expect_true(sni_worker_limit() == SNI_CONN_LIMIT_DEFAULT, "worker limit defaults to 1024");
-    sni_worker_set_limit(3);
-    expect_true(sni_worker_limit() == 3, "worker limit follows the setting");
-    while (sni_worker_acquire())
+    expect_true(sni_conn_limit() == SNI_CONN_LIMIT_DEFAULT, "connection limit defaults to 1024");
+    sni_conn_set_limit(3);
+    expect_true(sni_conn_limit() == 3, "connection limit follows the setting");
+    while (sni_conn_acquire())
         n++;
     expect_true(n == 3, "only the configured number of slots can be taken");
     for (i = 0; i < n; i++)
-        sni_worker_release();
-    sni_worker_set_limit(0);
-    expect_true(sni_worker_limit() == 1, "worker limit is clamped up to 1");
-    sni_worker_set_limit(1 << 20);
-    expect_true(sni_worker_limit() == SNI_CONN_LIMIT_MAX, "worker limit is clamped to the maximum");
-    sni_worker_set_limit(SNI_CONN_LIMIT_DEFAULT);
+        sni_conn_release();
+    sni_conn_set_limit(0);
+    expect_true(sni_conn_limit() == 1, "connection limit is clamped up to 1");
+    sni_conn_set_limit(1 << 20);
+    expect_true(sni_conn_limit() == SNI_CONN_LIMIT_MAX, "connection limit is clamped to the maximum");
+    sni_conn_set_limit(SNI_CONN_LIMIT_DEFAULT);
 }
 
 int main(void)
 {
     log_set_quiet(1);
 
-    test_worker_limit_is_configurable();
+    test_conn_limit_is_configurable();
     if (!can_run_loopback_socket_test())
     {
         return 0;

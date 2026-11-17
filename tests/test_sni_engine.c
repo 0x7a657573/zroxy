@@ -639,10 +639,10 @@ static int slots_are_clear(void)
 {
 	int n = 0;
 	int i;
-	while (sni_worker_acquire())
+	while (sni_conn_acquire())
 		n++;
 	for (i = 0; i < n; i++)
-		sni_worker_release();
+		sni_conn_release();
 	return n == 1024;
 }
 
@@ -2091,7 +2091,7 @@ static void test_evict_idle_hello(void)
 	stats_init(&st, "sni-evict");
 	fill_listener(&cfg, local, echo.port, 30, st, NULL, NULL);
 	sni_test_set_hello_idle_ms(60000);
-	sni_worker_set_limit(CAP);
+	sni_conn_set_limit(CAP);
 	expect_true(sni_listener_open(&cfg, &ls), "evict listener");
 	for (i = 0; i < CAP; i++) {
 		idle[i] = connect_local(local, 2000);
@@ -2117,7 +2117,7 @@ static void test_evict_idle_hello(void)
 	expect_int(wait_active(st, 0, 3000), 0, "evict test drained");
 	sni_listener_close(ls);
 	sni_test_set_hello_idle_ms(SNI_HELLO_IDLE_MS);
-	sni_worker_set_limit(SNI_CONN_LIMIT_DEFAULT);
+	sni_conn_set_limit(SNI_CONN_LIMIT_DEFAULT);
 	echo_stop(&echo);
 	state_drop(st);
 	expect_true(slots_are_clear(), "evict test released slots");
@@ -2147,7 +2147,7 @@ static void test_no_evict_when_relaying(void)
 		close(binder);
 	stats_init(&st, "sni-noevict");
 	fill_listener(&cfg, local, echo.port, 30, st, NULL, NULL);
-	sni_worker_set_limit(CAP);
+	sni_conn_set_limit(CAP);
 	expect_true(sni_listener_open(&cfg, &ls), "no-evict listener");
 	for (i = 0; i < CAP; i++) {
 		live[i] = connect_local(local, 2000);
@@ -2172,7 +2172,7 @@ static void test_no_evict_when_relaying(void)
 	}
 	expect_int(wait_active(st, 0, 3000), 0, "no-evict test drained");
 	sni_listener_close(ls);
-	sni_worker_set_limit(SNI_CONN_LIMIT_DEFAULT);
+	sni_conn_set_limit(SNI_CONN_LIMIT_DEFAULT);
 	echo_stop(&echo);
 	state_drop(st);
 	expect_true(slots_are_clear(), "no-evict test released slots");
