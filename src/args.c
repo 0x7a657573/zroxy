@@ -1020,11 +1020,11 @@ static bool parse_dns_ttl(zroxy_t *ptr,char *str)
 
 static bool parse_dns_acl(zroxy_t *ptr,char *str)
 {
-	dns_cidr_t parsed[32];
-	dns_cidr_t *copy;
+	zroxy_cidr_t parsed[32];
+	zroxy_cidr_t *copy;
 	size_t count = 0;
 	dnshost_t *dns = dns_config(ptr);
-	if (!dns || !dns_acl_parse(str, parsed, sizeof(parsed) / sizeof(parsed[0]), &count))
+	if (!dns || !acl_parse(str, parsed, sizeof(parsed) / sizeof(parsed[0]), &count))
 		return false;
 	copy = malloc(count * sizeof(*copy));
 	if (!copy)

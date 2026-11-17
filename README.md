@@ -601,7 +601,7 @@ The default suite includes unit, process, and loopback integration tests:
 - `filter_whitelist`
 - `dns_codec`
 - `dns_cache`
-- `dns_acl`
+- `acl`
 - `dns_rate`
 - `dns_throttle`
 - `args_parse`

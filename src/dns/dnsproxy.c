@@ -150,7 +150,7 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 		struct in_addr listen_ip;
 		if (inet_pton(AF_INET, dns->listen_addr, &listen_ip) != 1 ||
 				(ntohl(listen_ip.s_addr) & 0xff000000u) != 0x7f000000u) {
-			static const dns_cidr_t private_acl[] = {
+			static const zroxy_cidr_t private_acl[] = {
 				{ 0x7f000000u, 0xff000000u }, { 0x0a000000u, 0xff000000u },
 				{ 0xac100000u, 0xfff00000u }, { 0xc0a80000u, 0xffff0000u },
 				{ 0x64400000u, 0xffc00000u },

@@ -73,7 +73,7 @@ typedef struct dnsserver
 	uint32_t active_upstreams;
 	uint32_t active_route;
 	uint32_t route_switches;
-	dns_cidr_t *acl;
+	zroxy_cidr_t *acl;
 	size_t acl_count;
 	dns_rate_t rate;
 	statistics_t  *Stat;
