@@ -46,6 +46,8 @@ void stats_free(statistics_t *self)
 
 void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx)
 {
+	if (!self)
+		return;
 	pthread_mutex_lock(&self->Lock);
 	self->stat.TotalRx += rx;
 	self->stat.TotalTx += tx;
@@ -58,6 +60,8 @@ void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx)
 
 void stats_open_connection(statistics_t *self)
 {
+	if (!self)
+		return;
 	pthread_mutex_lock(&self->Lock);
 	self->stat.ActiveConnection++;
 	if(self->stat.ActiveConnection>self->stat.MaxConnection)
@@ -67,6 +71,11 @@ void stats_open_connection(statistics_t *self)
 
 void stats_get(statistics_t *self,stat_t *st)
 {
+	if (!self)
+	{
+		memset(st, 0, sizeof(*st));
+		return;
+	}
 	pthread_mutex_lock(&self->Lock);
 	*st =  self->stat;
 	pthread_mutex_unlock(&self->Lock);

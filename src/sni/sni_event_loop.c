@@ -658,7 +658,7 @@ static void conn_kill(sni_engine *e, sni_conn *c, int reason)
 		return;
 	c->settled = 1;
 	count_close(reason);
-	if (c->close_stats && c->cfg.sta)
+	if (c->close_stats)
 		stats_close_connection(c->cfg.sta, c->rx, c->tx);
 	if (c->slot_held) {
 		sni_worker_release();
@@ -1905,27 +1905,23 @@ void sni_connection_run(sniclient_t *client)
 	if (fd < 0 || !set_nb_cloexec(fd)) {
 		if (fd >= 0)
 			close(fd);
-		if (client->SniConfig.sta)
-			stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->SniConfig.sta, 0, 0);
 		return;
 	}
 	if (!sni_engine_init(&eng, -1, &client->SniConfig)) {
 		close(fd);
-		if (client->SniConfig.sta)
-			stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->SniConfig.sta, 0, 0);
 		return;
 	}
 	c = conn_new(&eng, fd);
 	if (!c) {
 		close(fd);
-		if (client->SniConfig.sta)
-			stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->SniConfig.sta, 0, 0);
 		sni_engine_deinit(&eng);
 		return;
 	}
 	if (!conn_start(&eng, c)) {
-		if (client->SniConfig.sta)
-			stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->SniConfig.sta, 0, 0);
 		sni_engine_run(&eng);
 		sni_engine_deinit(&eng);
 		return;
