@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 
-#include "sni_resolver.h"
+#include "resolver.h"
 
 #include <errno.h>
 #include <fcntl.h>

@@ -19,8 +19,8 @@
  * The pool mutex and a completion-sink mutex are never held together.
  * getaddrinfo(), pipe writes, and socket calls happen with neither lock held.
  */
-#ifndef SNI_RESOLVER_H_
-#define SNI_RESOLVER_H_
+#ifndef RESOLVER_H_
+#define RESOLVER_H_
 
 #include <netdb.h>
 #include <pthread.h>
@@ -239,4 +239,4 @@ void sni_resolver_test_reap(void);
 int sni_resolver_test_wait_idle(int timeout_ms);
 #endif
 
-#endif /* SNI_RESOLVER_H_ */
+#endif /* RESOLVER_H_ */

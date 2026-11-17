@@ -20,7 +20,7 @@
 #include <zroxy/net.h>
 #include <zroxy/net_io.h>
 #include <zroxy/socks5_codec.h>
-#include "sni_resolver.h"
+#include "resolver.h"
 #include "reactor.h"
 
 /*

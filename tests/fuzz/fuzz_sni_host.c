@@ -14,7 +14,7 @@
 
 #include "fuzz_common.h"
 #include "sni_event_loop.h"
-#include "sni_resolver.h"
+#include "resolver.h"
 
 typedef bool (*extract_fn)(uint8_t *buf, uint32_t len, char *host, uint16_t max);
 

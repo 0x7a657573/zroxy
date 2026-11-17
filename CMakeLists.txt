@@ -71,9 +71,13 @@ target_include_directories(zroxy_core PUBLIC ${PROJECT_SOURCE_DIR}/src/core)
 # outside either module prevents a second bounded resolver pool from being
 # created when both services are enabled.
 zroxy_add_module(zroxy_resolver
-    SOURCES src/sni/sni_resolver.c
+    SOURCES src/resolver/resolver.c
     DEPS zroxy_net zroxy_log Threads::Threads)
-target_include_directories(zroxy_resolver PUBLIC ${PROJECT_SOURCE_DIR}/src/sni)
+target_include_directories(zroxy_resolver PUBLIC ${PROJECT_SOURCE_DIR}/src/resolver)
+
+# Resolver header for targets that compile resolver.c directly (test hooks).
+add_library(zroxy_resolver_internal INTERFACE)
+target_include_directories(zroxy_resolver_internal INTERFACE ${PROJECT_SOURCE_DIR}/src/resolver)
 
 zroxy_add_module(zroxy_filter
     SOURCES src/filter/filter.c
@@ -97,7 +101,7 @@ target_include_directories(zroxy_dns PRIVATE ${PROJECT_SOURCE_DIR}/src/dns)
 add_library(zroxy_dns_internal INTERFACE)
 target_include_directories(zroxy_dns_internal INTERFACE ${PROJECT_SOURCE_DIR}/src/dns)
 
-# The SNI engine's own headers (event loop, resolver) stay private to
+# The SNI engine's own headers (event loop, client) stay private to
 # src/sni/; tests that drive the engine directly link zroxy_sni_internal.
 add_library(zroxy_sni_internal INTERFACE)
 target_include_directories(zroxy_sni_internal INTERFACE ${PROJECT_SOURCE_DIR}/src/sni)
@@ -112,6 +116,7 @@ set(ZROXY_SNI_DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats)
 zroxy_add_module(zroxy_sni
     SOURCES ${ZROXY_SNI_SOURCES}
     DEPS ${ZROXY_SNI_DEPS})
+target_include_directories(zroxy_sni PRIVATE ${PROJECT_SOURCE_DIR}/src/sni)
 
 zroxy_add_module(zroxy_args
     SOURCES src/args.c
@@ -140,12 +145,12 @@ endif()
 if(BUILD_TESTING)
     # SNI engine builds with test hooks, once per event backend.
     zroxy_add_module(zroxy_sni_hooks
-        SOURCES ${ZROXY_SNI_SOURCES} src/sni/sni_resolver.c
-        DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal
+        SOURCES ${ZROXY_SNI_SOURCES} src/resolver/resolver.c
+        DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal zroxy_resolver_internal
         DEFINES SNI_TEST_HOOKS)
     zroxy_add_module(zroxy_sni_hooks_poll
-        SOURCES ${ZROXY_SNI_SOURCES} src/sni/sni_resolver.c
-        DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal
+        SOURCES ${ZROXY_SNI_SOURCES} src/resolver/resolver.c
+        DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal zroxy_resolver_internal
         DEFINES SNI_TEST_HOOKS SNI_FORCE_POLL)
 
     # zroxy_add_unit_test(<name> <source> <libs>...)

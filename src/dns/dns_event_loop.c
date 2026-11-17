@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 
 #include "dns_event_loop.h"
-#include "sni_resolver.h"
+#include "resolver.h"
 #include "reactor.h"
 
 #include <arpa/inet.h>

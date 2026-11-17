@@ -6,7 +6,7 @@
  */
 #include <zroxy/sniproxy.h>
 #include "sni_event_loop.h"
-#include "sni_resolver.h"
+#include "resolver.h"
 
 sni_listener *sniproxy_start(SniServer_t *Sni)
 {
