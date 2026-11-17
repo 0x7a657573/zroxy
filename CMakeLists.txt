@@ -192,7 +192,7 @@ if(BUILD_TESTING)
     zroxy_add_unit_test(args_parse       tests/test_args_parse.c       zroxy_args zroxy_dns zroxy_dns_internal)
     zroxy_add_unit_test(socks_handshake  tests/test_socks_handshake.c  zroxy_net zroxy_test_support)
     zroxy_add_unit_test(socks5_codec     tests/test_socks5_codec.c     zroxy_net)
-    zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni zroxy_sni_internal)
+    zroxy_add_unit_test(sni_forwarding   tests/test_sni_forwarding.c   zroxy_sni_hooks)
     zroxy_add_unit_test(sni_engine       tests/test_sni_engine.c       zroxy_sni_hooks)
     zroxy_add_unit_test(sni_engine_poll  tests/test_sni_engine.c       zroxy_sni_hooks_poll)
 

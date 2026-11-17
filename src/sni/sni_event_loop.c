@@ -1893,6 +1893,7 @@ void sni_listener_close(sni_listener *ls)
 	free(ls);
 }
 
+#ifdef SNI_TEST_HOOKS
 void sni_connection_run(sniclient_t *client)
 {
 	sni_engine eng;
@@ -1931,6 +1932,7 @@ void sni_connection_run(sniclient_t *client)
 	sni_engine_run(&eng);
 	sni_engine_deinit(&eng);
 }
+#endif /* SNI_TEST_HOOKS */
 
 #ifdef SNI_TEST_HOOKS
 void sni_test_set_faults(const sni_test_faults *faults)
