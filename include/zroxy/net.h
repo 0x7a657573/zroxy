@@ -24,7 +24,6 @@ bool net_listen_ipv4(in_addr_t addr, uint16_t Port,int *sockfd);
  * host -> adress of host
  * Port -> Port Number
  * sockfd -> Store Socket fd in this Pointer
- * bool -> set keepalive tcp socket
  */
 bool net_connect(int *sockfd,const char *hostname, uint16_t port, int timeout_sec);
 
@@ -49,7 +48,6 @@ bool net_is_ip_literal(const char *ipAddress);
 
 bool net_get_http_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
 bool net_get_https_host(uint8_t *buf,uint32_t len,char *HostName,uint16_t MaxHostName);
-bool net_enable_keepalive(int sock);
 bool net_set_nonblock_cloexec(int fd);
 
 #endif /* NET_H_ */

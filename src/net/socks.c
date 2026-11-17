@@ -29,7 +29,7 @@ static void socks5_close(int *sockfd)
 	}
 }
 
-bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,bool keepalive, int timeout_sec)
+bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port, int timeout_sec)
 {
 	int io_ms;
 	char *socks5_host;
@@ -54,11 +54,6 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port,b
 		socks5_close(sockfd);
 		return false;
 	}
-
-	if(keepalive)
-    {
-        net_enable_keepalive(*sockfd);
-    }
 
 	/* The codec says what to write and how much to read; this loop does the I/O. */
 	step = socks5_client_start(&client);

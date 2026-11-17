@@ -471,7 +471,7 @@ static bool run_scenario(enum scenario_mode mode, sockshost_t *socks, const char
     socks->host = "127.0.0.1";
     socks->port = ntohs(addr.sin_port);
 
-    bool ok = socks5_connect(&client_fd, socks, dst_host, dst_port, false, 5);
+    bool ok = socks5_connect(&client_fd, socks, dst_host, dst_port, 5);
     if (ok)
     {
         close(client_fd);
@@ -621,7 +621,7 @@ static void test_stalled_socks_times_out(void)
     socks.host = "127.0.0.1";
     socks.port = ntohs(addr.sin_port);
     clock_gettime(CLOCK_MONOTONIC, &start);
-    ok = socks5_connect(&client_fd, &socks, "1.2.3.4", 443, false, 1);
+    ok = socks5_connect(&client_fd, &socks, "1.2.3.4", 443, 1);
     clock_gettime(CLOCK_MONOTONIC, &end);
     elapsed_ms = (int64_t)(end.tv_sec - start.tv_sec) * 1000 +
                  (end.tv_nsec - start.tv_nsec) / 1000000;
