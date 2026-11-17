@@ -18,11 +18,11 @@
 #include <zroxy/log.h>
 #include <zroxy/net_io.h>
 
-#define SNI_QUOTA_LISTENER 1
-#define SNI_QUOTA_DIRECT 2
-#define SNI_QUOTA_INFRA 3
-#define SNI_BIND_MAX 32
-#define SNI_GAI_ATTEMPTS 8
+#define RESOLVER_QUOTA_LISTENER 1
+#define RESOLVER_QUOTA_DIRECT 2
+#define RESOLVER_QUOTA_INFRA 3
+#define RESOLVER_BIND_MAX 32
+#define RESOLVER_GAI_ATTEMPTS 8
 
 typedef struct sni_bind_rec {
 	int used;
@@ -69,7 +69,7 @@ typedef struct resolver_pool {
 	int64_t cache_max_stale;
 	int cache_refresh_inflight;
 	uint64_t cache_refresh_req;
-	sni_bind_rec binds[SNI_BIND_MAX];
+	sni_bind_rec binds[RESOLVER_BIND_MAX];
 	uint32_t calls;
 	uint32_t skipped_expired;
 	uint32_t skipped_cancelled;
@@ -174,13 +174,13 @@ static resolver_sink *ref_drop_locked(resolver_sink *sink)
 
 static void quota_dec_locked(resolve_slot *slot)
 {
-	if (slot->quota_kind == SNI_QUOTA_DIRECT) {
+	if (slot->quota_kind == RESOLVER_QUOTA_DIRECT) {
 		if (g_pool->direct_used > 0)
 			g_pool->direct_used--;
-	} else if (slot->quota_kind == SNI_QUOTA_INFRA) {
+	} else if (slot->quota_kind == RESOLVER_QUOTA_INFRA) {
 		if (g_pool->infra_used > 0)
 			g_pool->infra_used--;
-	} else if (slot->quota_kind == SNI_QUOTA_LISTENER) {
+	} else if (slot->quota_kind == RESOLVER_QUOTA_LISTENER) {
 		if (g_pool->listener_used > 0)
 			g_pool->listener_used--;
 		if (slot->sink && slot->sink->quota_used > 0)
@@ -398,7 +398,7 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 			freeaddrinfo(res);
 			res = NULL;
 		}
-	} while (st == EAI_SYSTEM && errno == EINTR && attempts < SNI_GAI_ATTEMPTS);
+	} while (st == EAI_SYSTEM && errno == EINTR && attempts < RESOLVER_GAI_ATTEMPTS);
 	__atomic_fetch_add(&g_pool->calls, (uint32_t)attempts, __ATOMIC_RELAXED);
 #ifdef SNI_TEST_HOOKS
 	if (g_pool->hook)
@@ -860,12 +860,12 @@ static void quota_inc_locked(resolver_sink *sink, resolve_slot *slot)
 {
 	if (sink->kind == RESOLVER_SINK_DIRECT) {
 		g_pool->direct_used++;
-		slot->quota_kind = SNI_QUOTA_DIRECT;
+		slot->quota_kind = RESOLVER_QUOTA_DIRECT;
 		return;
 	}
 	sink->quota_used++;
 	g_pool->listener_used++;
-	slot->quota_kind = SNI_QUOTA_LISTENER;
+	slot->quota_kind = RESOLVER_QUOTA_LISTENER;
 }
 
 bool resolver_sink_open(int kind, resolver_sink **out)
@@ -1124,7 +1124,7 @@ static int submit_infra_locked(const char *norm, uint16_t port)
 	slot->sink = NULL;
 	slot->in_ring = 0;
 	slot->holds_ref = 0;
-	slot->quota_kind = SNI_QUOTA_INFRA;
+	slot->quota_kind = RESOLVER_QUOTA_INFRA;
 	slot->state = RESOLVE_QUEUED;
 	g_pool->infra_used++;
 	g_pool->cache_refresh_inflight = 1;
@@ -1182,7 +1182,7 @@ void resolver_watch_bind(uint32_t listener_id, const char *bindip, uint16_t port
 	if (inet_pton(AF_INET, bindip, &ip) != 1)
 		return;
 	pthread_mutex_lock(&g_pool->mu);
-	for (i = 0; i < SNI_BIND_MAX; i++) {
+	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
 		if (g_pool->binds[i].used && g_pool->binds[i].listener_id == listener_id) {
 			free_i = i;
 			break;
@@ -1206,7 +1206,7 @@ void resolver_unwatch_bind(uint32_t listener_id)
 	if (!g_pool || listener_id == 0)
 		return;
 	pthread_mutex_lock(&g_pool->mu);
-	for (i = 0; i < SNI_BIND_MAX; i++) {
+	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
 		if (g_pool->binds[i].used && g_pool->binds[i].listener_id == listener_id)
 			g_pool->binds[i].used = 0;
 	}
@@ -1243,7 +1243,7 @@ static int v4_rejected(uint32_t host, uint16_t port, unsigned flags)
 		return 1;
 	if ((flags & RESOLVER_POLICY_DENY_PRIVATE) && v4_private(host))
 		return 1;
-	for (i = 0; i < SNI_BIND_MAX; i++) {
+	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
 		sni_bind_rec *b = &g_pool->binds[i];
 		uint32_t bip;
 		if (!b->used)
@@ -1268,7 +1268,7 @@ static int v6_rejected(const struct in6_addr *ip, uint16_t port, unsigned flags)
 	if (IN6_IS_ADDR_LOOPBACK(ip)) {
 		if (!(flags & RESOLVER_POLICY_ALLOW_LOOPBACK))
 			return 1;
-		for (i = 0; i < SNI_BIND_MAX; i++) {
+		for (i = 0; i < RESOLVER_BIND_MAX; i++) {
 			if (g_pool->binds[i].used && g_pool->binds[i].port == port)
 				return 1;
 		}
@@ -1607,7 +1607,7 @@ int resolver_test_fill_infra(void)
 		slot->sink = NULL;
 		slot->in_ring = 0;
 		slot->holds_ref = 0;
-		slot->quota_kind = SNI_QUOTA_INFRA;
+		slot->quota_kind = RESOLVER_QUOTA_INFRA;
 		slot->state = RESOLVE_QUEUED;
 		g_pool->infra_used++;
 		enqueue(&g_pool->infra_head, &g_pool->infra_tail, slot);
