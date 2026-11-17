@@ -43,12 +43,12 @@ typedef struct sni_listener sni_listener;
 sni_listener *sniproxy_start(SniServer_t *Sni);
 /* Stop accepting, close every connection, join the loop and free. */
 void sniproxy_stop(sni_listener *ls);
-bool sni_worker_acquire(void);
-void sni_worker_release(void);
+bool sni_conn_acquire(void);
+void sni_conn_release(void);
 /* The connection cap shared by every listener. */
-int sni_worker_limit(void);
+int sni_conn_limit(void);
 /* Set the cap, clamped to 1..SNI_CONN_LIMIT_MAX. Call before listeners start. */
-void sni_worker_set_limit(int limit);
+void sni_conn_set_limit(int limit);
 
 /*
  * stats_extra_fn for the SNI_Server monitor object: appends the connection
