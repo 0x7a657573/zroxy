@@ -10,7 +10,9 @@ The main implementation areas are:
   `<zroxy/name.h>`;
 - `src/` — process startup (`main.c`) and configuration (`args.c`);
 - `src/sni/` — hostname-aware TCP forwarding and the SNI event loop (its
-  event-loop and resolver headers are private to this directory);
+  event-loop header is private to this directory);
+- `src/resolver/` — the process-wide hostname resolver pool shared by the SNI
+  and DNS loops (its header is private to the data-plane modules);
 - `src/dns/` — local UDP/TCP DNS service and upstream TCP forwarding;
 - `src/stats/` — counters and the HTTP JSON monitor;
 - `src/net/` — sockets, bounded I/O, hostname extraction, the SOCKS5
@@ -128,7 +130,7 @@ flowchart LR
     DNS --> SOCKS
     Monitor --> MonWorkers
     SNI --> Stats
-    DNSWorkers --> Stats
+    DNS --> Stats
     MonWorkers --> Stats
 ```
 
@@ -294,8 +296,8 @@ path, then returns `1`.
 | `src/core/reactor.c` | epoll/poll readiness reactor (private) | Registers fds for one loop thread; callers delete an fd before closing it |
 | `src/sni/sni_event_loop.c` | Non-blocking SNI state machine | Owns listener/client/upstream fds on its thread |
 | `src/sni/sni_event_loop.h` | Event-loop API and test hooks (private) | Joinable listener: open/close |
-| `src/sni/sni_resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
-| `src/sni/sni_resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
+| `src/resolver/resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
+| `src/resolver/resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
 | `src/sni/sniclient.c` | SNI connection cap and test entry point | `SNIMAXCONN` live-connection slots (default 1024) |
 | `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |
 | `src/net/net.c` | IPv4 listen/connect, HTTP/TLS host extraction | Protocol-independent socket helpers |
@@ -639,7 +641,7 @@ flowchart LR
 - `getaddrinfo`, pipe writes, and socket operations run without the pool mutex
   held.
 - The event-loop thread never calls `getaddrinfo`.
-- The monitor's `Resolver` object comes from `sni_resolver_get_stats`, which
+- The monitor's `Resolver` object comes from `resolver_get_stats`, which
   takes the pool mutex once per report to read the free-slot count (`Slots`
   minus the free count is `SlotsInUse`) and reads the `Lookups`
   (`getaddrinfo` calls), `LookupFailures` and `RingFull` atomics. Workers
@@ -1008,9 +1010,9 @@ Current important bounds are:
 | SNI client-to-upstream relay buffer | 8192 bytes | `SNI_RELAY_CAP` |
 | SNI upstream-to-client relay buffer | 8192 bytes | `SNI_RELAY_CAP` |
 | SOCKS5 reply buffer | 600 bytes | `SNI_SOCKS_CAP` |
-| Resolver workers | 4 | `SNI_RESOLVER_THREADS` |
-| Resolver slots | 128 | `SNI_RESOLVER_SLOTS` |
-| Per-listener client lookup quota | 104 | `SNI_RESOLVER_LISTENER_QUOTA` |
+| Resolver workers | 4 | `RESOLVER_THREADS` |
+| Resolver slots | 128 | `RESOLVER_SLOTS` |
+| Per-listener client lookup quota | 104 | `RESOLVER_LISTENER_QUOTA` |
 | DNS packet representation | 512 bytes | `DNS_MSG_SIZE` |
 | DNS accepted requests | 2048 | `DNS_EVENT_REQUESTS` |
 | DNS upstream connections | 96 default, configurable 1..96 | `DNS_EVENT_UPSTREAMS`, `DNSCONNECTIONS` |
