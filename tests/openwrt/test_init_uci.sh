@@ -79,8 +79,10 @@ run_ok() { # NAME EXPECTED  (fixture already loaded)
 		diff "$WORK/want" "$WORK/got"
 		FAILS=$((FAILS + 1)); return
 	fi
-	mode="$(stat -c '%a' "$ZR_RUN_DIR/zroxy.conf")"
-	dmode="$(stat -c '%a' "$ZR_RUN_DIR")"
+	mode="$(stat -c '%a' "$ZR_RUN_DIR/zroxy.conf" 2>/dev/null)"
+	[ -n "$mode" ] || mode="$(stat -f '%Lp' "$ZR_RUN_DIR/zroxy.conf")"
+	dmode="$(stat -c '%a' "$ZR_RUN_DIR" 2>/dev/null)"
+	[ -n "$dmode" ] || dmode="$(stat -f '%Lp' "$ZR_RUN_DIR")"
 	if [ "$mode" != 600 ] || [ "$dmode" != 700 ]; then
 		echo "FAIL $1: modes file=$mode dir=$dmode"; FAILS=$((FAILS + 1)); return
 	fi
