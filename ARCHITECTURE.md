@@ -33,7 +33,7 @@ implemented in `src/sni/sni_event_loop.c`; the DNS loop is implemented in
 zroxy is one process containing three optional services:
 
 1. one SNI listener event loop for each configured `PORT` entry;
-2. one monitor accept loop when `MONITOR` is configured; and
+2. one monitor reactor thread when `MONITOR` is configured; and
 3. one DNS event loop when `LDNS` is configured.
 
 The SNI data plane does not create one pthread per client. Each listener owns
@@ -44,7 +44,7 @@ loop into one bounded, process-wide resolver pool.
 The DNS service has one joinable event-loop thread. It drives UDP intake, local
 DNS-over-TCP clients, resolver completions, and a bounded group of reusable
 upstream TCP connections without creating one thread per request. The monitor
-still uses detached pthreads for accepted work, bounded to 32.
+uses the shared reactor with one thread and at most 32 non-blocking clients.
 
 `DCACHE` selects the bounded answer-cache capacity; zero leaves the cache
 pointer null and disables caching. `DTTL` is copied to the DNS service and is
@@ -106,8 +106,8 @@ flowchart LR
         SNI[SNI listener event loop\none per PORT entry]
         Resolve[resolver pool\n4 threads / 128 slots]
         DNS[DNS event loop\nUDP + TCP + upstreams]
-        Monitor[monitor accept loop]
-        MonWorkers[monitor workers\nmaximum 32]
+        Monitor[monitor reactor thread]
+        MonClients[monitor clients\nmaximum 32, one thread]
         Stats[statistics objects\nper service]
     end
 
@@ -128,10 +128,10 @@ flowchart LR
     SNI --> SOCKS
     DNS --> DNSUpstream
     DNS --> SOCKS
-    Monitor --> MonWorkers
+    Monitor --> MonClients
     SNI --> Stats
     DNS --> Stats
-    MonWorkers --> Stats
+    MonClients --> Stats
 ```
 
 ### Portable fallback
@@ -150,7 +150,7 @@ If Mermaid is not rendered by the viewer, the same topology is:
  DNS UDP ---------------> DNS event loop -------+----> DNS over TCP
                          |                      |      direct or SOCKS5
                          |                      |
- Monitor HTTP ----------> monitor accept/workers |
+ Monitor HTTP ----------> monitor reactor thread  |
                          |                      |
                          |  shared statistics  <--- SNI/DNS/monitor
                          +----------------------+
@@ -192,7 +192,7 @@ sequenceDiagram
     end
 
     opt MONITOR configured
-        M->>Mo: bind and start accept thread
+        M->>Mo: bind and start reactor thread
         Mo-->>M: startup result
     end
 
@@ -245,7 +245,7 @@ itself when it is non-dumpable.
   (checked in `args_validate`, with a warning when it is). `OPENPROXY` has no
   effect once a whitelist is configured.
 - A configured whitelist that cannot be loaded returns `1`.
-- A configured monitor that cannot bind or create its accept thread returns
+- A configured monitor that cannot bind or create its reactor thread returns
   `1`.
 - A configured DNS service that cannot initialize returns `1`.
 - A configured SNI listener that cannot bind or start its event-loop thread
@@ -273,14 +273,10 @@ them.
     connection, and is joined;
   - the DNS event loop is woken through its wake pipe, completes cleanup of its
     requests and descriptors, and is joined;
-  - `monitor_stop` wakes and joins the accept thread, closes the listener,
-    waits for the active workers, then frees the sections, the token and the
-    monitor, and reports whether it did;
+  - `monitor_stop` wakes and joins the monitor thread, which closes every
+    client and the listener, then frees the sections, the token and the monitor;
   - `filter_free` wakes and joins the whitelist watcher, then frees the filter;
   - `main` frees the statistics objects last.
-
-  If `monitor_stop` gave up on a worker, `main` leaves the statistics objects
-  and the whitelist allocated.
 
   `main` then returns `0`.
 
@@ -316,7 +312,7 @@ path, then returns `1`.
 | `src/dns/dnsproxy.c` | DNS local answers and legacy test helpers | Shared request validation and reply construction |
 | `src/dns/dns.c` | DNS decode/encode | Bounded packet representation |
 | `src/stats/statistics.c` | Per-service counters | One mutex per statistics object |
-| `src/stats/monitor.c` | HTTP monitor accept/workers/JSON | Maximum 32 monitor workers |
+| `src/stats/monitor.c` | HTTP monitor reactor and JSON | Maximum 32 non-blocking monitor clients |
 | `src/log/log.c` | Logging | Shared logging path |
 
 ## Thread and ownership model
@@ -339,8 +335,8 @@ flowchart TB
     end
 
     subgraph MonitorService[optional monitor]
-        MA[monitor accept thread]
-        MW[detached monitor workers\nmax 32]
+        MA[monitor reactor thread\nlistener + wake pipe]
+        MC[non-blocking monitor clients\nmax 32]
     end
 
     subgraph DNSService[optional DNS]
@@ -355,7 +351,7 @@ flowchart TB
     Loop <--> R2
     Loop <--> R3
     Loop <--> R4
-    MA --> MW
+    MA --> MC
     DE --> Upstreams
 ```
 
@@ -376,11 +372,10 @@ flowchart TB
   creates during its operation. Failure paths close it and store `-1`.
 - The DNS service stores aliases to the configuration's SOCKS and whitelist
   objects. Its `localdns_free` function does not free those aliases.
-- Monitor workers close their client descriptor exactly once and release their
-  worker slot before exiting.
+- The monitor thread owns the listener, wake pipe, reactor and client slots. It
+  closes every client before it exits.
 - `main` creates the SNI and DNS statistics objects and frees them after the
-  services stop, unless the monitor gave up on a worker. The monitor only
-  borrows them through `monitor_attach_stat`.
+  services stop. The monitor only borrows them through `monitor_attach_stat`.
 - The monitor owns its sections and token, and frees them in `monitor_stop`. The whitelist filter owns its watcher thread and wake pipe and
   frees them in `filter_free`.
 - The DNS event loop owns its UDP/TCP listeners, wake pipe, resolver completion
@@ -391,7 +386,7 @@ flowchart TB
 
 ```text
 main
-  ├─ creates/binds monitor fd ──> monitor accept thread
+  ├─ creates/binds monitor fd ──> monitor reactor thread
   ├─ creates/binds DNS fds ─────> owning DNS event-loop thread
   │                                   ├─ wake pipe and resolver completion pipe
   │                                   ├─ local TCP client fds
@@ -817,41 +812,44 @@ pending resolver work, and closes every client and upstream connection.
 ```mermaid
 sequenceDiagram
     participant C as monitor client
-    participant A as monitor accept thread
-    participant W as monitor worker
+    participant R as monitor reactor thread
     participant L as stats_lock
     participant S as statistics mutexes
 
-    C->>A: TCP connect
-    A->>A: accept and reserve one of 32 slots
-    A->>W: detached worker
-    W->>W: read up to 4096 bytes until CRLF CRLF
-    W->>W: enforce one absolute header deadline
+    C->>R: TCP connect
+    R->>R: accept into one of 32 client slots
+    R->>R: read up to 4096 bytes until CRLF CRLF
+    R->>R: enforce header deadline
     alt invalid request
-        W-->>C: empty 400/404/405 response
+        R-->>C: empty 400/404/405 response
     else token missing or wrong
-        W-->>C: empty 401 response
+        R-->>C: empty 401 response
     else GET / authorized
-        W->>L: snapshot statistics-list head
-        L-->>W: list pointer
-        W->>W: process object: getrlimit, getrusage, /proc/self/status
+        R->>L: snapshot statistics-list head
+        L-->>R: list pointer
+        R->>R: process object: getrlimit, getrusage, /proc/self/status
         loop each statistics object
-            W->>S: copy counters under object mutex
-            S-->>W: counter snapshot
+            R->>S: copy counters under object mutex
+            S-->>R: counter snapshot
         end
-        W-->>C: JSON response and close
+        R-->>C: JSON response and close
     else report exceeds 16 KiB
-        W-->>C: empty 500 response, logged once
+        R-->>C: empty 500 response, logged once
     end
-    W->>W: close fd and release worker slot
+    R->>R: enforce write deadline, then close fd
 ```
 
 The monitor accepts only `GET /` with HTTP/1.0 or HTTP/1.1. A configured
 Bearer token is required before counters are emitted. Without a token, anyone
 who can reach the monitor socket can read the counters.
 
+Each client has a header deadline and then a write deadline. Both use the
+configured header timeout. When all 32 client slots are occupied, the extra
+accepted socket is closed immediately. The reactor backend is not limited by
+`FD_SETSIZE`.
+
 The report starts with the version, `CountOfOpenFile`, and the `Process`
-object. `Process` is not a statistics object: the worker fills it on each
+object. `Process` is not a statistics object: the monitor thread fills it on each
 request from `getpid`, `getrlimit`, `getrusage`, and (on Linux) one bounded
 read of `/proc/self/status` into a stack buffer. It takes no lock and
 allocates nothing. Registered sections follow, then the statistics objects.
@@ -865,7 +863,7 @@ The JSON is formatted into one 16 KiB stack buffer. The response head is built
 in reserved space in front of the body, so the head and body leave in a single
 write. All head lines end with CRLF and carry `Connection: close`; the 200
 response also carries `Cache-Control: no-store`. If a statistics object or an
-extra hook cannot append, nothing has been sent yet, so the worker answers an
+extra hook cannot append, nothing has been sent yet, so the monitor thread answers an
 empty 500 and logs the overflow once.
 
 The monitor uses two lock levels:
@@ -977,9 +975,9 @@ configured DNS options are sufficient to start the service.
 | Resolver pool queues/slots | pool mutex | resolver workers and submit/release paths |
 | Resolver completion ring | sink mutex | resolver workers and owning event loop |
 | Filter snapshot pointer | filter rwlock (read: lookup, write: swap) | SNI/DNS readers, reload watcher, `SIGHUP` |
-| Statistics counters | one mutex per statistics object | SNI/DNS event loops and monitor workers |
+| Statistics counters | one mutex per statistics object | SNI/DNS event loops and monitor thread |
 | Monitor statistics-list head | monitor `stats_lock` | startup/attach and monitor response generation |
-| Monitor worker count | monitor worker mutex | monitor accept/workers |
+| Monitor client slots | monitor thread | monitor reactor and client slots |
 | SNI live-connection count | SNI worker mutex | SNI accept/destruction paths |
 | Listener startup/stop state | listener mutex/condition | `main` and the event-loop thread |
 
@@ -989,8 +987,6 @@ Important lock-order rules:
 - Resolver blocking calls, pipe writes, and socket calls happen without the
   resolver pool mutex.
 - Filter and statistics locks are not nested.
-- A detached monitor worker reserves its capacity before `pthread_create` and
-  releases it on every exit path.
 
 ## Backpressure and bounded resources
 
@@ -1001,7 +997,7 @@ flowchart LR
     Limits --> Resolver[128 resolver slots]
     Limits --> DNSR[2048 DNS requests]
     Limits --> DNSU[96 DNS upstream connections]
-    Limits --> MonW[32 monitor workers]
+    Limits --> MonC[32 monitor clients, one thread]
     Conn --> Buffers[8 KiB SNI hello +\n8 KiB per relay direction]
     Buffers --> Deadline[monotonic I/O deadlines]
     Deadline --> Close[close and release resources]
@@ -1025,7 +1021,7 @@ Current important bounds are:
 | DNS upstream connections | 96 default, configurable 1..96 | `DNS_EVENT_UPSTREAMS`, `DNSCONNECTIONS` |
 | DNS local TCP clients | 128 | `DNS_EVENT_CLIENTS` |
 | DNS response buffers | 16 MiB | `DNS_EVENT_RESPONSE_BYTES` |
-| Monitor workers | 32 | `MON_MAX_WORKERS` |
+| Monitor clients | 32 | `MON_MAX_CLIENTS` |
 | Monitor request header | 4096 bytes | `MON_MAX_HEADER` |
 | Config line | 1024 bytes | `ZROXY_MAX_CONFIG_LINE` |
 | Config value | 512 bytes | `ZROXY_MAX_CONFIG_VALUE` |
@@ -1099,10 +1095,10 @@ path above) and then the DNS service, as described in
 [Signals and shutdown](#signals-and-shutdown). The monitor and the whitelist
 (with its watcher) are stopped after them, in that order.
 
-`monitor_stop` waits for active monitor workers for at most the header timeout
-plus one second. Workers re-check a stop flag every 100 ms, so idle or
-half-sent requests end at once. If a worker is still alive when the bound
-expires, the monitor state, the statistics objects and the whitelist are deliberately left allocated.
+`monitor_stop` wakes and joins the monitor thread. The thread closes every
+client, including clients waiting on a header or a response write, before it
+returns. The monitor then frees its sections, token and state; `main` frees the
+statistics objects and whitelist after the services stop.
 
 ## Observability
 
@@ -1193,8 +1189,8 @@ These are the rules future changes should preserve or update explicitly:
 8. A failed whitelist reload must not replace a valid published list with an
    incomplete list.
 9. Configured service startup failures must be visible to `main`.
-10. Monitor worker limits must be enforced before creating detached worker
-    threads. DNS must not create a thread per query.
+10. Monitor client limits must be enforced before accepting a client into a
+    slot. DNS must not create a thread per query.
 11. Descriptors must be removed from the event backend before close and set to
     `-1` afterward.
 12. The SNI event-loop thread must not sleep when `accept` runs out of
@@ -1206,14 +1202,11 @@ These are the rules future changes should preserve or update explicitly:
 
 ## Known limitations and open design work
 
-- If a monitor worker is still writing to a stalled client when the bounded
-  `monitor_stop` wait expires, the monitor's state is left allocated until
-  process exit.
 - Each DNS upstream connection carries one query at a time (no TCP
   pipelining). Throughput toward a slow upstream is bounded by the configured
   upstream-connection count divided by the upstream round-trip time.
-- Monitor request handling still uses `select` internally and one detached
-  worker per accepted monitor client within its 32-worker cap.
+- Monitor request handling uses the shared reactor. It has one monitor thread,
+  at most 32 non-blocking client slots, and closes an extra accepted socket.
 - A resolver worker can remain allocated until process exit if bounded shutdown
   waits expire while it is inside `getaddrinfo()`.
 - A musl build, live DNS event-loop flooding, and some file-watcher concurrency

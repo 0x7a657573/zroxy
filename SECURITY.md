@@ -28,7 +28,7 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 
 ## Resource limits
 
-- SNI keeps at most 1024 connections at once, on one event-loop thread per listener. It does not create a pthread per client, and it does not use `select`. The 1025th accepted socket is closed immediately and counted as `Refused` in the monitor. Relay buffers are fixed at 8KB per direction. The monitor stops at 32 workers and closes the extra accepted socket. DNS query workers stop at 128. Local DNS over TCP takes at most 8 connections (each holding one worker and a 64 KiB buffer), 32 queries each, and closes a connection idle for 3 s. The DNS cap is inside `dnsproxy.c` and was not driven by a live flood in this pass.
+- SNI keeps at most 1024 connections at once, on one event-loop thread per listener. It does not create a pthread per client, and it does not use `select`. The 1025th accepted socket is closed immediately and counted as `Refused` in the monitor. Relay buffers are fixed at 8KB per direction. The monitor serves at most 32 clients on one reactor thread and closes the extra accepted socket. DNS query workers stop at 128. Local DNS over TCP takes at most 8 connections (each holding one worker and a 64 KiB buffer), 32 queries each, and closes a connection idle for 3 s. The DNS cap is inside `dnsproxy.c` and was not driven by a live flood in this pass.
 - A configured whitelist that cannot be opened aborts process startup. A failed whitelist reload keeps the previous list and is counted as `ReloadFailures` in the monitor. Invalid ports, addresses, and empty config values are rejected instead of truncated.
 
 ## What was run
@@ -42,7 +42,7 @@ The SNI sources also compile with `-Wconversion -Werror`. Since then the whole t
 ## Remaining risk
 
 - A monitor started with no token does not check credentials. Binding it to `0.0.0.0` without a token exposes the counters to every reachable client.
-- On `SIGINT`/`SIGTERM` and on a startup failure, `main` stops the SNI listeners and the DNS service (joining their threads) before freeing the configuration they use. The whitelist and monitor are not freed; their threads may run until exit.
+- On `SIGINT`/`SIGTERM` and on a startup failure, `main` stops the SNI listeners and the DNS service (joining their threads) before freeing the configuration they use. It then stops the monitor and whitelist, and frees the statistics objects after the services stop.
 - The DNS worker pool (32 threads) was not load-tested. SNI and monitor caps were.
 - Before this release, a plain whitelist entry also matched any longer name that started with it (`example.com` allowed `example.com.attacker.net`). Lists written against the old behaviour may have relied on that; such names now need an explicit entry or pattern.
 - Inotify whitelist reload is covered by `dns_e2e` on Linux. The FreeBSD kqueue watcher and a musl build were not executed. SNI name lookup runs on a fixed pool of 4 threads. The event-loop thread does not call `getaddrinfo()`. DNS still blocks one worker thread on its own lookup.
