@@ -1,6 +1,8 @@
 """Sample a process from /proc. No third-party packages."""
 
 import os
+import subprocess
+import sys
 import threading
 import time
 
@@ -10,6 +12,17 @@ def _clk_tck():
 
 
 def _status(pid):
+    if not sys.platform.startswith("linux"):
+        result = subprocess.run(
+            ["ps", "-o", "rss=", "-o", "vsz=", "-p", str(pid)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            raise ProcessLookupError(pid)
+        values = result.stdout.split()
+        if len(values) < 2:
+            raise ValueError("unexpected ps output")
+        return {"VmRSS": values[0] + " kB", "VmSize": values[1] + " kB", "Threads": "1"}
     fields = {}
     with open("/proc/%s/status" % pid, "r", encoding="ascii", errors="replace") as fh:
         for line in fh:
@@ -34,6 +47,10 @@ def _optional_int(fields, key):
 
 
 def _cpu_ticks(pid):
+    if not sys.platform.startswith("linux"):
+        # BSD ps portability is sufficient for the stress resource bounds;
+        # CPU deltas are unavailable without a procfs-compatible tick source.
+        return 0, 0
     with open("/proc/%s/stat" % pid, "r", encoding="ascii", errors="replace") as fh:
         text = fh.read()
     rest = text[text.rfind(")") + 2:].split()
@@ -41,7 +58,19 @@ def _cpu_ticks(pid):
 
 
 def fd_count(pid):
-    return len(os.listdir("/proc/%s/fd" % pid))
+    if sys.platform.startswith("linux"):
+        return len(os.listdir("/proc/%s/fd" % pid))
+    result = subprocess.run(
+        ["fstat", "-p", str(pid)], capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise ProcessLookupError(pid)
+    count = 0
+    for line in result.stdout.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) >= 4 and fields[2] == str(pid) and fields[3].isdigit():
+            count += 1
+    return count
 
 
 def sample_once(pid):
@@ -51,7 +80,7 @@ def sample_once(pid):
         "t": time.time(),
         "rss_kb": _kb(fields.get("VmRSS")),
         "vsz_kb": _kb(fields.get("VmSize")),
-        "threads": int(fields["Threads"]),
+        "threads": int(fields.get("Threads", "1")),
         "fds": fd_count(pid),
         "cpu_user_ticks": user_ticks,
         "cpu_system_ticks": system_ticks,
