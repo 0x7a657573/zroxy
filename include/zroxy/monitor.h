@@ -34,18 +34,10 @@ typedef struct
 	pthread_mutex_t stats_lock; /* guards the state list head only */
 	char *token; /* optional bearer secret; NULL disables authentication */
 	int header_timeout; /* seconds to wait for a complete header */
-	pthread_t accept_thread; /* joined by monitor_stop */
-	int wake[2]; /* pipe that wakes the accept thread */
-	int stopping; /* set by monitor_stop; workers give up at their next slice */
+	pthread_t thread; /* joined by monitor_stop */
+	int wake[2]; /* pipe that wakes the monitor thread */
+	void *private_data; /* monitor reactor and private client slots */
 }mon_t;
-
-typedef struct
-{
-	int		 			connid;
-	struct sockaddr_in	cli;
-	socklen_t 			addr_len;
-	mon_t 			*owner;
-}monclient_t;
 
 mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int header_timeout_sec);
 /*
@@ -57,13 +49,9 @@ bool monitor_attach_stat(mon_t *self,statistics_t *stat);
 /* Adds a top-level object written by fn. ctx must outlive the monitor. */
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx);
 /*
- * Stops accepting, joins the accept thread, closes the listener, waits for the
- * active clients (at most the header timeout plus a margin), then frees the
- * sections, the token and the monitor itself. The attached statistics objects
- * stay the caller's. Returns true when the monitor stopped and freed itself
- * (also for NULL), false when a client was still running after the wait: then
- * nothing it can touch is freed, so the caller must keep the attached
- * statistics objects and the section contexts alive too.
+ * Stops accepting, joins the monitor thread, closes the listener and pipe,
+ * then frees the sections, token and monitor itself. The attached statistics
+ * objects stay the caller's. Returns true when stopped (also for NULL).
  *
  * Call it only after every service that writes to the statistics objects
  * (SNI, DNS) has stopped, and once the sections' contexts are still valid.

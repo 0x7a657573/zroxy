@@ -9,7 +9,7 @@
 # Builds with the static helpers monitor.c and filter.c keep to themselves.
 zroxy_add_module(zroxy_monitor_hooks
     SOURCES ${PROJECT_SOURCE_DIR}/src/stats/monitor.c
-    DEPS zroxy_stats zroxy_net
+    DEPS zroxy_core zroxy_stats zroxy_net
     DEFINES MON_TEST_HOOKS)
 zroxy_add_module(zroxy_filter_hooks
     SOURCES ${PROJECT_SOURCE_DIR}/src/filter/filter.c
