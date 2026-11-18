@@ -884,7 +884,7 @@ static int count_open_files(void)
 
 #ifdef __linux__
 	dp = opendir("/proc/self/fd");
-#elif __FreeBSD__
+#elif defined(__FreeBSD__) || defined(__OpenBSD__)
 	dp = opendir("/dev/fd/");
 #endif
 

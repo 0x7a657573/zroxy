@@ -12,7 +12,7 @@
 #include <stdio.h>
 #ifdef __linux__
 #include <sys/inotify.h>
-#elif __FreeBSD__
+#elif defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <sys/types.h>
 #include <sys/event.h>
 #include <fcntl.h>
@@ -436,7 +436,7 @@ static void *filter_watch_thread(void *vargp)
 	close(fd);
 	return NULL;
 }
-#elif __FreeBSD__
+#elif defined(__FreeBSD__) || defined(__OpenBSD__)
 #ifdef NOTE_CLOSE_WRITE
 #define FILTER_NOTE_CHANGE	(NOTE_CLOSE_WRITE | NOTE_ATTRIB)
 #else
@@ -576,7 +576,8 @@ filter_t *filter_init(char *filename)
 	}
 	log_info("load %zu valid host", set->total);
 
-	/*create file watcher; without one the list still works, it just never auto-reloads*/
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__)
+	/* create file watcher; without one the list still works, it just never auto-reloads */
 	if (pipe2(self->wake, O_CLOEXEC | O_NONBLOCK) != 0)
 	{
 		self->wake[0] = self->wake[1] = -1;
@@ -586,6 +587,7 @@ filter_t *filter_init(char *filename)
 		self->watching = true;
 	else
 		log_error("whitelist watcher thread failed");
+#endif
 	return self;
 }
 
