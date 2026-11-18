@@ -237,4 +237,13 @@ int sni_read_some(int fd, uint8_t *buf, uint32_t cap, uint32_t *len);
 int sni_write_some(int fd, const uint8_t *buf, uint32_t len, uint32_t *off, uint32_t *counter);
 int sni_shut_write(int fd);
 
+void sni_conn_set_state(sni_engine *e, sni_conn *c, int state);
+void sni_conn_kill(sni_engine *e, sni_conn *c, int reason);
+bool sni_conn_arm(sni_engine *e, sni_conn *c);
+void sni_enter_relay(sni_engine *e, sni_conn *c);
+void sni_socks_pump(sni_engine *e, sni_conn *c);
+void sni_connect_pump(sni_engine *e, sni_conn *c, uint32_t ev);
+void sni_begin_upstream(sni_engine *e, sni_conn *c);
+void sni_drain_resolve(sni_engine *e);
+
 #endif
