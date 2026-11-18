@@ -590,11 +590,15 @@ static void *monitor_thread(void *vargp)
 			client = (mon_client_t *)events[i].tag;
 			if (!client || client->fd < 0)
 				continue;
-			if (events[i].ev & (RE_ERR | RE_HUP))
-				monitor_close_client(mon, client);
-			else if (client->phase == MON_READ && (events[i].ev & RE_IN))
+			/*
+			 * RE_HUP includes a peer that only shut down its write side.
+			 * Let read and write see it: reading to EOF closes with a FIN
+			 * instead of a reset, and a half-closed client still gets its
+			 * response.
+			 */
+			if (client->phase == MON_READ)
 				monitor_read_client(mon, client);
-			else if (client->phase == MON_WRITE && (events[i].ev & RE_OUT))
+			else
 				monitor_write_client(mon, client);
 		}
 		for (i = 0; i < n; i++)
