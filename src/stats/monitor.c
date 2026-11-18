@@ -617,13 +617,13 @@ out:
 	return NULL;
 }
 
-bool monitor_stop(mon_t *self)
+void monitor_stop(mon_t *self)
 {
 	mon_section_t *sec;
 	char b = 0;
 
 	if (!self)
-		return true;
+		return;
 	while (write(self->wake[1], &b, 1) < 0 && errno == EINTR)
 		;
 	pthread_join(self->thread, NULL);
@@ -639,7 +639,6 @@ bool monitor_stop(mon_t *self)
 	pthread_mutex_destroy(&self->stats_lock);
 	mon_free_token(self->token);
 	free(self);
-	return true;
 }
 
 static bool mon_append(char **ptr, char *end, const char *fmt, ...)

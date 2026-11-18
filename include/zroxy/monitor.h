@@ -28,14 +28,13 @@ bool monitor_attach_stat(mon_t *self,statistics_t *stat);
 /* Adds a top-level object written by fn. ctx must outlive the monitor. */
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx);
 /*
- * Stops accepting, joins the monitor thread, closes the listener and pipe,
- * then frees the sections, token and monitor itself. The attached statistics
- * objects stay the caller's. Returns true when stopped (also for NULL).
- *
- * Call it only after every service that writes to the statistics objects
- * (SNI, DNS) has stopped, and once the sections' contexts are still valid.
+ * Stops accepting, joins the monitor thread, closes every client, the listener
+ * and pipe, then frees the sections, token and monitor itself. The attached
+ * statistics objects stay the caller's. After it returns, nothing reads the
+ * attached statistics objects or the sections' contexts any more.
+ * Call it while the statistics objects and the sections' contexts are still valid.
  */
-bool monitor_stop(mon_t *self);
+void monitor_stop(mon_t *self);
 
 #ifdef MON_TEST_HOOKS
 #include <stddef.h>
