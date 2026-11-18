@@ -1,10 +1,10 @@
-/* Hostname normalization, numeric address handling, and destination policy. */
-
 #include "resolver_internal.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <string.h>
+
+/* Hostname normalization, numeric address handling, and destination policy. */
 
 int resolver_copy_numeric(const char *host, uint16_t port, resolver_addr *out, size_t *count)
 {
