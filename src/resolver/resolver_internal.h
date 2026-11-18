@@ -82,5 +82,6 @@ void resolver_apply_port_one(resolver_addr *addr, uint16_t port);
 void resolver_enqueue(resolve_slot **head, resolve_slot **tail, resolve_slot *slot);
 uint64_t resolver_alloc_req_id_locked(resolver_pool *pool);
 int resolver_mono_deadline(int timeout_ms, struct timespec *ts);
+void resolver_commit_infra_locked(resolve_slot *slot, int gai_error);
 
 #endif /* RESOLVER_INTERNAL_H_ */
