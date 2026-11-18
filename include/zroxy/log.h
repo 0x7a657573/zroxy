@@ -12,9 +12,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-//#define LOG_USE_COLOR
-#define LOG_VERSION "0.1.0"
-
 enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
 
 #define LOG_FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
