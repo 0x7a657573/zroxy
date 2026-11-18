@@ -34,7 +34,7 @@ static int set_pipe_flags(int fd)
 
 static int open_pipe(int fds[2])
 {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 	if (pipe2(fds, O_NONBLOCK | O_CLOEXEC) == 0)
 		return 0;
 	if (errno != ENOSYS)
