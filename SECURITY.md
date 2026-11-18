@@ -24,7 +24,7 @@ zroxy 1.2.7 is a POSIX C proxy. It forwards TLS by the ClientHello SNI or the HT
 - TLS SNI parsing checks the record length against the buffer, then checks extension and server-name lengths against that record. A name that continues past the record is not accepted. An empty name is rejected.
 - SOCKS5 accepts only version 5 and methods `0x00` and `0x02`. Username length must be 1–255. A missing password with method 2 fails. Address types other than IPv4, domain, and IPv6 fail.
 - The monitor reads at most 4096 header bytes and answers `GET /` only after `\r\n\r\n`. A buffer that fills without that terminator, or a client that stops sending, is closed with no JSON body. The incomplete-header wait defaults to 5 seconds. `Content-Length` is the length of the JSON actually written. The JSON is built in a 16 KiB buffer; a report that does not fit is answered with an empty `500` and logged once. Other methods and paths are rejected without counters.
-- `net_write_all_ms` waits for writability against a deadline and fails when it passes. `SIGPIPE` is ignored in `main`. A negative `recvfrom` does not enqueue a DNS job.
+- The test-only `net_write_all_ms` helper waits for writability against a deadline and fails when it passes. `SIGPIPE` is ignored in `main`. A negative `recvfrom` does not enqueue a DNS job.
 
 ## Resource limits
 

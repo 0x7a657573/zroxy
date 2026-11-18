@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -31,6 +32,79 @@ static bool io_set_nonblock(int fd, int *saved_flags)
 static void io_restore_flags(int fd, int saved_flags)
 {
     (void)fcntl(fd, F_SETFL, saved_flags);
+}
+
+bool net_wait_fd(int fd, int events, int64_t deadline_ms)
+{
+    for (;;)
+    {
+        int64_t now = net_mono_ms();
+        int64_t left64;
+        int left;
+        struct pollfd pfd;
+        int rc;
+
+        if (now < 0 || now >= deadline_ms)
+            return false;
+        left64 = deadline_ms - now;
+        if (left64 > INT_MAX)
+            left = INT_MAX;
+        else
+            left = (int)left64;
+        pfd.fd = fd;
+        pfd.events = (short)events;
+        pfd.revents = 0;
+        rc = poll(&pfd, 1, left);
+        if (rc < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        if (rc == 0)
+            return false;
+        if (pfd.revents & POLLNVAL)
+            return false;
+        if (pfd.revents & (events | POLLERR | POLLHUP))
+            return true;
+    }
+}
+
+bool net_write_all_ms(int fd, const void *buf, size_t len, int timeout_ms)
+{
+    const uint8_t *p = (const uint8_t *)buf;
+    size_t written = 0;
+    int saved = 0;
+    int64_t now;
+    int64_t deadline;
+    bool ok = false;
+
+    if (timeout_ms < 0)
+        timeout_ms = 0;
+    now = net_mono_ms();
+    if (now < 0 || !io_set_nonblock(fd, &saved))
+        return false;
+    deadline = now + (int64_t)timeout_ms;
+    while (written < len)
+    {
+        ssize_t n;
+        if (!net_wait_fd(fd, POLLOUT, deadline))
+            goto out;
+        n = write(fd, p + written, len - written);
+        if (n < 0)
+        {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+                continue;
+            goto out;
+        }
+        if (n == 0)
+            goto out;
+        written += (size_t)n;
+    }
+    ok = true;
+out:
+    io_restore_flags(fd, saved);
+    return ok;
 }
 
 static bool net_connect_one(int sfd, const struct sockaddr *addr, socklen_t len, int64_t deadline_ms)
