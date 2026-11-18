@@ -9,6 +9,38 @@
 #include <stdint.h>
 #include <sys/socket.h>
 
+#ifdef SNI_TEST_HOOKS
+enum sni_fault {
+	SNI_FAULT_EINTR_READ,
+	SNI_FAULT_EAGAIN_WRITE,
+	SNI_FAULT_EINTR_WRITE,
+	SNI_FAULT_FAIL_ACCEPT,
+	SNI_FAULT_EINTR_CONNECT,
+	SNI_FAULT_EINTR_WAIT,
+	SNI_FAULT_FAIL_WAIT,
+	SNI_FAULT_FAIL_ALLOCS
+};
+
+int sni_take_fault(enum sni_fault which);
+int sni_read_limit(void);
+int sni_write_limit(void);
+int sni_hello_idle_ms_override(void);
+uint32_t sni_relay_budget_override(void);
+void sni_note_client_read(uint32_t n);
+void sni_note_pending(uint32_t n);
+void sni_note_eagain(void);
+void sni_note_wait(void);
+void sni_note_relay_yield(void);
+void sni_note_accept_pause(void);
+#else
+static inline void sni_note_client_read(uint32_t n) { (void)n; }
+static inline void sni_note_pending(uint32_t n) { (void)n; }
+static inline void sni_note_eagain(void) { }
+static inline void sni_note_wait(void) { }
+static inline void sni_note_relay_yield(void) { }
+static inline void sni_note_accept_pause(void) { }
+#endif
+
 #define SNI_SOCKS_CAP 600u
 /* Bytes one relay_pump call may move before yielding to other connections. */
 #define SNI_RELAY_BUDGET (256u * 1024u)

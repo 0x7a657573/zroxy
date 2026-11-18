@@ -51,80 +51,6 @@
  * - stats_close_connection and sni_conn_release run once, from conn_kill.
  */
 
-#ifdef SNI_TEST_HOOKS
-static int g_read_limit;
-static int g_write_limit;
-static int g_eagain_write;
-static int g_eintr_read;
-static int g_eintr_write;
-static int g_eintr_connect;
-static int g_eintr_wait;
-static int g_fail_wait;
-static int g_fail_allocs;
-static int g_fail_accept;
-static uint32_t g_accept_pauses;
-static uint32_t g_client_bytes;
-static uint32_t g_max_pending;
-static uint32_t g_eagain;
-static uint32_t g_wait_calls;
-static uint32_t g_relay_yields;
-static int g_hello_idle_ms = SNI_HELLO_IDLE_MS;
-static uint32_t g_relay_budget = SNI_RELAY_BUDGET;
-
-static int take_one(int *counter)
-{
-	int cur = __atomic_load_n(counter, __ATOMIC_RELAXED);
-	while (cur > 0) {
-		if (__atomic_compare_exchange_n(counter, &cur, cur - 1, 1,
-				__ATOMIC_RELAXED, __ATOMIC_RELAXED))
-			return 1;
-	}
-	return 0;
-}
-
-static void note_client_read(uint32_t n)
-{
-	__atomic_fetch_add(&g_client_bytes, n, __ATOMIC_RELAXED);
-}
-
-static void note_pending(uint32_t n)
-{
-	uint32_t cur = __atomic_load_n(&g_max_pending, __ATOMIC_RELAXED);
-	while (n > cur) {
-		if (__atomic_compare_exchange_n(&g_max_pending, &cur, n, 1,
-				__ATOMIC_RELAXED, __ATOMIC_RELAXED))
-			break;
-	}
-}
-
-static void note_eagain(void)
-{
-	__atomic_fetch_add(&g_eagain, 1, __ATOMIC_RELAXED);
-}
-
-static void note_wait(void)
-{
-	__atomic_fetch_add(&g_wait_calls, 1u, __ATOMIC_RELAXED);
-}
-
-static void note_relay_yield(void)
-{
-	__atomic_fetch_add(&g_relay_yields, 1u, __ATOMIC_RELAXED);
-}
-
-static void note_accept_pause(void)
-{
-	__atomic_fetch_add(&g_accept_pauses, 1u, __ATOMIC_RELAXED);
-}
-#else
-static void note_client_read(uint32_t n) { (void)n; }
-static void note_pending(uint32_t n) { (void)n; }
-static void note_eagain(void) { }
-static void note_wait(void) { }
-static void note_relay_yield(void) { }
-static void note_accept_pause(void) { }
-#endif
-
 static bool set_nb_cloexec(int fd)
 {
 	return net_set_nonblock_cloexec(fd);
@@ -134,11 +60,11 @@ static ssize_t io_read(int fd, void *buf, size_t len)
 {
 #ifdef SNI_TEST_HOOKS
 	int limit;
-	if (take_one(&g_eintr_read)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_READ)) {
 		errno = EINTR;
 		return -1;
 	}
-	limit = __atomic_load_n(&g_read_limit, __ATOMIC_RELAXED);
+	limit = sni_read_limit();
 	if (limit > 0 && len > (size_t)limit)
 		len = (size_t)limit;
 #endif
@@ -149,15 +75,15 @@ static ssize_t io_write(int fd, const void *buf, size_t len)
 {
 #ifdef SNI_TEST_HOOKS
 	int limit;
-	if (take_one(&g_eagain_write)) {
+	if (sni_take_fault(SNI_FAULT_EAGAIN_WRITE)) {
 		errno = EAGAIN;
 		return -1;
 	}
-	if (take_one(&g_eintr_write)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_WRITE)) {
 		errno = EINTR;
 		return -1;
 	}
-	limit = __atomic_load_n(&g_write_limit, __ATOMIC_RELAXED);
+	limit = sni_write_limit();
 	if (limit > 0 && len > (size_t)limit)
 		len = (size_t)limit;
 #endif
@@ -173,7 +99,7 @@ static int io_accept(int fd, struct sockaddr_storage *peer)
 	socklen_t len = (socklen_t)sizeof(*peer);
 
 #ifdef SNI_TEST_HOOKS
-	if (take_one(&g_fail_accept)) {
+	if (sni_take_fault(SNI_FAULT_FAIL_ACCEPT)) {
 		errno = EMFILE;
 		return -1;
 	}
@@ -184,7 +110,7 @@ static int io_accept(int fd, struct sockaddr_storage *peer)
 static int io_connect(int fd, const struct sockaddr *sa, socklen_t len)
 {
 #ifdef SNI_TEST_HOOKS
-	if (take_one(&g_eintr_connect)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_CONNECT)) {
 		errno = EINTR;
 		return -1;
 	}
@@ -214,13 +140,13 @@ static int react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 	int i;
 	if (max > 64)
 		max = 64;
-	note_wait();
+	sni_note_wait();
 #ifdef SNI_TEST_HOOKS
-	if (take_one(&g_eintr_wait)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_WAIT)) {
 		errno = EINTR;
 		return -1;
 	}
-	if (take_one(&g_fail_wait)) {
+	if (sni_take_fault(SNI_FAULT_FAIL_WAIT)) {
 		errno = EBADF;
 		return -1;
 	}
@@ -314,7 +240,7 @@ static int write_some(int fd, const uint8_t *buf, uint32_t len, uint32_t *off, u
 		} while (n < 0 && errno == EINTR);
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				note_eagain();
+				sni_note_eagain();
 				return 0;
 			}
 			return -1;
@@ -550,7 +476,7 @@ static sni_conn *conn_new(sni_engine *e, int client_fd)
 	sni_conn *c;
 	int64_t now;
 #ifdef SNI_TEST_HOOKS
-	if (take_one(&g_fail_allocs))
+	if (sni_take_fault(SNI_FAULT_FAIL_ALLOCS))
 		return NULL;
 #endif
 	now = net_mono_ms();
@@ -620,7 +546,7 @@ static void enter_relay(sni_engine *e, sni_conn *c)
 		c->c2u_len = c->hello_len;
 		c->c2u_off = 0;
 		c->c2u_by = now + (int64_t)c->io_ms;
-		note_pending(c->c2u_len);
+		sni_note_pending(c->c2u_len);
 	}
 	c->idle_at = now + (int64_t)c->idle_ms;
 	c->touched = 1;
@@ -1008,7 +934,7 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 			conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 			return;
 		}
-		note_client_read(c->hello_len - before);
+		sni_note_client_read(c->hello_len - before);
 		c->last_hello = net_mono_ms();
 		if (host_ready(e, c))
 			return;
@@ -1020,7 +946,7 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 static uint32_t relay_budget(void)
 {
 #ifdef SNI_TEST_HOOKS
-	uint32_t b = __atomic_load_n(&g_relay_budget, __ATOMIC_RELAXED);
+	uint32_t b = sni_relay_budget_override();
 	if (b > 0)
 		return b;
 #endif
@@ -1049,7 +975,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			if (c->c2u_off == c->c2u_len)
 				c->c2u_by = 0;
 			if (c->c2u_len >= c->c2u_off)
-				note_pending(c->c2u_len - c->c2u_off);
+				sni_note_pending(c->c2u_len - c->c2u_off);
 		}
 		if (!c->dead && !c->client_shut && c->u2c_off < c->u2c_len) {
 			uint32_t before = c->u2c_off;
@@ -1065,7 +991,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			if (c->u2c_off == c->u2c_len)
 				c->u2c_by = 0;
 			if (c->u2c_len >= c->u2c_off)
-				note_pending(c->u2c_len - c->u2c_off);
+				sni_note_pending(c->u2c_len - c->u2c_off);
 		}
 		if (!c->dead && !c->client_eof && c->c2u_off == c->c2u_len) {
 			c->c2u_off = 0;
@@ -1079,7 +1005,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			} else if (rr == 1) {
 				progress = 1;
 				c->c2u_by = net_mono_ms() + (int64_t)c->io_ms;
-				note_pending(c->c2u_len);
+				sni_note_pending(c->c2u_len);
 			}
 		}
 		if (!c->dead && c->up_fd >= 0 && !c->up_eof && c->u2c_off == c->u2c_len) {
@@ -1094,7 +1020,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 			} else if (rr == 1) {
 				progress = 1;
 				c->u2c_by = net_mono_ms() + (int64_t)c->io_ms;
-				note_pending(c->u2c_len);
+				sni_note_pending(c->u2c_len);
 			}
 		}
 		if (!c->dead && c->client_eof && c->c2u_off == c->c2u_len &&
@@ -1123,7 +1049,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		 * socket, and conn_arm keeps both armed.
 		 */
 		if (moved >= budget) {
-			note_relay_yield();
+			sni_note_relay_yield();
 			break;
 		}
 	}
@@ -1187,7 +1113,7 @@ static void accept_pause(sni_engine *e)
 	(void)watch(e, e->listen_fd, 0, &e->listen_interest, &e->listen_tag);
 	e->accept_paused = 1;
 	e->accept_resume_at = now + SNI_ACCEPT_PAUSE_MS;
-	note_accept_pause();
+	sni_note_accept_pause();
 }
 
 static void accept_resume(sni_engine *e)
@@ -1343,7 +1269,7 @@ static void dispatch_one(sni_engine *e, const sni_ready *ev)
 static int hello_idle_ms(void)
 {
 #ifdef SNI_TEST_HOOKS
-	int ms = __atomic_load_n(&g_hello_idle_ms, __ATOMIC_RELAXED);
+	int ms = sni_hello_idle_ms_override();
 	if (ms > 0)
 		return ms;
 #endif
@@ -1765,82 +1691,3 @@ void *sni_client_handler(void *arg)
 }
 #endif /* SNI_TEST_HOOKS */
 
-#ifdef SNI_TEST_HOOKS
-void sni_test_set_faults(const sni_test_faults *faults)
-{
-	sni_test_faults none;
-	if (!faults) {
-		memset(&none, 0, sizeof(none));
-		faults = &none;
-	}
-	__atomic_store_n(&g_read_limit, faults->read_limit, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_write_limit, faults->write_limit, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_eagain_write, faults->eagain_write, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_eintr_read, faults->eintr_read, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_eintr_write, faults->eintr_write, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_eintr_connect, faults->eintr_connect, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_eintr_wait, faults->eintr_wait, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_fail_wait, faults->fail_wait, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_fail_allocs, faults->fail_allocs, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_fail_accept, faults->fail_accept, __ATOMIC_RELAXED);
-}
-
-void sni_test_clear_faults(void)
-{
-	sni_test_set_faults(NULL);
-}
-
-void sni_test_reset_counters(void)
-{
-	__atomic_store_n(&g_client_bytes, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_max_pending, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_eagain, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_wait_calls, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_relay_yields, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_accept_pauses, 0u, __ATOMIC_RELAXED);
-}
-
-uint32_t sni_test_client_bytes(void)
-{
-	return __atomic_load_n(&g_client_bytes, __ATOMIC_RELAXED);
-}
-
-uint32_t sni_test_max_pending(void)
-{
-	return __atomic_load_n(&g_max_pending, __ATOMIC_RELAXED);
-}
-
-uint32_t sni_test_eagain_count(void)
-{
-	return __atomic_load_n(&g_eagain, __ATOMIC_RELAXED);
-}
-
-uint32_t sni_test_wait_calls(void)
-{
-	return __atomic_load_n(&g_wait_calls, __ATOMIC_RELAXED);
-}
-
-void sni_test_set_hello_idle_ms(int ms)
-{
-	if (ms <= 0)
-		ms = SNI_HELLO_IDLE_MS;
-	__atomic_store_n(&g_hello_idle_ms, ms, __ATOMIC_RELAXED);
-}
-
-uint32_t sni_test_accept_pauses(void)
-{
-	return __atomic_load_n(&g_accept_pauses, __ATOMIC_RELAXED);
-}
-
-uint32_t sni_test_relay_yields(void)
-{
-	return __atomic_load_n(&g_relay_yields, __ATOMIC_RELAXED);
-}
-
-void sni_test_set_relay_budget(uint32_t bytes)
-{
-	if (bytes == 0)
-		bytes = SNI_RELAY_BUDGET;
-	__atomic_store_n(&g_relay_budget, bytes, __ATOMIC_RELAXED);
-}
-#endif
