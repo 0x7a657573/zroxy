@@ -762,7 +762,7 @@ Current important bounds include:
 - up to `SNIMAXCONN` concurrent SNI connections (default 1024);
 - fixed 8 KiB buffers for the initial data and each relay direction;
 - a process-wide resolver pool with 4 threads and 128 resolver slots;
-- up to 32 monitor workers;
+- up to 32 non-blocking monitor clients on one monitor thread;
 - one DNS event-loop thread, with up to 96 reusable non-blocking upstream TCP
   connections (configurable with `--dnsconnections`).
 
