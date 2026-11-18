@@ -24,7 +24,6 @@ static inline void fuzz_init_once(void)
 	if (done)
 		return;
 	done = 1;
-	log_init();
 	log_set_quiet(1);
 	signal(SIGPIPE, SIG_IGN);
 }

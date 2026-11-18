@@ -25,12 +25,13 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
 
 #include <zroxy/log.h>
 
+static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static struct {
-  void *udata;
-  log_LockFn lock;
   FILE *fp;
   int level;
   int quiet;
@@ -46,30 +47,6 @@ static const char *level_colors[] = {
   "\x1b[94m", "\x1b[36m", "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[35m"
 };
 #endif
-
-
-static void lock(void)   {
-  if (L.lock) {
-    L.lock(L.udata, 1);
-  }
-}
-
-
-static void unlock(void) {
-  if (L.lock) {
-    L.lock(L.udata, 0);
-  }
-}
-
-
-void log_set_udata(void *udata) {
-  L.udata = udata;
-}
-
-
-void log_set_lock(log_LockFn fn) {
-  L.lock = fn;
-}
 
 
 void log_set_fp(FILE *fp) {
@@ -93,7 +70,7 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
   }
 
   /* Acquire lock */
-  lock();
+  pthread_mutex_lock(&log_mutex);
 
   /* Get current time */
   time_t t = time(NULL);
@@ -132,5 +109,5 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
   }
 
   /* Release lock */
-  unlock();
+  pthread_mutex_unlock(&log_mutex);
 }

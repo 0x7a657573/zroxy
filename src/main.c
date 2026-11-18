@@ -113,7 +113,6 @@ int main(int argc, const char **argv)
 	statistics_t *DnsStat = NULL;
 	SniServer_t Xconf;
 
-	log_init();
 	memset(&ignore_pipe, 0, sizeof(ignore_pipe));
 	ignore_pipe.sa_handler = SIG_IGN;
 	sigaction(SIGPIPE, &ignore_pipe, NULL);

@@ -15,8 +15,6 @@
 //#define LOG_USE_COLOR
 #define LOG_VERSION "0.1.0"
 
-typedef void (*log_LockFn)(void *udata, int lock);
-
 enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
 
 #define LOG_FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -28,14 +26,9 @@ enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
 #define log_error(...) log_log(LOG_ERROR, LOG_FILENAME , __LINE__, __VA_ARGS__)
 #define log_fatal(...) log_log(LOG_FATAL, LOG_FILENAME , __LINE__, __VA_ARGS__)
 
-void log_set_udata(void *udata);
-void log_set_lock(log_LockFn fn);
 void log_set_fp(FILE *fp);
 void log_set_level(int level);
 void log_set_quiet(int enable);
 
 void log_log(int level, const char *file, int line, const char *fmt, ...);
-
-/* Serialize log lines across threads. Call once before starting threads. */
-void log_init(void);
 #endif
