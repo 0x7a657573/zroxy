@@ -222,4 +222,19 @@ typedef struct sni_ready {
 	uint32_t ev;
 } sni_ready;
 
+bool sni_set_nb_cloexec(int fd);
+ssize_t sni_io_read(int fd, void *buf, size_t len);
+ssize_t sni_io_write(int fd, const void *buf, size_t len);
+int sni_io_accept(int fd, struct sockaddr_storage *peer);
+int sni_io_connect(int fd, const struct sockaddr *sa, socklen_t len);
+bool sni_react_add(sni_engine *e, int fd, uint32_t ev, sni_tag *tag);
+bool sni_react_mod(sni_engine *e, int fd, uint32_t ev, sni_tag *tag);
+void sni_react_del(sni_engine *e, int fd);
+int sni_react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms);
+bool sni_watch(sni_engine *e, int fd, uint32_t ev, uint32_t *slot, sni_tag *tag);
+void sni_drop_watched(sni_engine *e, int *fd, uint32_t *slot, sni_tag *tag);
+int sni_read_some(int fd, uint8_t *buf, uint32_t cap, uint32_t *len);
+int sni_write_some(int fd, const uint8_t *buf, uint32_t len, uint32_t *off, uint32_t *counter);
+int sni_shut_write(int fd);
+
 #endif

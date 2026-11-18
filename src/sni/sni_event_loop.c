@@ -51,218 +51,6 @@
  * - stats_close_connection and sni_conn_release run once, from conn_kill.
  */
 
-static bool set_nb_cloexec(int fd)
-{
-	return net_set_nonblock_cloexec(fd);
-}
-
-static ssize_t io_read(int fd, void *buf, size_t len)
-{
-#ifdef SNI_TEST_HOOKS
-	int limit;
-	if (sni_take_fault(SNI_FAULT_EINTR_READ)) {
-		errno = EINTR;
-		return -1;
-	}
-	limit = sni_read_limit();
-	if (limit > 0 && len > (size_t)limit)
-		len = (size_t)limit;
-#endif
-	return read(fd, buf, len);
-}
-
-static ssize_t io_write(int fd, const void *buf, size_t len)
-{
-#ifdef SNI_TEST_HOOKS
-	int limit;
-	if (sni_take_fault(SNI_FAULT_EAGAIN_WRITE)) {
-		errno = EAGAIN;
-		return -1;
-	}
-	if (sni_take_fault(SNI_FAULT_EINTR_WRITE)) {
-		errno = EINTR;
-		return -1;
-	}
-	limit = sni_write_limit();
-	if (limit > 0 && len > (size_t)limit)
-		len = (size_t)limit;
-#endif
-#if defined(MSG_NOSIGNAL)
-	return send(fd, buf, len, MSG_NOSIGNAL);
-#else
-	return write(fd, buf, len);
-#endif
-}
-
-static int io_accept(int fd, struct sockaddr_storage *peer)
-{
-	socklen_t len = (socklen_t)sizeof(*peer);
-
-#ifdef SNI_TEST_HOOKS
-	if (sni_take_fault(SNI_FAULT_FAIL_ACCEPT)) {
-		errno = EMFILE;
-		return -1;
-	}
-#endif
-	return accept(fd, (struct sockaddr *)peer, &len);
-}
-
-static int io_connect(int fd, const struct sockaddr *sa, socklen_t len)
-{
-#ifdef SNI_TEST_HOOKS
-	if (sni_take_fault(SNI_FAULT_EINTR_CONNECT)) {
-		errno = EINTR;
-		return -1;
-	}
-#endif
-	return connect(fd, sa, len);
-}
-
-static bool react_add(sni_engine *e, int fd, uint32_t ev, sni_tag *tag)
-{
-	return reactor_add(&e->re, fd, ev, tag);
-}
-
-static bool react_mod(sni_engine *e, int fd, uint32_t ev, sni_tag *tag)
-{
-	return reactor_mod(&e->re, fd, ev, tag);
-}
-
-static void react_del(sni_engine *e, int fd)
-{
-	reactor_del(&e->re, fd);
-}
-
-static int react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
-{
-	reactor_event evs[64];
-	int n;
-	int i;
-	if (max > 64)
-		max = 64;
-	sni_note_wait();
-#ifdef SNI_TEST_HOOKS
-	if (sni_take_fault(SNI_FAULT_EINTR_WAIT)) {
-		errno = EINTR;
-		return -1;
-	}
-	if (sni_take_fault(SNI_FAULT_FAIL_WAIT)) {
-		errno = EBADF;
-		return -1;
-	}
-#endif
-	n = reactor_wait(&e->re, evs, max, timeout_ms);
-	if (n < 0)
-		return -1;
-	for (i = 0; i < n; i++) {
-		sni_tag *tag = (sni_tag *)evs[i].tag;
-		out[i].tag = tag;
-		/* epoll reports no fd; the tag holds the fd it is armed with. */
-		out[i].fd = evs[i].fd >= 0 ? evs[i].fd : (tag ? tag->fd : -1);
-		out[i].ev = evs[i].ev;
-	}
-	return n;
-}
-
-static bool watch(sni_engine *e, int fd, uint32_t ev, uint32_t *slot, sni_tag *tag)
-{
-	if (fd < 0) {
-		*slot = 0;
-		return true;
-	}
-	if (ev == *slot)
-		return true;
-	if (tag)
-		tag->fd = fd;
-	if (ev == 0) {
-		react_del(e, fd);
-		*slot = 0;
-		return true;
-	}
-	if (*slot == 0) {
-		if (!react_add(e, fd, ev, tag))
-			return false;
-	} else if (!react_mod(e, fd, ev, tag)) {
-		return false;
-	}
-	*slot = ev;
-	return true;
-}
-
-static void drop_watched(sni_engine *e, int *fd, uint32_t *slot, sni_tag *tag)
-{
-	if (*fd < 0) {
-		if (tag)
-			tag->fd = -1;
-		return;
-	}
-	if (*slot != 0) {
-		react_del(e, *fd);
-		*slot = 0;
-	}
-	close(*fd);
-	*fd = -1;
-	if (tag)
-		tag->fd = -1;
-}
-
-static int read_some(int fd, uint8_t *buf, uint32_t cap, uint32_t *len)
-{
-	size_t space;
-	ssize_t n;
-	if (*len >= cap)
-		return 0;
-	space = (size_t)(cap - *len);
-	do {
-		n = io_read(fd, buf + *len, space);
-	} while (n < 0 && errno == EINTR);
-	if (n < 0) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			return 0;
-		}
-		return -1;
-	}
-	if (n == 0)
-		return -2;
-	if ((size_t)n > space)
-		return -1;
-	*len += (uint32_t)n;
-	return 1;
-}
-
-static int write_some(int fd, const uint8_t *buf, uint32_t len, uint32_t *off, uint32_t *counter)
-{
-	while (*off < len) {
-		size_t space = (size_t)(len - *off);
-		ssize_t n;
-		do {
-			n = io_write(fd, buf + *off, space);
-		} while (n < 0 && errno == EINTR);
-		if (n < 0) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				sni_note_eagain();
-				return 0;
-			}
-			return -1;
-		}
-		if (n == 0 || (size_t)n > space)
-			return -1;
-		*off += (uint32_t)n;
-		if (counter)
-			*counter += (uint32_t)n;
-	}
-	return 1;
-}
-
-static int shut_write(int fd)
-{
-	int rc;
-	do {
-		rc = shutdown(fd, SHUT_WR);
-	} while (rc < 0 && errno == EINTR);
-	return rc;
-}
-
 /*
  * Counters for every listener, reported through the SNI_Server monitor
  * object. Word-sized and updated with relaxed atomics: 64-bit atomics are not
@@ -398,8 +186,8 @@ static void conn_kill(sni_engine *e, sni_conn *c, int reason)
 		resolver_cancel(c->resolve_slot, c->pending_req_id);
 		c->pending_req_id = 0;
 	}
-	drop_watched(e, &c->client_fd, &c->client_interest, &c->client_tag);
-	drop_watched(e, &c->up_fd, &c->up_interest, &c->up_tag);
+	sni_drop_watched(e, &c->client_fd, &c->client_interest, &c->client_tag);
+	sni_drop_watched(e, &c->up_fd, &c->up_interest, &c->up_tag);
 	if (c->settled)
 		return;
 	c->settled = 1;
@@ -450,9 +238,9 @@ static bool conn_arm(sni_engine *e, sni_conn *c)
 		if (c->up_fd >= 0 && !c->up_shut && c->c2u_off < c->c2u_len)
 			uin |= SNI_EV_OUT;
 	}
-	if (!watch(e, c->client_fd, cin, &c->client_interest, &c->client_tag))
+	if (!sni_watch(e, c->client_fd, cin, &c->client_interest, &c->client_tag))
 		return false;
-	if (!watch(e, c->up_fd, uin, &c->up_interest, &c->up_tag))
+	if (!sni_watch(e, c->up_fd, uin, &c->up_interest, &c->up_tag))
 		return false;
 	return true;
 }
@@ -573,7 +361,7 @@ static void socks_pump(sni_engine *e, sni_conn *c)
 	int guard = 0;
 	while (!c->dead && c->state == SNI_ST_SOCKS && guard++ < 100000) {
 		if (c->socks_step == S5_SEND) {
-			int wr = write_some(c->up_fd, c->socks.out, (uint32_t)c->socks.out_len,
+			int wr = sni_write_some(c->up_fd, c->socks.out, (uint32_t)c->socks.out_len,
 					&c->socks_out_off, NULL);
 			if (wr < 0) {
 				conn_kill(e, c, SNI_CLOSE_SOCKS);
@@ -589,7 +377,7 @@ static void socks_pump(sni_engine *e, sni_conn *c)
 				conn_kill(e, c, SNI_CLOSE_SOCKS);
 				return;
 			}
-			rr = read_some(c->up_fd, c->socks_in, (uint32_t)c->socks.need, &c->socks_in_len);
+			rr = sni_read_some(c->up_fd, c->socks_in, (uint32_t)c->socks.need, &c->socks_in_len);
 			if (rr == 0)
 				break;
 			if (rr < 0) {
@@ -699,13 +487,13 @@ static void try_connect(sni_engine *e, sni_conn *c)
 			c->addr_i++;
 			continue;
 		}
-		if (!set_nb_cloexec(fd)) {
+		if (!sni_set_nb_cloexec(fd)) {
 			close(fd);
 			c->addr_i++;
 			continue;
 		}
 		do {
-			rc = io_connect(fd, (struct sockaddr *)&addr->sa, addr->len);
+			rc = sni_io_connect(fd, (struct sockaddr *)&addr->sa, addr->len);
 		} while (rc < 0 && errno == EINTR);
 		if (rc == 0 || (rc < 0 && errno == EISCONN)) {
 			c->up_fd = fd;
@@ -748,7 +536,7 @@ static void connect_pump(sni_engine *e, sni_conn *c, uint32_t ev)
 			conn_kill(e, c, SNI_CLOSE_NONE);
 		return;
 	}
-	drop_watched(e, &c->up_fd, &c->up_interest, &c->up_tag);
+	sni_drop_watched(e, &c->up_fd, &c->up_interest, &c->up_tag);
 	c->addr_i++;
 	try_connect(e, c);
 }
@@ -927,7 +715,7 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 			return;
 		}
 		before = c->hello_len;
-		rr = read_some(c->client_fd, c->hello, SNI_HELLO_CAP, &c->hello_len);
+		rr = sni_read_some(c->client_fd, c->hello, SNI_HELLO_CAP, &c->hello_len);
 		if (rr == 0)
 			break;
 		if (rr < 0) {
@@ -963,7 +751,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		int rr;
 		if (c->up_fd >= 0 && !c->up_shut && c->c2u_off < c->c2u_len) {
 			uint32_t before = c->c2u_off;
-			wr = write_some(c->up_fd, c->c2u, c->c2u_len, &c->c2u_off, &c->tx);
+			wr = sni_write_some(c->up_fd, c->c2u, c->c2u_len, &c->c2u_off, &c->tx);
 			if (wr < 0) {
 				conn_kill(e, c, SNI_CLOSE_NONE);
 				return;
@@ -979,7 +767,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		}
 		if (!c->dead && !c->client_shut && c->u2c_off < c->u2c_len) {
 			uint32_t before = c->u2c_off;
-			wr = write_some(c->client_fd, c->u2c, c->u2c_len, &c->u2c_off, &c->rx);
+			wr = sni_write_some(c->client_fd, c->u2c, c->u2c_len, &c->u2c_off, &c->rx);
 			if (wr < 0) {
 				conn_kill(e, c, SNI_CLOSE_NONE);
 				return;
@@ -996,7 +784,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		if (!c->dead && !c->client_eof && c->c2u_off == c->c2u_len) {
 			c->c2u_off = 0;
 			c->c2u_len = 0;
-			rr = read_some(c->client_fd, c->c2u, SNI_RELAY_CAP, &c->c2u_len);
+			rr = sni_read_some(c->client_fd, c->c2u, SNI_RELAY_CAP, &c->c2u_len);
 			if (rr == -2) {
 				c->client_eof = 1;
 			} else if (rr < 0) {
@@ -1011,7 +799,7 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		if (!c->dead && c->up_fd >= 0 && !c->up_eof && c->u2c_off == c->u2c_len) {
 			c->u2c_off = 0;
 			c->u2c_len = 0;
-			rr = read_some(c->up_fd, c->u2c, SNI_RELAY_CAP, &c->u2c_len);
+			rr = sni_read_some(c->up_fd, c->u2c, SNI_RELAY_CAP, &c->u2c_len);
 			if (rr == -2) {
 				c->up_eof = 1;
 			} else if (rr < 0) {
@@ -1025,12 +813,12 @@ static void relay_pump(sni_engine *e, sni_conn *c)
 		}
 		if (!c->dead && c->client_eof && c->c2u_off == c->c2u_len &&
 				c->up_fd >= 0 && !c->up_shut) {
-			(void)shut_write(c->up_fd);
+			(void)sni_shut_write(c->up_fd);
 			c->up_shut = 1;
 			progress = 1;
 		}
 		if (!c->dead && c->up_eof && c->u2c_off == c->u2c_len && !c->client_shut) {
-			(void)shut_write(c->client_fd);
+			(void)sni_shut_write(c->client_fd);
 			c->client_shut = 1;
 			progress = 1;
 		}
@@ -1110,7 +898,7 @@ static void accept_pause(sni_engine *e)
 			SNI_ACCEPT_PAUSE_MS);
 		e->accept_log_at = now + SNI_ACCEPT_LOG_MS;
 	}
-	(void)watch(e, e->listen_fd, 0, &e->listen_interest, &e->listen_tag);
+	(void)sni_watch(e, e->listen_fd, 0, &e->listen_interest, &e->listen_tag);
 	e->accept_paused = 1;
 	e->accept_resume_at = now + SNI_ACCEPT_PAUSE_MS;
 	sni_note_accept_pause();
@@ -1128,7 +916,7 @@ static void accept_resume(sni_engine *e)
 	e->accept_paused = 0;
 	if (e->listen_fd < 0)
 		return;
-	if (!watch(e, e->listen_fd, SNI_EV_IN, &e->listen_interest, &e->listen_tag)) {
+	if (!sni_watch(e, e->listen_fd, SNI_EV_IN, &e->listen_interest, &e->listen_tag)) {
 		log_error("sni listener re-arm failed: %s", strerror(errno));
 		if (now >= 0) {
 			e->accept_paused = 1;
@@ -1180,7 +968,7 @@ static void accept_clients(sni_engine *e)
 		int fd;
 		sni_conn *c;
 		memset(&peer, 0, sizeof(peer));
-		fd = io_accept(e->listen_fd, &peer);
+		fd = sni_io_accept(e->listen_fd, &peer);
 		if (fd < 0) {
 			if (errno == EINTR)
 				continue;
@@ -1198,7 +986,7 @@ static void accept_clients(sni_engine *e)
 			close(fd);
 			continue;
 		}
-		if (!set_nb_cloexec(fd)) {
+		if (!sni_set_nb_cloexec(fd)) {
 			count_close(SNI_CLOSE_REFUSED);
 			close(fd);
 			continue;
@@ -1378,7 +1166,7 @@ static void sni_engine_run(sni_engine *e)
 		reap(e);
 		if (e->listen_fd < 0 && e->head == NULL)
 			break;
-		n = react_wait(e, ready, 64, engine_timeout(e));
+		n = sni_react_wait(e, ready, 64, engine_timeout(e));
 		if (n < 0) {
 			if (errno == EINTR) {
 				accept_resume(e);
@@ -1406,7 +1194,7 @@ static void sni_engine_run(sni_engine *e)
 	}
 	reap(e);
 	if (e->sink && e->sink_interest != 0) {
-		react_del(e, e->sink->pipe_read);
+		sni_react_del(e, e->sink->pipe_read);
 		e->sink_interest = 0;
 	}
 	drain_resolve(e);
@@ -1417,7 +1205,7 @@ static void sni_engine_deinit(sni_engine *e)
 	sni_conn *c = e->head;
 	if (e->sink) {
 		if (e->sink_interest != 0) {
-			react_del(e, e->sink->pipe_read);
+			sni_react_del(e, e->sink->pipe_read);
 			e->sink_interest = 0;
 		}
 		resolver_sink_mark_closed(e->sink);
@@ -1478,21 +1266,21 @@ static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg
 		goto fail;
 	e->wake_r = pipes[0];
 	e->wake_w = pipes[1];
-	if (!set_nb_cloexec(e->wake_r) || !set_nb_cloexec(e->wake_w))
+	if (!sni_set_nb_cloexec(e->wake_r) || !sni_set_nb_cloexec(e->wake_w))
 		goto fail;
 	e->wake_tag.fd = e->wake_r;
-	if (!watch(e, e->wake_r, SNI_EV_IN, &e->wake_interest, &e->wake_tag))
+	if (!sni_watch(e, e->wake_r, SNI_EV_IN, &e->wake_interest, &e->wake_tag))
 		goto fail;
 	e->sink_tag.fd = e->sink->pipe_read;
-	if (!watch(e, e->sink->pipe_read, SNI_EV_IN, &e->sink_interest, &e->sink_tag))
+	if (!sni_watch(e, e->sink->pipe_read, SNI_EV_IN, &e->sink_interest, &e->sink_tag))
 		goto fail;
 	if (listen_fd >= 0) {
 		e->listen_fd = listen_fd;
 		listen_fd = -1;
-		if (!set_nb_cloexec(e->listen_fd))
+		if (!sni_set_nb_cloexec(e->listen_fd))
 			goto fail;
 		e->listen_tag.fd = e->listen_fd;
-		if (!watch(e, e->listen_fd, SNI_EV_IN, &e->listen_interest, &e->listen_tag))
+		if (!sni_watch(e, e->listen_fd, SNI_EV_IN, &e->listen_interest, &e->listen_tag))
 			goto fail;
 	}
 	return true;
@@ -1649,7 +1437,7 @@ void sni_connection_run(sniclient_t *client)
 		return;
 	fd = client->connid;
 	client->connid = -1;
-	if (fd < 0 || !set_nb_cloexec(fd)) {
+	if (fd < 0 || !sni_set_nb_cloexec(fd)) {
 		if (fd >= 0)
 			close(fd);
 		stats_close_connection(client->SniConfig.sta, 0, 0);
