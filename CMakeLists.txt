@@ -72,7 +72,8 @@ target_include_directories(zroxy_core PUBLIC ${PROJECT_SOURCE_DIR}/src/core)
 # created when both services are enabled.
 set(ZROXY_RESOLVER_SOURCES
     src/resolver/resolver.c
-    src/resolver/resolver_policy.c)
+    src/resolver/resolver_policy.c
+    src/resolver/resolver_test_hooks.c)
 
 zroxy_add_module(zroxy_resolver
     SOURCES ${ZROXY_RESOLVER_SOURCES}
