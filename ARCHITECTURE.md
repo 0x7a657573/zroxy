@@ -303,7 +303,12 @@ path, then returns `1`.
 | `src/sni/sni_test_hooks.c` | Test-only fault and counter state | Compiled into the hook libraries only |
 | `src/sni/sni_internal.h` | Private SNI engine types and cross-file declarations | Shared only by SNI implementation sources |
 | `src/sni/sni_event_loop.h` | Event-loop API and test hooks (private) | Joinable listener: open/close |
-| `src/resolver/resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
+| `src/resolver/resolver.c` | Resolver pool lifecycle, worker loop, slot queues, submission, cancellation, release, and stats | Owns the process-wide bounded pool and worker state |
+| `src/resolver/resolver_internal.h` | Private resolver pool types, quotas, and cross-file declarations | Shared only by resolver implementation sources |
+| `src/resolver/resolver_policy.c` | Hostname normalization and numeric/address destination policy | Pure address handling plus listener self-connect checks |
+| `src/resolver/resolver_infra.c` | SOCKS upstream cache and listener-bind tracking | Infrastructure lookups and bind records |
+| `src/resolver/resolver_sink.c` | Completion pipes, rings, sink lifecycle, and sink quotas | Delivers worker completions to event loops |
+| `src/resolver/resolver_test_hooks.c` | Test-only resolver hooks, counters, and accounting helpers | Compiled under `SNI_TEST_HOOKS` only |
 | `src/resolver/resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
 | `src/sni/sni_conn_limit.c` | Process-wide SNI connection cap | `SNIMAXCONN` live-connection slots (default 1024) |
 | `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |
