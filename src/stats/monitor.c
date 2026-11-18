@@ -27,6 +27,12 @@
 #include <fcntl.h>
 #include <sys/resource.h>
 #include <limits.h>
+#if defined(__OpenBSD__) || defined(__FreeBSD__)
+#include <sys/sysctl.h>
+#endif
+#if defined(__FreeBSD__)
+#include <sys/user.h>
+#endif
 
 #include "../core/reactor.h"
 
@@ -662,7 +668,7 @@ static bool mon_append(char **ptr, char *end, const char *fmt, ...)
 	return true;
 }
 
-#ifdef __linux__
+#if defined(__linux__)
 /*
  * Reads the integer after "key" (for example "\nThreads:") in the status
  * text. Returns -1 when the key is absent.
@@ -706,6 +712,64 @@ static void mon_read_status(long long *threads, long long *rss_kib, long long *h
 	*rss_kib = mon_status_value(text, "\nVmRSS:");
 	*hwm_kib = mon_status_value(text, "\nVmHWM:");
 }
+#elif defined(__OpenBSD__)
+/* Threads and resident pages from the BSD process sysctl interface. */
+static void mon_read_status(long long *threads, long long *rss_kib, long long *hwm_kib)
+{
+	struct kinfo_proc kp;
+	struct rusage ru;
+	size_t len;
+	int mib[6] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid(),
+		sizeof(struct kinfo_proc), 1 };
+
+	*threads = -1;
+	*rss_kib = -1;
+	*hwm_kib = -1;
+	if (getrusage(RUSAGE_SELF, &ru) == 0)
+		*hwm_kib = (long long)ru.ru_maxrss;
+	len = sizeof(kp);
+	if (sysctl(mib, 6, &kp, &len, NULL, 0) == 0 && len >= sizeof(kp))
+		*rss_kib = (long long)kp.p_vm_rssize * (long long)getpagesize() / 1024;
+
+	{
+		struct kinfo_proc *all = NULL;
+		size_t all_len = 0;
+		int i;
+		long long count = 0;
+
+		mib[2] = KERN_PROC_PID | KERN_PROC_SHOW_THREADS;
+		mib[5] = 0;
+		if (sysctl(mib, 6, NULL, &all_len, NULL, 0) == 0 &&
+		    all_len > 0 && all_len % sizeof(*all) == 0) {
+			all = malloc(all_len);
+			mib[5] = (int)(all_len / sizeof(*all));
+			if (all && sysctl(mib, 6, all, &all_len, NULL, 0) == 0 &&
+			    all_len % sizeof(*all) == 0) {
+				for (i = 0; i < (int)(all_len / sizeof(*all)); i++)
+					if (all[i].p_tid != -1)
+						count++;
+				*threads = count;
+			}
+		}
+		free(all);
+	}
+}
+#elif defined(__FreeBSD__)
+/* FreeBSD exposes the process values through the kern.proc.pid mib. */
+static void mon_read_status(long long *threads, long long *rss_kib, long long *hwm_kib)
+{
+	struct kinfo_proc kp;
+	size_t len = sizeof(kp);
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid() };
+
+	*threads = -1;
+	*rss_kib = -1;
+	*hwm_kib = -1;
+	if (sysctl(mib, 4, &kp, &len, NULL, 0) == 0 && len >= sizeof(kp)) {
+		*threads = (long long)kp.ki_numthreads;
+		*rss_kib = (long long)kp.ki_rssize * (long long)getpagesize() / 1024;
+	}
+}
 #endif
 
 static bool mon_process_json(char **ptr, char *end, int open_files)
@@ -735,7 +799,7 @@ static bool mon_process_json(char **ptr, char *end, int open_files)
 	     mon_append(ptr, end, "\"UpTime\" : %lld ,\n", (long long)(now - mon_process_start)) &&
 	     mon_append(ptr, end, "\"OpenFiles\" : %i ,\n", open_files) &&
 	     mon_append(ptr, end, "\"MaxOpenFiles\" : %lld ,\n", max_files);
-#ifdef __linux__
+#if defined(__linux__) || defined(__OpenBSD__) || defined(__FreeBSD__)
 	if (ok)
 	{
 		long long threads;
