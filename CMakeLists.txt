@@ -112,6 +112,7 @@ set(ZROXY_SNI_SOURCES
     src/sni/sni_event_loop.c
     src/sni/sni_io.c
     src/sni/sni_test_hooks.c
+    src/sni/sni_upstream.c
 )
 set(ZROXY_SNI_DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats)
 
