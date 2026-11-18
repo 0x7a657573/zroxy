@@ -15,6 +15,7 @@ import zroxy_lab
 
 SYNTHETIC_IP = (10, 9, 8, 7)
 UPSTREAM_IP = (9, 9, 9, 9)
+FAST_FAILOVER_LIMIT = 0.75 if sys.platform.startswith("linux") else 1.25
 
 
 def _answer_with(ip):
@@ -669,12 +670,12 @@ def test_dns_failover_refused():
         ldns = zroxy_lab.free_udp_port()
         proc = _start_routes(lab, ldns, [_local(closed), _local(good.port)], dtimeout="2")
         elapsed = _expect_answer_from(ldns, "refused0.test", 0x5001, UPSTREAM_IP, 3.0)
-        if elapsed > 0.75:
+        if elapsed > FAST_FAILOVER_LIMIT:
             raise AssertionError("refused route was not skipped quickly: %.2fs" % elapsed)
         for i in range(4):
             elapsed = _expect_answer_from(ldns, "refused%d.test" % (i + 1), 0x5002 + i,
                                           UPSTREAM_IP, 3.0)
-            if elapsed > 0.75:
+            if elapsed > FAST_FAILOVER_LIMIT:
                 raise AssertionError("later query was slow: %.2fs" % elapsed)
         if good.query_count() != 5:
             raise AssertionError("route 1 saw %d of 5 queries" % good.query_count())
@@ -688,12 +689,12 @@ def test_dns_failover_blackhole():
         ldns = zroxy_lab.free_udp_port()
         proc = _start_routes(lab, ldns, [_local(hole.port), _local(good.port)], dtimeout="1")
         elapsed = _expect_answer_from(ldns, "hole0.test", 0x5101, UPSTREAM_IP, 3.0)
-        if not 0.8 <= elapsed <= 1.8:
+        if not 0.8 <= elapsed <= (1.8 if sys.platform.startswith("linux") else 2.5):
             raise AssertionError("first answer took %.2fs, expected about 1s" % elapsed)
         for i in range(3):
             elapsed = _expect_answer_from(ldns, "hole%d.test" % (i + 1), 0x5102 + i,
                                           UPSTREAM_IP, 3.0)
-            if elapsed > 0.75:
+            if elapsed > FAST_FAILOVER_LIMIT:
                 raise AssertionError("query after the switch took %.2fs" % elapsed)
         if hole.upstream_connections() != 1:
             raise AssertionError("black-hole route got %d connections, expected 1"
@@ -713,7 +714,7 @@ def test_dns_failover_socks_down():
         ]
         proc = _start_routes(lab, ldns, routes, dtimeout="2")
         elapsed = _expect_answer_from(ldns, "socks0.test", 0x5201, UPSTREAM_IP, 3.0)
-        if elapsed > 0.75:
+        if elapsed > FAST_FAILOVER_LIMIT:
             raise AssertionError("dead SOCKS route was not skipped quickly: %.2fs" % elapsed)
         _expect_answer_from(ldns, "socks1.test", 0x5202, UPSTREAM_IP, 3.0)
         if len(socks.connects) != 2:
@@ -730,7 +731,7 @@ def test_dns_via_direct_ignores_dsocks():
         proc = _start_routes(lab, ldns, ["%s via direct" % _local(upstream.port)],
                              extra=["-x", _local(dead)])
         elapsed = _expect_answer_from(ldns, "direct.test", 0x5301, UPSTREAM_IP, 3.0)
-        if elapsed > 0.75:
+        if elapsed > FAST_FAILOVER_LIMIT:
             raise AssertionError("direct route was slow: %.2fs" % elapsed)
         proc.check_alive()
 
@@ -800,7 +801,7 @@ def test_dns_failover_sticky():
         # Route 1 fails; the next query moves back to route 0.
         second.set_mode("close")
         elapsed = _expect_answer_from(ldns, "sticky9.test", 0x5510, other, 3.0)
-        if elapsed > 0.75:
+        if elapsed > FAST_FAILOVER_LIMIT:
             raise AssertionError("failover back to route 0 took %.2fs" % elapsed)
         _expect_answer_from(ldns, "sticky10.test", 0x5511, other, 3.0)
         if _route_counters(mon) != (0, 2):

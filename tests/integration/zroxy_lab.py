@@ -1004,25 +1004,59 @@ class FakeDnsUpstream:
 
 
 def _tcp_listening(port):
-    """True when /proc/net/tcp shows this port listening on loopback or any."""
+    """True when the TCP listener is observed (precise on Linux, probed on BSD)."""
     suffixes = ("0100007F:%04X" % port, "00000000:%04X" % port)
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/net/tcp", "r", encoding="ascii", errors="replace") as fh:
+                next(fh, None)
+                for line in fh:
+                    parts = line.split()
+                    if len(parts) < 4 or parts[3] != "0A":
+                        continue
+                    local = parts[1].upper()
+                    if local in suffixes:
+                        return True
+        except OSError as exc:
+            raise LabError("cannot read /proc/net/tcp: %s" % exc) from exc
+        return False
+
+    # BSD has no /proc/net/tcp here. A successful non-blocking connect is a
+    # weaker readiness probe: it confirms that something accepts this port,
+    # but cannot identify the owning process. The caller has just allocated it.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.2)
     try:
-        with open("/proc/net/tcp", "r", encoding="ascii", errors="replace") as fh:
-            next(fh, None)
-            for line in fh:
-                parts = line.split()
-                if len(parts) < 4 or parts[3] != "0A":
-                    continue
-                local = parts[1].upper()
-                if local in suffixes:
-                    return True
-    except OSError as exc:
-        raise LabError("cannot read /proc/net/tcp: %s" % exc) from exc
-    return False
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+    finally:
+        sock.close()
 
 
 def _udp_owned_by(pid, port):
-    """True when pid has a UDP socket bound to 127.0.0.1:port."""
+    """True when pid owns UDP port (precise on Linux, fstat-probed on BSD)."""
+    if not sys.platform.startswith("linux"):
+        # OpenBSD/FreeBSD fstat exposes the process' internet sockets. This is
+        # weaker than Linux inode matching, so bind failure is the final
+        # fallback when fstat is unavailable; the port was allocated by us.
+        try:
+            result = subprocess.run(
+                ["fstat", "-p", str(pid)], capture_output=True, text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                needle = ":%d" % port
+                return any(needle in line for line in result.stdout.splitlines())
+        except OSError:
+            pass
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as exc:
+            return exc.errno == errno.EADDRINUSE
+        finally:
+            probe.close()
+        return False
+
     token = "0100007F:%04X" % port
     inode = None
     try:

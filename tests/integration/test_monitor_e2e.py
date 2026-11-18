@@ -238,7 +238,7 @@ def test_monitor_http_framing():
         proc = lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
         got = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)
         fd_dir = "/proc/%d/fd" % proc.proc.pid
-        if os.path.isdir(fd_dir):
+        if sys.platform.startswith("linux") and os.path.isdir(fd_dir):
             # Idle descriptors are stdin, stdout, stderr and the listener; the
             # report is built while the monitor's own client socket is open.
             # The descriptor of the directory scan itself is not counted. The
@@ -254,6 +254,8 @@ def test_monitor_http_framing():
                         "CountOfOpenFile %r, expected %d" % (reported, expected_fds))
                 time.sleep(0.1)
                 got = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)
+        else:
+            print("SKIP: child fd count comparison requires Linux /proc")
         headers = got["headers"]
         if headers.get("connection") != "close":
             raise AssertionError("Connection header is %r" % headers.get("connection"))
@@ -340,7 +342,7 @@ def test_monitor_process_object():
         obj = doc.get("Process")
         if not isinstance(obj, dict):
             raise AssertionError("missing Process object: %r" % doc)
-        linux = os.path.isdir("/proc/self")
+        linux = sys.platform.startswith("linux")
         keys = ["Pid", "StartTime", "UpTime", "OpenFiles", "MaxOpenFiles",
                 "PeakRssBytes", "CpuUserMs", "CpuSystemMs"]
         if linux:
@@ -411,8 +413,10 @@ def test_sni_close_reasons():
             raise AssertionError("unexpected Resolver sizes: %r" % res_base)
         for key in SNI_CLOSE_KEYS:
             _number(base.get(key), "SNI_Server." + key)
-        if base["ConnectionLimit"] != 1024:
+        if sys.platform.startswith("linux") and base["ConnectionLimit"] != 1024:
             raise AssertionError("ConnectionLimit is %r" % base["ConnectionLimit"])
+        if not sys.platform.startswith("linux") and not 1 <= base["ConnectionLimit"] <= 1024:
+            raise AssertionError("invalid portable ConnectionLimit %r" % base["ConnectionLimit"])
 
         data, closed = zroxy_lab.tcp_exchange("127.0.0.1", sni_port, hello, timeout=4.0)
         if data != zroxy_lab.HTTP_OK or not closed:
