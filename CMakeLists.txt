@@ -186,7 +186,8 @@ if(BUILD_TESTING)
         -P ${PROJECT_SOURCE_DIR}/tests/check_help.cmake)
 
     find_program(ZROXY_SH sh)
-    if(ZROXY_SH)
+    # OpenWrt's procd/UCI init test is not meaningful on an OpenBSD host.
+    if(ZROXY_SH AND NOT CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
         add_test(NAME openwrt_init_uci COMMAND ${ZROXY_SH}
             ${PROJECT_SOURCE_DIR}/tests/openwrt/test_init_uci.sh
             ${PROJECT_SOURCE_DIR}/openwrt/files/zroxy.init
