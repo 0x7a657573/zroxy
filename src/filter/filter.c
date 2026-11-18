@@ -472,6 +472,61 @@ static int filter_watch_open(int kq, const char *filename)
 	return fd;
 }
 
+/*
+ * Drain vnode changes for 50 ms so one save gives one reload. The drained
+ * fflags are added to *fflags; a delete or rename ends the wait early so the
+ * caller can follow the new file. Returns true when told to stop.
+ */
+static bool filter_watch_coalesce(int kq, unsigned int *fflags)
+{
+	struct timespec deadline;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0)
+		return false;
+	deadline.tv_nsec += 50000000L;
+	if (deadline.tv_nsec >= 1000000000L)
+	{
+		deadline.tv_sec++;
+		deadline.tv_nsec -= 1000000000L;
+	}
+	for (;;)
+	{
+		struct timespec now;
+		struct timespec timeout;
+		struct kevent events[8];
+		int nev;
+
+		if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+			return false;
+		timeout.tv_sec = deadline.tv_sec - now.tv_sec;
+		timeout.tv_nsec = deadline.tv_nsec - now.tv_nsec;
+		if (timeout.tv_nsec < 0)
+		{
+			timeout.tv_sec--;
+			timeout.tv_nsec += 1000000000L;
+		}
+		if (timeout.tv_sec < 0)
+			return false;
+		nev = kevent(kq, NULL, 0, events, sizeof(events) / sizeof(events[0]), &timeout);
+		if (nev == -1)
+		{
+			if (errno == EINTR)
+				continue;
+			return false;
+		}
+		if (nev == 0)
+			return false;
+		for (int i = 0; i < nev; i++)
+		{
+			if (events[i].filter == EVFILT_READ)
+				return true;
+			*fflags |= (unsigned int)events[i].fflags;
+		}
+		if (*fflags & (NOTE_DELETE | NOTE_RENAME))
+			return false;
+	}
+}
+
 static void *filter_watch_thread(void *vargp)
 {
 	filter_t *self = (filter_t *)vargp;
@@ -509,6 +564,7 @@ static void *filter_watch_thread(void *vargp)
 	while (1)
 	{
 		struct kevent event;
+		unsigned int fflags;
 		int nev = kevent(kq, NULL, 0, &event, 1, NULL); // Wait for events
 
 		if (nev == -1)
@@ -523,7 +579,13 @@ static void *filter_watch_thread(void *vargp)
 		if (event.filter == EVFILT_READ)
 			break; /* told to stop */
 
-		if (event.fflags & (NOTE_DELETE | NOTE_RENAME))
+		fflags = (unsigned int)event.fflags;
+		/* Coalesce truncate/write notifications into one complete reload. */
+		if (!(fflags & (NOTE_DELETE | NOTE_RENAME)) && (fflags & FILTER_NOTE_CHANGE) &&
+		    filter_watch_coalesce(kq, &fflags))
+			break;
+
+		if (fflags & (NOTE_DELETE | NOTE_RENAME))
 		{
 			/* replaced by rename or delete+create: follow the new file */
 			int tries;
@@ -546,7 +608,7 @@ static void *filter_watch_thread(void *vargp)
 			filter_reload(self);
 			continue;
 		}
-		if (event.fflags & FILTER_NOTE_CHANGE)
+		if (fflags & FILTER_NOTE_CHANGE)
 		{
 			log_info( "file %s was modified", self->filepath);
 			filter_reload(self);
