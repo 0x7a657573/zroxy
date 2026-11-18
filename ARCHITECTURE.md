@@ -8,7 +8,7 @@ The main implementation areas are:
 
 - `include/zroxy/` — public headers of every module, included as
   `<zroxy/name.h>`;
-- `src/` — process startup (`main.c`) and configuration (`args.c`);
+- `src/` — process startup (`main.c`) and configuration (`args/args.c`);
 - `src/sni/` — hostname-aware TCP forwarding and the SNI event loop (its
   event-loop header is private to this directory);
 - `src/resolver/` — the process-wide hostname resolver pool shared by the SNI
@@ -292,7 +292,7 @@ path, then returns `1`.
 | Path | Responsibility | Main boundary |
 | --- | --- | --- |
 | `src/main.c` | Startup order, signal handling, shutdown | Owns top-level configuration and service handles |
-| `src/args.c` | CLI/config parsing and validation | Produces `zroxy_t` |
+| `src/args/args.c` | CLI/config parsing and validation | Produces `zroxy_t` |
 | `include/zroxy/args.h` | `zroxy_t` and the parser API | Shared by startup/services |
 | `include/zroxy/settings.h` | Config types and defaults (ports, DNS host and routes) | Shared by args and the services |
 | `include/zroxy/config.h` | Length bounds | Compile-time limits |
