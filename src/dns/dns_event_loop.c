@@ -25,9 +25,9 @@
 static void request_fail(dns_event_t *event, dns_request_t *request);
 static void request_complete(dns_event_t *event, dns_request_t *request,
 		const uint8_t *response, size_t len);
-static void schedule(dns_event_t *event);
 
-static void close_fd(int *fd)
+
+void dnsev_close_fd(int *fd)
 {
 	if (fd && *fd >= 0) {
 		close(*fd);
@@ -35,7 +35,7 @@ static void close_fd(int *fd)
 	}
 }
 
-static int64_t mono_now(void)
+int64_t dnsev_mono_now(void)
 {
 	return net_mono_ms();
 }
@@ -117,7 +117,7 @@ static void request_free(dns_event_t *event, dns_request_t *request)
 	if (!request)
 		return;
 	if (request->flight)
-		dnscache_finish(event->dns->cache, request->flight, NULL, 0, 0, mono_now());
+		dnscache_finish(event->dns->cache, request->flight, NULL, 0, 0, dnsev_mono_now());
 	if (request->response) {
 		if (event->response_bytes >= request->response_cap)
 			event->response_bytes -= request->response_cap;
@@ -166,74 +166,6 @@ static void request_complete_followers(dns_event_t *event, dns_request_t *leader
 	}
 }
 
-static void send_udp(dns_event_t *event, const struct sockaddr_in *peer,
-		const uint8_t *buf, size_t len)
-{
-	if (len > 0)
-		(void)sendto(event->dns->local_sock, buf, len, 0,
-				(const struct sockaddr *)peer, sizeof(*peer));
-}
-
-static void client_close(dns_event_t *event, dns_client_t *client)
-{
-	dns_client_t **p;
-	if (!client)
-		return;
-	if (client->request) {
-		client->request->client = NULL;
-		client->request = NULL;
-	}
-	if (client->registered)
-		reactor_del(&event->re, client->fd);
-	client->registered = 0;
-	close_fd(&client->fd);
-	if (__atomic_load_n(&event->dns->tcp_active, __ATOMIC_RELAXED) > 0)
-		__atomic_sub_fetch(&event->dns->tcp_active, 1, __ATOMIC_RELAXED);
-	p = &event->clients;
-	while (*p && *p != client)
-		p = &(*p)->next;
-	if (*p)
-		*p = client->next;
-	if (event->client_count > 0)
-		event->client_count--;
-	/*
-	 * A ready batch may still hold an event for this client, so it is freed
-	 * only after the batch (client_reap); dispatch skips dead clients.
-	 */
-	client->dead = 1;
-	client->dead_next = event->graveyard;
-	event->graveyard = client;
-}
-
-static void client_reap(dns_event_t *event)
-{
-	while (event->graveyard) {
-		dns_client_t *client = event->graveyard;
-		event->graveyard = client->dead_next;
-		free(client->output);
-		free(client);
-	}
-}
-
-static bool client_queue_reply(dns_client_t *client, const uint8_t *buf, size_t len)
-{
-	uint8_t *out;
-	if (!client || client->fd < 0 || len > DNS_TCP_MSG_MAX || client->output)
-		return false;
-	out = malloc(len + 2u);
-	if (!out)
-		return false;
-	out[0] = (uint8_t)(len >> 8);
-	out[1] = (uint8_t)len;
-	memcpy(out + 2, buf, len);
-	client->output = out;
-	client->output_len = len + 2u;
-	client->output_off = 0;
-	client->state = CLIENT_WRITE;
-	client->deadline_ms = mono_now() + net_timeout_ms((int)client->event->dns->timeout);
-	return true;
-}
-
 static void request_send_error(dns_event_t *event, dns_request_t *request, uint8_t rcode)
 {
 	uint8_t error[DNS_MSG_SIZE];
@@ -258,15 +190,15 @@ static void request_complete(dns_event_t *event, dns_request_t *request,
 			out = trunc;
 		}
 		if (out_len > 0)
-			send_udp(event, &request->peer, out, out_len);
+			dnsev_send_udp(event, &request->peer, out, out_len);
 	} else if (request->client) {
 		dns_client_t *client = request->client;
-		if (client_queue_reply(client, response, len)) {
+		if (dnsev_client_queue_reply(client, response, len)) {
 			client->request = NULL;
 		} else {
 			client->request = NULL;
 			request->client = NULL;
-			client_close(event, client);
+			dnsev_client_close(event, client);
 			out_len = 0;
 		}
 	} else {
@@ -282,7 +214,7 @@ static void request_finish_upstream(dns_event_t *event, dns_request_t *request)
 		!dns_reply_matches(request->query, request->query_len,
 				request->response, request->response_len)) {
 		if (request && request->flight) {
-			dnscache_finish(event->dns->cache, request->flight, NULL, 0, 0, mono_now());
+			dnscache_finish(event->dns->cache, request->flight, NULL, 0, 0, dnsev_mono_now());
 			request->flight = NULL;
 		}
 		request_send_error(event, request, ServerFailure_ResponseType);
@@ -290,7 +222,7 @@ static void request_finish_upstream(dns_event_t *event, dns_request_t *request)
 	}
 	if (request->flight) {
 		dnscache_finish(event->dns->cache, request->flight, request->response,
-				request->response_len, request->response_len, mono_now());
+				request->response_len, request->response_len, dnsev_mono_now());
 		request->flight = NULL;
 	}
 	request_complete_followers(event, request, request->response, request->response_len);
@@ -304,7 +236,7 @@ static void request_fail(dns_event_t *event, dns_request_t *request)
 	if (!request)
 		return;
 	if (request->flight) {
-		dnscache_finish(event->dns->cache, request->flight, NULL, 0, 0, mono_now());
+		dnscache_finish(event->dns->cache, request->flight, NULL, 0, 0, dnsev_mono_now());
 		request->flight = NULL;
 	}
 	follower = request->followers;
@@ -379,12 +311,12 @@ static bool handle_local(dns_event_t *event, dns_request_t *request)
 	return true;
 }
 
-static void request_start(dns_event_t *event, dns_request_t *request)
+void dnsev_request_start(dns_event_t *event, dns_request_t *request)
 {
 	dnscache_flight *flight = NULL;
 	dnscache_result cached;
 	size_t full = 0;
-	int64_t now = mono_now();
+	int64_t now = dnsev_mono_now();
 
 	if (handle_local(event, request))
 		return;
@@ -413,7 +345,7 @@ static void request_start(dns_event_t *event, dns_request_t *request)
 	pending_push(event, request);
 }
 
-static dns_request_t *request_new(dns_event_t *event, int kind,
+dns_request_t *dnsev_request_new(dns_event_t *event, int kind,
 		const uint8_t *query, size_t len, const struct sockaddr_in *peer, dns_client_t *client)
 {
 	dns_request_t *request;
@@ -424,7 +356,7 @@ static dns_request_t *request_new(dns_event_t *event, int kind,
 	request = calloc(1, sizeof(*request));
 	if (!request)
 		return NULL;
-	now = mono_now();
+	now = dnsev_mono_now();
 	request->event = event;
 	request->kind = kind;
 	request->client = client;
@@ -452,7 +384,7 @@ static void upstream_close(dns_event_t *event, dns_upstream_t *upstream)
 	 * the old connection is still queued: upstream_dispatch drops it.
 	 */
 	upstream->closed_batch = event->batch;
-	close_fd(&upstream->fd);
+	dnsev_close_fd(&upstream->fd);
 	upstream->state = UP_CLOSED;
 	upstream->out_len = upstream->out_off = 0;
 	upstream->in_len = upstream->in_need = 0;
@@ -500,7 +432,7 @@ static void request_attempt_failed(dns_event_t *event, dns_request_t *request,
 		int mode, bool reused)
 {
 	unsigned count = event->dns->route_count;
-	int64_t now = mono_now();
+	int64_t now = dnsev_mono_now();
 
 	if (mode != ATTEMPT_TIMEOUT && now < request->deadline_ms)
 		(void)__atomic_fetch_add(&event->dns->upstream_errors, 1u, __ATOMIC_RELAXED);
@@ -576,7 +508,7 @@ static bool upstream_socks_apply(dns_event_t *event, dns_upstream_t *upstream, s
 	}
 	if (step == S5_DONE) {
 		upstream->state = UP_IDLE;
-		upstream->idle_since_ms = mono_now();
+		upstream->idle_since_ms = dnsev_mono_now();
 		return upstream_queue_query(upstream);
 	}
 	log_error("[!] SOCKS server %s:%u: %s", socks && socks->host ? socks->host : "?",
@@ -639,7 +571,7 @@ static int upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_reque
 	}
 	if (errno != EINPROGRESS && errno != EALREADY) {
 		upstream->request = NULL;
-		close_fd(&upstream->fd);
+		dnsev_close_fd(&upstream->fd);
 		return OPEN_FAILED;
 	}
 	upstream->state = UP_CONNECT;
@@ -728,9 +660,9 @@ static void upstream_read(dns_event_t *event, dns_upstream_t *upstream)
 			}
 			upstream->request = NULL;
 			upstream->state = UP_IDLE;
-			upstream->idle_since_ms = mono_now();
+			upstream->idle_since_ms = dnsev_mono_now();
 			request_finish_upstream(event, request);
-			schedule(event);
+			dnsev_schedule(event);
 			return;
 		}
 		if (n < 0 && errno == EINTR)
@@ -774,7 +706,7 @@ static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, uint32_t
 		upstream_close(event, upstream);
 }
 
-static void schedule(dns_event_t *event)
+void dnsev_schedule(dns_event_t *event)
 {
 	unsigned i;
 	for (i = 0; i < event->dns->upstream_connections; i++) {
@@ -788,7 +720,7 @@ static void schedule(dns_event_t *event)
 		dns_upstream_t *upstream = NULL;
 		dns_request_t *request = event->pending_head;
 		int route;
-		if (mono_now() >= request->deadline_ms) {
+		if (dnsev_mono_now() >= request->deadline_ms) {
 			(void)pending_pop(event);
 			(void)__atomic_fetch_add(&event->dns->upstream_timeouts, 1u, __ATOMIC_RELAXED);
 			request_fail(event, request);
@@ -828,7 +760,7 @@ static void schedule(dns_event_t *event)
 		request->route = (unsigned)route;
 		request->attempt_deadline_ms = request->deadline_ms;
 		if (event->dns->route_count > 1) {
-			int64_t limit = mono_now() + net_timeout_ms((int)event->dns->timeout);
+			int64_t limit = dnsev_mono_now() + net_timeout_ms((int)event->dns->timeout);
 			if (limit < request->attempt_deadline_ms)
 				request->attempt_deadline_ms = limit;
 		}
@@ -849,129 +781,6 @@ static void schedule(dns_event_t *event)
 	}
 }
 
-static void client_pump(dns_event_t *event, dns_client_t *client, uint32_t revents)
-{
-	if (!client || client->fd < 0) return;
-	/* A half-closed peer reports IN|HUP: read what it sent before giving up. */
-	if ((revents & RE_ERR) || ((revents & RE_HUP) && !(revents & RE_IN))) {
-		client_close(event, client);
-		return;
-	}
-	if (client->state == CLIENT_WRITE && revents & RE_OUT) {
-		for (;;) {
-			ssize_t n = write(client->fd, client->output + client->output_off,
-					client->output_len - client->output_off);
-			if (n > 0) {
-				client->output_off += (size_t)n;
-				if (client->output_off < client->output_len) return;
-				free(client->output); client->output = NULL;
-				if (client->close_after_write || ++client->served >= DNS_TCP_MAX_QUERIES) {
-					client_close(event, client); return;
-				}
-				client->state = CLIENT_READ_LEN; client->input_off = 0; client->input_need = 2;
-				client->deadline_ms = mono_now() + DNS_TCP_IDLE_MS;
-				return;
-			}
-			if (n < 0 && errno == EINTR) continue;
-			if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-			client_close(event, client); return;
-		}
-	}
-	if ((client->state == CLIENT_READ_LEN || client->state == CLIENT_READ_QUERY) && revents & RE_IN) {
-		for (;;) {
-			ssize_t n = read(client->fd, client->input + client->input_off, client->input_need - client->input_off);
-			if (n > 0) {
-				client->input_off += (size_t)n;
-				if (client->input_off < client->input_need) return;
-				if (client->state == CLIENT_READ_LEN) {
-					client->input_need = ((size_t)client->input[0] << 8) | client->input[1];
-				if (client->input_need < DNS_HEADER_SIZE || client->input_need > DNS_MSG_SIZE) {
-						client_close(event, client); return;
-					}
-					client->input_off = 0; client->state = CLIENT_READ_QUERY;
-					client->deadline_ms = mono_now() + net_timeout_ms((int)event->dns->timeout);
-					continue;
-				}
-				if ((client->input[2] & 0x80) != 0) { client_close(event, client); return; }
-				client->request = request_new(event, REQ_TCP, client->input, client->input_need, NULL, client);
-				if (!client->request) { client_close(event, client); return; }
-				client->state = CLIENT_WAIT;
-				request_start(event, client->request);
-				schedule(event);
-				return;
-			}
-			if (n < 0 && errno == EINTR) continue;
-			if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-			client_close(event, client); return;
-		}
-	}
-}
-
-static void accept_clients(dns_event_t *event)
-{
-	for (;;) {
-		dns_client_t *client;
-		struct sockaddr_in peer;
-		socklen_t peer_len = sizeof(peer);
-		int fd = accept(event->dns->tcp_sock, (struct sockaddr *)&peer, &peer_len);
-		if (fd < 0) {
-			if (errno == EINTR) continue;
-			if (errno != EAGAIN && errno != EWOULDBLOCK) log_error("dns accept failed: %s", strerror(errno));
-			return;
-		}
-		if ((event->dns->acl_count > 0 &&
-				!acl_allows(event->dns->acl, event->dns->acl_count,
-					ntohl(peer.sin_addr.s_addr))) ||
-			event->client_count >= DNS_EVENT_CLIENTS || !net_set_nonblock_cloexec(fd)) {
-			(void)__atomic_fetch_add(&event->dns->tcp_refused, 1u, __ATOMIC_RELAXED);
-			close(fd); continue;
-		}
-		client = calloc(1, sizeof(*client));
-		if (!client) { close(fd); continue; }
-		client->event = event; client->fd = fd; client->state = CLIENT_READ_LEN;
-		client->input_need = 2; client->deadline_ms = mono_now() + DNS_TCP_IDLE_MS;
-		client->watch = (dns_watch_t){ WATCH_CLIENT, client };
-		if (!reactor_add(&event->re, fd, RE_IN, &client->watch)) { free(client); close(fd); continue; }
-		client->registered = 1; client->interest = RE_IN;
-		client->next = event->clients; event->clients = client; event->client_count++;
-		(void)__atomic_add_fetch(&event->dns->tcp_active, 1, __ATOMIC_RELAXED);
-	}
-}
-
-static void pull_udp(dns_event_t *event)
-{
-	unsigned i;
-	for (i = 0; i < DNS_EVENT_UDP_BURST; i++) {
-		uint8_t query[DNS_MSG_SIZE];
-		struct sockaddr_in peer;
-		socklen_t plen = sizeof(peer);
-		ssize_t n = recvfrom(event->dns->local_sock, query, sizeof(query), MSG_TRUNC,
-				(struct sockaddr *)&peer, &plen);
-		dns_request_t *request;
-		if (n < 0) {
-			if (errno == EINTR) continue;
-			if (errno != EAGAIN && errno != EWOULDBLOCK) log_error("dns recvfrom failed: %s", strerror(errno));
-			return;
-		}
-		if (event->dns->acl_count > 0 && !acl_allows(event->dns->acl, event->dns->acl_count,
-				ntohl(peer.sin_addr.s_addr))) { __atomic_fetch_add(&event->dns->acl_dropped, 1u, __ATOMIC_RELAXED); continue; }
-		if (!dns_rate_take(&event->dns->rate, ntohl(peer.sin_addr.s_addr), mono_now())) { __atomic_fetch_add(&event->dns->rate_dropped, 1u, __ATOMIC_RELAXED); continue; }
-		if (n < DNS_HEADER_SIZE || (size_t)n > sizeof(query) || (query[2] & 0x80) != 0) continue;
-		request = request_new(event, REQ_UDP, query, (size_t)n, &peer, NULL);
-		if (!request) {
-			uint8_t error[DNS_MSG_SIZE]; size_t len = dns_build_error(query, (size_t)n, ServerFailure_ResponseType, error, sizeof(error));
-			__atomic_fetch_add(&event->dns->queue_dropped, 1u, __ATOMIC_RELAXED);
-			send_udp(event, &peer, error, len); continue;
-		}
-		request_start(event, request);
-	}
-	schedule(event);
-}
-
-/*
- * Resolver connection_index: route i upstream is 1 + 2*i, its SOCKS proxy
- * 2 + 2*i. NULL for an index that names nothing.
- */
 static dns_target_t *resolve_target(dns_event_t *event, uint32_t index,
 		const char **host, uint16_t *port, uint64_t **generation)
 {
@@ -1010,10 +819,10 @@ static bool resolution_submit(dns_event_t *event, uint32_t index)
 		return true;
 	}
 	if (resolver_submit(event->resolver, index, event->generation, host, port, AF_INET,
-			mono_now() + net_timeout_ms((int)event->dns->timeout),
+			dnsev_mono_now() + net_timeout_ms((int)event->dns->timeout),
 			&target->slot, &target->req) == RESOLVER_SUBMIT_OK)
 		return true;
-	target->resolve_at_ms = mono_now() + DNS_RESOLVE_RETRY_MS;
+	target->resolve_at_ms = dnsev_mono_now() + DNS_RESOLVE_RETRY_MS;
 	return false;
 }
 
@@ -1035,7 +844,7 @@ static void dns_drain_resolver(dns_event_t *event)
 	resolve_slot *done[RESOLVER_SLOTS];
 	size_t n = resolver_drain(event->resolver, done, RESOLVER_SLOTS);
 	size_t i;
-	int64_t now = mono_now();
+	int64_t now = dnsev_mono_now();
 
 	for (i = 0; i < n; i++) {
 		resolve_slot *slot = done[i];
@@ -1080,7 +889,7 @@ static void dns_drain_resolver(dns_event_t *event)
 		resolver_release(slot->index, slot->req_id);
 	}
 	resolution_tick(event, now);
-	schedule(event);
+	dnsev_schedule(event);
 }
 
 static int loop_timeout(dns_event_t *event, int64_t now)
@@ -1126,10 +935,10 @@ static void sweep(dns_event_t *event, int64_t now)
 	while (client) {
 		dns_client_t *next = client->next;
 		if (now >= client->deadline_ms && client->state != CLIENT_WAIT)
-			client_close(event, client);
+			dnsev_client_close(event, client);
 		client = next;
 	}
-	schedule(event);
+	dnsev_schedule(event);
 }
 
 static void drain_wake(dns_event_t *event)
@@ -1154,19 +963,12 @@ static uint32_t upstream_interest(const dns_upstream_t *upstream)
 	}
 }
 
-/* A waiting client has interest 0: the reactor still reports ERR and HUP. */
-static uint32_t client_interest(const dns_client_t *client)
-{
-	if (client->state == CLIENT_WRITE)
-		return RE_OUT;
-	return client->state == CLIENT_WAIT ? 0 : RE_IN;
-}
 
 /*
  * Bring the reactor in line with the state transitions of the last batch.
  * Only fds whose interest changed (or that were just opened) cost a syscall.
  * An fd the reactor refuses is dropped like any other failed connection;
- * that can schedule more work, so go again until nothing was dropped.
+ * that can dnsev_schedule more work, so go again until nothing was dropped.
  */
 static void sync_interest(dns_event_t *event)
 {
@@ -1196,10 +998,10 @@ static void sync_interest(dns_event_t *event)
 		}
 		for (client = event->clients; client; ) {
 			dns_client_t *next = client->next;
-			uint32_t want = client_interest(client);
+			uint32_t want = dnsev_client_interest(client);
 			if (client->interest != want) {
 				if (!reactor_mod(&event->re, client->fd, want, &client->watch)) {
-					client_close(event, client);
+					dnsev_client_close(event, client);
 					again = true;
 				} else {
 					client->interest = want;
@@ -1207,7 +1009,7 @@ static void sync_interest(dns_event_t *event)
 			}
 			client = next;
 		}
-		client_reap(event);
+		dnsev_client_reap(event);
 	} while (again);
 }
 
@@ -1226,28 +1028,28 @@ static void *event_main(void *arg)
 		reactor_event ready[DNS_EVENT_BATCH];
 		int n;
 		int i;
-		n = reactor_wait(&event->re, ready, DNS_EVENT_BATCH, loop_timeout(event, mono_now()));
+		n = reactor_wait(&event->re, ready, DNS_EVENT_BATCH, loop_timeout(event, dnsev_mono_now()));
 		if (n < 0) { if (errno == EINTR) continue; log_error("dns event wait failed: %s", strerror(errno)); break; }
 		event->batch++;
 		for (i = 0; i < n; i++) {
 			dns_watch_t *watch = ready[i].tag;
 			if (!watch) continue;
 			switch (watch->kind) {
-			case WATCH_UDP: pull_udp(event); break;
-			case WATCH_TCP_LISTEN: accept_clients(event); break;
+			case WATCH_UDP: dnsev_pull_udp(event); break;
+			case WATCH_TCP_LISTEN: dnsev_accept_clients(event); break;
 			case WATCH_WAKE: drain_wake(event); event->stop = 1; break;
 			case WATCH_RESOLVER: dns_drain_resolver(event); break;
 			case WATCH_UPSTREAM: upstream_dispatch(event, watch->ptr, ready[i].ev); break;
 			case WATCH_CLIENT:
 				/* Closed by an earlier event of this batch; freed after it. */
 				if (!((dns_client_t *)watch->ptr)->dead)
-					client_pump(event, watch->ptr, ready[i].ev);
+					dnsev_client_pump(event, watch->ptr, ready[i].ev);
 				break;
 			default: break;
 			}
 		}
-		client_reap(event);
-		sweep(event, mono_now());
+		dnsev_client_reap(event);
+		sweep(event, dnsev_mono_now());
 		sync_interest(event);
 	}
 	return NULL;
@@ -1262,8 +1064,8 @@ static void event_destroy(dns_event_t *event)
 		if (event->upstreams[i].request) { dns_request_t *request = event->upstreams[i].request; event->upstreams[i].request = NULL; request_fail(event, request); }
 		upstream_close(event, &event->upstreams[i]);
 	}
-	while (event->clients) client_close(event, event->clients);
-	client_reap(event);
+	while (event->clients) dnsev_client_close(event, event->clients);
+	dnsev_client_reap(event);
 	reactor_close(&event->re);
 	for (i = 0; i < DNS_ROUTES_MAX; i++) {
 		if (event->routes[i].upstream.req)
@@ -1307,7 +1109,7 @@ bool dns_event_loop_start(dnsserver_t *dns)
 		event_destroy(event); return false;
 	}
 	for (i = 0; i < dns->route_count; i++) {
-		event->routes[i].upstream.resolve_at_ms = event->routes[i].socks.resolve_at_ms = mono_now();
+		event->routes[i].upstream.resolve_at_ms = event->routes[i].socks.resolve_at_ms = dnsev_mono_now();
 		(void)resolution_submit(event, 1u + 2u * i);
 		if (dns->routes[i].socks)
 			(void)resolution_submit(event, 2u + 2u * i);
