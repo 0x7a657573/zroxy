@@ -73,6 +73,7 @@ target_include_directories(zroxy_core PUBLIC ${PROJECT_SOURCE_DIR}/src/core)
 set(ZROXY_RESOLVER_SOURCES
     src/resolver/resolver.c
     src/resolver/resolver_policy.c
+    src/resolver/resolver_infra.c
     src/resolver/resolver_test_hooks.c)
 
 zroxy_add_module(zroxy_resolver
