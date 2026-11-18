@@ -52,10 +52,28 @@ typedef struct {
 	size_t out_off;
 } mon_client_t;
 
-typedef struct {
+typedef struct mon_section
+{
+	char name[32];
+	mon_section_fn fn;
+	void *ctx;
+	struct mon_section *next;
+} mon_section_t;
+
+struct mon
+{
+	int fd;
+	uint16_t Port;
+	statistics_t *state;
+	mon_section_t *sections; /* guarded by stats_lock; nodes are never freed */
+	pthread_mutex_t stats_lock; /* guards the state list head only */
+	char *token; /* optional bearer secret; NULL disables authentication */
+	int header_timeout; /* seconds to wait for a complete header */
+	pthread_t thread; /* joined by monitor_stop */
+	int wake[2]; /* pipe that wakes the monitor thread */
 	reactor reactor;
 	mon_client_t clients[MON_MAX_CLIENTS];
-} mon_private_t;
+};
 
 static bool http_headers_done(const uint8_t *buf, size_t len)
 {
@@ -261,7 +279,6 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	int sockfd;
 	struct in_addr addr;
 	mon_t *mon;
-	mon_private_t *priv;
 	const char *bind_text = bind_ip;
 
 	if (!bind_text || bind_text[0] == '\0')
@@ -286,17 +303,8 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 		close(sockfd);
 		return NULL;
 	}
-	priv = calloc(1, sizeof(*priv));
-	if (!priv)
-	{
-		log_error("monitor private allocation failed");
-		close(sockfd);
-		free(mon);
-		return NULL;
-	}
 	for (int i = 0; i < MON_MAX_CLIENTS; i++)
-		priv->clients[i].fd = -1;
-	mon->private_data = priv;
+		mon->clients[i].fd = -1;
 	if (token && token[0] != '\0')
 	{
 		mon->token = mon_dup_token(token);
@@ -304,7 +312,6 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 		{
 			log_error("monitor token allocation failed");
 			close(sockfd);
-			free(priv);
 			free(mon);
 			return NULL;
 		}
@@ -313,7 +320,6 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	{
 		log_error("monitor mutex init failed");
 		close(sockfd);
-		free(priv);
 		mon_free_token(mon->token);
 		free(mon);
 		return NULL;
@@ -326,7 +332,6 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	{
 		log_error("monitor wake pipe failed");
 		close(sockfd);
-		free(priv);
 		pthread_mutex_destroy(&mon->stats_lock);
 		mon_free_token(mon->token);
 		free(mon);
@@ -340,28 +345,26 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	if (mon->header_timeout > 60)
 		mon->header_timeout = 60;
 
-	if (!reactor_open(&priv->reactor, MON_MAX_CLIENTS + 2, false))
+	if (!reactor_open(&mon->reactor, MON_MAX_CLIENTS + 2, false))
 	{
 		log_error("monitor reactor open failed");
 		close(sockfd);
 		close(mon->wake[0]);
 		close(mon->wake[1]);
-		free(priv);
 		pthread_mutex_destroy(&mon->stats_lock);
 		mon_free_token(mon->token);
 		free(mon);
 		return NULL;
 	}
-	if (!reactor_add(&priv->reactor, sockfd, RE_IN, mon) ||
-	    !reactor_add(&priv->reactor, mon->wake[0], RE_IN, mon->wake) ||
+	if (!reactor_add(&mon->reactor, sockfd, RE_IN, mon) ||
+	    !reactor_add(&mon->reactor, mon->wake[0], RE_IN, mon->wake) ||
 	    pthread_create(&mon->thread, NULL, monitor_thread, (void*)mon) != 0)
 	{
 		log_error("monitor thread create failed");
-		reactor_close(&priv->reactor);
+		reactor_close(&mon->reactor);
 		close(sockfd);
 		close(mon->wake[0]);
 		close(mon->wake[1]);
-		free(priv);
 		pthread_mutex_destroy(&mon->stats_lock);
 		mon_free_token(mon->token);
 		free(mon);
@@ -407,26 +410,26 @@ bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void 
 static size_t mon_send_empty(uint8_t *out, size_t cap, int code);
 static size_t monitor_send_report(uint8_t *out, size_t cap, mon_t *owner);
 
-static void monitor_close_client(mon_private_t *priv, mon_client_t *client)
+static void monitor_close_client(mon_t *mon, mon_client_t *client)
 {
 	if (client->fd < 0)
 		return;
 	log_trace("monitor client %i done", client->fd);
-	reactor_del(&priv->reactor, client->fd);
+	reactor_del(&mon->reactor, client->fd);
 	close(client->fd);
 	client->fd = -1;
 }
 
-static mon_client_t *monitor_free_slot(mon_private_t *priv)
+static mon_client_t *monitor_free_slot(mon_t *mon)
 {
 	int i;
 	for (i = 0; i < MON_MAX_CLIENTS; i++)
-		if (priv->clients[i].fd < 0)
-			return &priv->clients[i];
+		if (mon->clients[i].fd < 0)
+			return &mon->clients[i];
 	return NULL;
 }
 
-static void monitor_accept(mon_t *mon, mon_private_t *priv)
+static void monitor_accept(mon_t *mon)
 {
 	for (;;)
 	{
@@ -441,7 +444,7 @@ static void monitor_accept(mon_t *mon, mon_private_t *priv)
 				log_error("server accept failed");
 			return;
 		}
-		client = monitor_free_slot(priv);
+		client = monitor_free_slot(mon);
 		if (!client)
 		{
 			close(fd);
@@ -451,7 +454,7 @@ static void monitor_accept(mon_t *mon, mon_private_t *priv)
 		client->fd = fd;
 		client->phase = MON_READ;
 		client->deadline_ms = net_mono_ms() + (int64_t)mon->header_timeout * 1000;
-		if (!reactor_add(&priv->reactor, fd, RE_IN, client))
+		if (!reactor_add(&mon->reactor, fd, RE_IN, client))
 		{
 			close(fd);
 			client->fd = -1;
@@ -459,7 +462,7 @@ static void monitor_accept(mon_t *mon, mon_private_t *priv)
 	}
 }
 
-static bool monitor_read_client(mon_t *mon, mon_private_t *priv, mon_client_t *client)
+static bool monitor_read_client(mon_t *mon, mon_client_t *client)
 {
 	ssize_t n;
 	size_t line_len = 0;
@@ -476,7 +479,7 @@ static bool monitor_read_client(mon_t *mon, mon_private_t *priv, mon_client_t *c
 		if (n <= 0)
 		{
 			log_trace("client %i disconnect %zd", client->fd, n);
-			monitor_close_client(priv, client);
+			monitor_close_client(mon, client);
 			return false;
 		}
 		client->header_len += (size_t)n;
@@ -490,9 +493,9 @@ static bool monitor_read_client(mon_t *mon, mon_private_t *priv, mon_client_t *c
 				client->out_off = 0;
 				client->phase = MON_WRITE;
 				client->deadline_ms = net_mono_ms() + (int64_t)mon->header_timeout * 1000;
-				if (reactor_mod(&priv->reactor, client->fd, RE_OUT, client))
+				if (reactor_mod(&mon->reactor, client->fd, RE_OUT, client))
 					return true;
-				monitor_close_client(priv, client);
+				monitor_close_client(mon, client);
 				return false;
 			}
 		}
@@ -507,21 +510,21 @@ static bool monitor_read_client(mon_t *mon, mon_private_t *priv, mon_client_t *c
 			client->out_off = 0;
 			client->phase = MON_WRITE;
 			client->deadline_ms = net_mono_ms() + (int64_t)mon->header_timeout * 1000;
-			if (reactor_mod(&priv->reactor, client->fd, RE_OUT, client))
+			if (reactor_mod(&mon->reactor, client->fd, RE_OUT, client))
 				return true;
-			monitor_close_client(priv, client);
+			monitor_close_client(mon, client);
 			return false;
 		}
 		if (client->header_len >= sizeof(client->header))
 		{
-			monitor_close_client(priv, client);
+			monitor_close_client(mon, client);
 			return false;
 		}
 		return true;
 	}
 }
 
-static bool monitor_write_client(mon_t *mon, mon_private_t *priv, mon_client_t *client)
+static bool monitor_write_client(mon_t *mon, mon_client_t *client)
 {
 	ssize_t n;
 	(void)mon;
@@ -535,19 +538,18 @@ static bool monitor_write_client(mon_t *mon, mon_private_t *priv, mon_client_t *
 			return true;
 		if (n <= 0)
 		{
-			monitor_close_client(priv, client);
+			monitor_close_client(mon, client);
 			return false;
 		}
 		client->out_off += (size_t)n;
 	}
-	monitor_close_client(priv, client);
+	monitor_close_client(mon, client);
 	return false;
 }
 
 static void *monitor_thread(void *vargp)
 {
 	mon_t *mon = (mon_t *)vargp;
-	mon_private_t *priv = (mon_private_t *)mon->private_data;
 	reactor_event events[MON_MAX_CLIENTS + 2];
 	int timeout;
 	int n;
@@ -560,9 +562,9 @@ static void *monitor_thread(void *vargp)
 		int64_t earliest = -1;
 		timeout = -1;
 		for (i = 0; i < MON_MAX_CLIENTS; i++)
-			if (priv->clients[i].fd >= 0 &&
-			    (earliest < 0 || priv->clients[i].deadline_ms < earliest))
-				earliest = priv->clients[i].deadline_ms;
+			if (mon->clients[i].fd >= 0 &&
+			    (earliest < 0 || mon->clients[i].deadline_ms < earliest))
+				earliest = mon->clients[i].deadline_ms;
 		if (earliest >= 0)
 		{
 			int64_t left = earliest - now;
@@ -571,7 +573,7 @@ static void *monitor_thread(void *vargp)
 			else
 				timeout = left > INT_MAX ? INT_MAX : (int)left;
 		}
-		n = reactor_wait(&priv->reactor, events, MON_MAX_CLIENTS + 2, timeout);
+		n = reactor_wait(&mon->reactor, events, MON_MAX_CLIENTS + 2, timeout);
 		if (n < 0)
 		{
 			if (errno != EINTR)
@@ -589,29 +591,29 @@ static void *monitor_thread(void *vargp)
 			if (!client || client->fd < 0)
 				continue;
 			if (events[i].ev & (RE_ERR | RE_HUP))
-				monitor_close_client(priv, client);
+				monitor_close_client(mon, client);
 			else if (client->phase == MON_READ && (events[i].ev & RE_IN))
-				monitor_read_client(mon, priv, client);
+				monitor_read_client(mon, client);
 			else if (client->phase == MON_WRITE && (events[i].ev & RE_OUT))
-				monitor_write_client(mon, priv, client);
+				monitor_write_client(mon, client);
 		}
 		for (i = 0; i < n; i++)
 			if (events[i].tag == mon->wake)
 				goto out;
 		for (i = 0; i < n; i++)
 			if (events[i].tag == mon)
-				monitor_accept(mon, priv);
+				monitor_accept(mon);
 		now = net_mono_ms();
 		for (i = 0; i < MON_MAX_CLIENTS; i++)
-			if (priv->clients[i].fd >= 0 && priv->clients[i].deadline_ms <= now)
-				monitor_close_client(priv, &priv->clients[i]);
+			if (mon->clients[i].fd >= 0 && mon->clients[i].deadline_ms <= now)
+				monitor_close_client(mon, &mon->clients[i]);
 	}
 out:
 	for (i = 0; i < MON_MAX_CLIENTS; i++)
-		monitor_close_client(priv, &priv->clients[i]);
-	reactor_del(&priv->reactor, mon->fd);
-	reactor_del(&priv->reactor, mon->wake[0]);
-	reactor_close(&priv->reactor);
+		monitor_close_client(mon, &mon->clients[i]);
+	reactor_del(&mon->reactor, mon->fd);
+	reactor_del(&mon->reactor, mon->wake[0]);
+	reactor_close(&mon->reactor);
 	return NULL;
 }
 
@@ -619,7 +621,6 @@ bool monitor_stop(mon_t *self)
 {
 	mon_section_t *sec;
 	char b = 0;
-	mon_private_t *priv;
 
 	if (!self)
 		return true;
@@ -629,8 +630,6 @@ bool monitor_stop(mon_t *self)
 	close(self->fd);
 	close(self->wake[0]);
 	close(self->wake[1]);
-	priv = (mon_private_t *)self->private_data;
-	free(priv);
 	for (sec = self->sections; sec; )
 	{
 		mon_section_t *next = sec->next;
