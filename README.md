@@ -679,7 +679,7 @@ seed corpus in `tests/fuzz/corpus/<name>/`:
 | `dns` | DNS message decode and encode, error, truncate, cache key, TTL, age and reply-match helpers |
 | `socks` | SOCKS5 server replies fed to the sans-IO client codec (`socks5_codec.c`), for every offered authentication and request form |
 | `monitor_request` | monitor request line, end of header and Bearer token checks |
-| `config` | config-file parser (`args.c`) and whitelist file parser and matcher |
+| `config` | config-file parser (`src/args/`) and whitelist file parser and matcher |
 
 A normal build (any compiler) replays the corpora as the `fuzz_corpus_*`
 tests; a crash or sanitizer report fails the test. To fuzz with libFuzzer,
