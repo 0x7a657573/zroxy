@@ -292,7 +292,7 @@ path, then returns `1`.
 | Path | Responsibility | Main boundary |
 | --- | --- | --- |
 | `src/main.c` | Startup order, signal handling, shutdown | Owns top-level configuration and service handles |
-| `src/args/args.c` | CLI/config parsing and validation | Produces `zroxy_t` |
+| `src/args/args.c`, `src/args/args_options.c`, `src/args/args_secret.c` | CLI, config file, validation; option value parsers; secret files and argv scrubbing | Produces `zroxy_t` |
 | `include/zroxy/args.h` | `zroxy_t` and the parser API | Shared by startup/services |
 | `include/zroxy/settings.h` | Config types and defaults (ports, DNS host and routes) | Shared by args and the services |
 | `include/zroxy/config.h` | Length bounds | Compile-time limits |
