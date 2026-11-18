@@ -63,6 +63,13 @@ cannot be routed by hostname using this mechanism.
 | Monitor | Local HTTP JSON statistics endpoint with optional Bearer token |
 | SNI data plane | Non-blocking event loop per listener; epoll on Linux and poll elsewhere |
 
+Linux and OpenBSD 7.5 amd64 are the tested platforms for this tree. The
+OpenBSD validation uses the standard CMake build and CTest suite, including the
+loopback integration tests; the Linux-only config fuzz corpus and the
+OpenWrt `openwrt_init_uci` test are not registered there because they are not
+meaningful on an OpenBSD host. The FreeBSD code path is present but was not
+built or run.
+
 ### Not provided
 
 - TLS termination, certificate management, or man-in-the-middle inspection;
@@ -414,8 +421,8 @@ The `Process` object describes the zroxy process:
 | `UpTime` | Seconds since `StartTime` |
 | `OpenFiles` | Same value as `CountOfOpenFile` |
 | `MaxOpenFiles` | Soft `RLIMIT_NOFILE`; `-1` when unlimited |
-| `Threads` | Thread count (Linux only; omitted elsewhere) |
-| `RssBytes` | Resident set size now (Linux only; omitted elsewhere) |
+| `Threads` | Thread count (Linux and tested OpenBSD; FreeBSD path present but untested) |
+| `RssBytes` | Resident set size now (Linux and tested OpenBSD; FreeBSD path present but untested) |
 | `PeakRssBytes` | Peak resident set size: `VmHWM` on Linux, `getrusage` elsewhere |
 | `CpuUserMs`, `CpuSystemMs` | User and system CPU time used by the process, in milliseconds |
 

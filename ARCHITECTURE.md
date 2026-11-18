@@ -445,7 +445,7 @@ Each SNI loop can react to four kinds of event source:
 | Resolver pipe | Receive completed DNS lookup records |
 | Client/upstream fds | Drive the current connection state |
 
-Linux uses `epoll`. Other supported builds use `poll`; a Linux test build can
+Linux uses `epoll`. OpenBSD and other supported builds use `poll`; a Linux test build can
 force the poll backend with `SNI_FORCE_POLL`, which the SNI loop passes to the
 shared reactor as a runtime flag. The DNS loop uses the same reactor. The loop does not use `select` or
 `FD_SET` for the SNI data plane.
@@ -866,9 +866,9 @@ accepted socket is closed immediately. The reactor backend is not limited by
 
 The report starts with the version, `CountOfOpenFile`, and the `Process`
 object. `Process` is not a statistics object: the monitor thread fills it on each
-request from `getpid`, `getrlimit`, `getrusage`, and (on Linux) one bounded
-read of `/proc/self/status` into a stack buffer. It takes no lock and
-allocates nothing. Registered sections follow, then the statistics objects.
+request from `getpid`, `getrlimit`, `getrusage`, and platform process APIs
+(Linux `/proc/self/status`, OpenBSD/FreeBSD `sysctl`) into a stack buffer. It takes no lock and
+allocates nothing, except one short-lived buffer for the OpenBSD thread list. Registered sections follow, then the statistics objects.
 
 A section (`monitor_add_section`) is a named top-level object written by a
 callback. `main` registers `Whitelist` this way when a whitelist file is
@@ -908,7 +908,7 @@ flowchart LR
     Match[filter_match]
     SNI[normalized SNI/Host]
     DNS[decoded DNS qName]
-    Watch[inotify on parent dir (Linux)\nkqueue on file (FreeBSD)\nor SIGHUP]
+    Watch[inotify on parent dir (Linux)\nkqueue on file (OpenBSD/FreeBSD)\nor SIGHUP]
     Reload[build replacement snapshot]
 
     File --> Load --> Mutex --> List
@@ -941,7 +941,7 @@ the monitor reports them. Reloads come from the file watcher or from `SIGHUP`. O
 watcher watches the parent directory for `IN_CLOSE_WRITE`/`IN_MOVED_TO` on the
 file name, so a save by rename is seen and a half-written file is not loaded.
 The watcher is a joinable thread that waits on its event source and a wake
-pipe (`poll` on Linux, a `kqueue` read filter on FreeBSD); `filter_free` writes
+pipe (`poll` on Linux, a `kqueue` read filter on OpenBSD/FreeBSD); `filter_free` writes
 to the pipe, joins the thread and then frees the filter, so it is valid for
 every filter, with or without a watcher.
 
