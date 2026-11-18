@@ -1,5 +1,5 @@
 /*
- * The config-file parser (src/args.c) and the whitelist parser and matcher
+ * The config-file parser (src/args/args.c) and the whitelist parser and matcher
  * (src/filter/filter.c), fed the same input as a file.
  *
  * The input is written to a memfd and opened by its /proc path, which is how
