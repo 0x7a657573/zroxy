@@ -295,6 +295,41 @@ def test_monitor_slow_clients_do_not_block():
         proc.check_alive()
 
 
+def test_monitor_half_closed_client_gets_report():
+    """A client that shuts down its write side after the request still gets the report."""
+    with zroxy_lab.Lab() as lab:
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
+        sock = socket.create_connection(("127.0.0.1", mon_port), timeout=2.0)
+        try:
+            sock.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            sock.shutdown(socket.SHUT_WR)
+            deadline = time.monotonic() + 2.0
+            response = bytearray()
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AssertionError("monitor response did not reach EOF within 2s")
+                sock.settimeout(remaining)
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout as exc:
+                    raise AssertionError("monitor response did not reach EOF within 2s") from exc
+                except ConnectionResetError as exc:
+                    raise AssertionError("monitor reset the half-closed client connection") from exc
+                if chunk == b"":
+                    break
+                response.extend(chunk)
+            response = bytes(response)
+            if not response.startswith(b"HTTP/1.1 200 OK"):
+                raise AssertionError("unexpected monitor response: %r" % response)
+            if b"ZroxyVersion" not in response:
+                raise AssertionError("monitor response has no ZroxyVersion: %r" % response)
+        finally:
+            sock.close()
+        proc.check_alive()
+
+
 def test_monitor_process_object():
     with zroxy_lab.Lab() as lab:
         mon_port = zroxy_lab.free_tcp_port()
@@ -537,6 +572,7 @@ def main():
     failed = 0
     for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error,
                  test_monitor_http_framing, test_monitor_slow_clients_do_not_block,
+                 test_monitor_half_closed_client_gets_report,
                  test_monitor_process_object,
                  test_sni_close_reasons, test_sni_connect_failure_and_handshake_timeout,
                  test_sni_loopback_refused_by_default,
