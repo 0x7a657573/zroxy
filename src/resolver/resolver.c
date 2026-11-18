@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 
-#include "resolver.h"
+#include "resolver_internal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -18,76 +18,7 @@
 #include <zroxy/log.h>
 #include <zroxy/net_io.h>
 
-#define RESOLVER_QUOTA_LISTENER 1
-#define RESOLVER_QUOTA_DIRECT 2
-#define RESOLVER_QUOTA_INFRA 3
-#define RESOLVER_BIND_MAX 32
-#define RESOLVER_GAI_ATTEMPTS 8
-
-typedef struct sni_bind_rec {
-	int used;
-	int wildcard;
-	uint32_t listener_id;
-	uint16_t port;
-	struct in_addr ip;
-} sni_bind_rec;
-
-typedef struct resolver_pool {
-	pthread_mutex_t mu;
-	pthread_cond_t work_cv;
-	pthread_cond_t infra_cv;
-	pthread_t threads[RESOLVER_THREADS];
-	int started;
-	int stopping;
-	int abandoned;
-	int exited;
-	int pause_dequeue;
-	resolve_slot slots[RESOLVER_SLOTS];
-	resolve_slot *free_head;
-	resolve_slot *client_head;
-	resolve_slot *client_tail;
-	resolve_slot *infra_head;
-	resolve_slot *infra_tail;
-	int free_count;
-	int direct_used;
-	int infra_used;
-	int listener_used;
-	int listener_quota_assigned;
-	int live_sinks;
-	int open_pipes;
-	int double_free;
-	unsigned sink_refs;
-	uint64_t next_req_id;
-	uint32_t next_listener_id;
-	int cache_valid;
-	char cache_host[RESOLVER_HOST_MAX + 1];
-	uint16_t cache_port;
-	size_t cache_count;
-	resolver_addr cache_addrs[RESOLVER_ADDR_MAX];
-	int64_t cache_last_success;
-	int64_t cache_refresh_after;
-	int64_t cache_max_stale;
-	int cache_refresh_inflight;
-	uint64_t cache_refresh_req;
-	sni_bind_rec binds[RESOLVER_BIND_MAX];
-	uint32_t calls;
-	uint32_t skipped_expired;
-	uint32_t skipped_cancelled;
-	uint32_t eagain_wakeups;
-	uint32_t closed_drops;
-	uint32_t ring_full;
-	uint32_t lookup_failures;
-#ifdef SNI_TEST_HOOKS
-	resolver_hook hook;
-	void *hook_cookie;
-	int hold_running;
-	int running_entered;
-	pthread_mutex_t test_mu;
-	pthread_cond_t test_cv;
-#endif
-} resolver_pool;
-
-static resolver_pool *g_pool;
+resolver_pool *g_resolver_pool;
 static pthread_mutex_t g_start_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void sink_destroy(resolver_sink *sink);
@@ -166,7 +97,7 @@ static resolver_sink *ref_drop_locked(resolver_sink *sink)
 	if (!sink || sink->refcount == 0)
 		return NULL;
 	sink->refcount--;
-	g_pool->sink_refs--;
+	g_resolver_pool->sink_refs--;
 	if (sink->refcount == 0)
 		return sink;
 	return NULL;
@@ -175,14 +106,14 @@ static resolver_sink *ref_drop_locked(resolver_sink *sink)
 static void quota_dec_locked(resolve_slot *slot)
 {
 	if (slot->quota_kind == RESOLVER_QUOTA_DIRECT) {
-		if (g_pool->direct_used > 0)
-			g_pool->direct_used--;
+		if (g_resolver_pool->direct_used > 0)
+			g_resolver_pool->direct_used--;
 	} else if (slot->quota_kind == RESOLVER_QUOTA_INFRA) {
-		if (g_pool->infra_used > 0)
-			g_pool->infra_used--;
+		if (g_resolver_pool->infra_used > 0)
+			g_resolver_pool->infra_used--;
 	} else if (slot->quota_kind == RESOLVER_QUOTA_LISTENER) {
-		if (g_pool->listener_used > 0)
-			g_pool->listener_used--;
+		if (g_resolver_pool->listener_used > 0)
+			g_resolver_pool->listener_used--;
 		if (slot->sink && slot->sink->quota_used > 0)
 			slot->sink->quota_used--;
 	}
@@ -195,7 +126,7 @@ static resolver_sink *slot_free_locked(resolve_slot *slot)
 	if (!slot)
 		return NULL;
 	if (slot->state == RESOLVE_FREE) {
-		g_pool->double_free++;
+		g_resolver_pool->double_free++;
 		return NULL;
 	}
 	quota_dec_locked(slot);
@@ -209,9 +140,9 @@ static resolver_sink *slot_free_locked(resolve_slot *slot)
 	slot->hostname[0] = '\0';
 	slot->address_count = 0;
 	slot->gai_error = 0;
-	slot->qnext = g_pool->free_head;
-	g_pool->free_head = slot;
-	g_pool->free_count++;
+	slot->qnext = g_resolver_pool->free_head;
+	g_resolver_pool->free_head = slot;
+	g_resolver_pool->free_count++;
 	return die;
 }
 
@@ -267,8 +198,8 @@ static void sink_wakeup(resolver_sink *sink)
 		if (errno == EINTR)
 			continue;
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			if (g_pool)
-				__atomic_fetch_add(&g_pool->eagain_wakeups, 1u, __ATOMIC_RELAXED);
+			if (g_resolver_pool)
+				__atomic_fetch_add(&g_resolver_pool->eagain_wakeups, 1u, __ATOMIC_RELAXED);
 			return;
 		}
 		return;
@@ -300,19 +231,19 @@ static void push_completion(resolve_slot *slot, resolver_sink *sink)
 	if (!sink->closed && ring_push(sink, slot) == 0) {
 		pushed = 1;
 	} else if (sink->closed) {
-		if (g_pool)
-			__atomic_fetch_add(&g_pool->closed_drops, 1u, __ATOMIC_RELAXED);
-	} else if (g_pool) {
-		__atomic_fetch_add(&g_pool->ring_full, 1u, __ATOMIC_RELAXED);
+		if (g_resolver_pool)
+			__atomic_fetch_add(&g_resolver_pool->closed_drops, 1u, __ATOMIC_RELAXED);
+	} else if (g_resolver_pool) {
+		__atomic_fetch_add(&g_resolver_pool->ring_full, 1u, __ATOMIC_RELAXED);
 	}
 	pthread_mutex_unlock(&sink->mutex);
 	if (pushed) {
 		sink_wakeup(sink);
 		return;
 	}
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	die = slot_free_locked(slot);
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	destroy_later(die);
 }
 
@@ -320,9 +251,9 @@ static void publish_slot(resolve_slot *slot, resolver_sink *sink)
 {
 	resolver_sink *die;
 	push_completion(slot, sink);
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	die = ref_drop_locked(sink);
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	destroy_later(die);
 }
 
@@ -385,9 +316,9 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 	do {
 		res = NULL;
 #ifdef SNI_TEST_HOOKS
-		if (g_pool->hook) {
-			st = g_pool->hook(host, family, out, RESOLVER_ADDR_MAX, count,
-					g_pool->hook_cookie);
+		if (g_resolver_pool->hook) {
+			st = g_resolver_pool->hook(host, family, out, RESOLVER_ADDR_MAX, count,
+					g_resolver_pool->hook_cookie);
 		} else
 #endif
 		{
@@ -399,9 +330,9 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 			res = NULL;
 		}
 	} while (st == EAI_SYSTEM && errno == EINTR && attempts < RESOLVER_GAI_ATTEMPTS);
-	__atomic_fetch_add(&g_pool->calls, (uint32_t)attempts, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&g_resolver_pool->calls, (uint32_t)attempts, __ATOMIC_RELAXED);
 #ifdef SNI_TEST_HOOKS
-	if (g_pool->hook)
+	if (g_resolver_pool->hook)
 		return st;
 #endif
 	if (st != 0) {
@@ -433,37 +364,37 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 #ifdef SNI_TEST_HOOKS
 static void wait_if_held(void)
 {
-	pthread_mutex_lock(&g_pool->test_mu);
-	g_pool->running_entered++;
-	pthread_cond_broadcast(&g_pool->test_cv);
-	while (g_pool->hold_running)
-		pthread_cond_wait(&g_pool->test_cv, &g_pool->test_mu);
-	pthread_mutex_unlock(&g_pool->test_mu);
+	pthread_mutex_lock(&g_resolver_pool->test_mu);
+	g_resolver_pool->running_entered++;
+	pthread_cond_broadcast(&g_resolver_pool->test_cv);
+	while (g_resolver_pool->hold_running)
+		pthread_cond_wait(&g_resolver_pool->test_cv, &g_resolver_pool->test_mu);
+	pthread_mutex_unlock(&g_resolver_pool->test_mu);
 }
 #endif
 
 static void commit_infra_locked(resolve_slot *slot, int gai_error)
 {
-	if (slot->req_id != g_pool->cache_refresh_req && g_pool->cache_refresh_req != 0 &&
-			slot->req_id != g_pool->cache_refresh_req) {
+	if (slot->req_id != g_resolver_pool->cache_refresh_req && g_resolver_pool->cache_refresh_req != 0 &&
+			slot->req_id != g_resolver_pool->cache_refresh_req) {
 		/* A newer refresh owns the cache. This result is stale. */
 	}
-	if (slot->req_id == g_pool->cache_refresh_req || g_pool->cache_refresh_inflight) {
-		if (slot->req_id == g_pool->cache_refresh_req) {
-			g_pool->cache_refresh_inflight = 0;
+	if (slot->req_id == g_resolver_pool->cache_refresh_req || g_resolver_pool->cache_refresh_inflight) {
+		if (slot->req_id == g_resolver_pool->cache_refresh_req) {
+			g_resolver_pool->cache_refresh_inflight = 0;
 			if (gai_error == 0 && slot->address_count > 0) {
 				int64_t now = net_mono_ms();
-				memcpy(g_pool->cache_addrs, slot->addresses,
+				memcpy(g_resolver_pool->cache_addrs, slot->addresses,
 						slot->address_count * sizeof(slot->addresses[0]));
-				g_pool->cache_count = slot->address_count;
-				g_pool->cache_valid = 1;
+				g_resolver_pool->cache_count = slot->address_count;
+				g_resolver_pool->cache_valid = 1;
 				if (now < 0)
 					now = 0;
-				g_pool->cache_last_success = now;
-				g_pool->cache_refresh_after = now + (int64_t)RESOLVER_INFRA_REFRESH_MS;
-				g_pool->cache_max_stale = now + (int64_t)RESOLVER_INFRA_MAX_STALE_MS;
+				g_resolver_pool->cache_last_success = now;
+				g_resolver_pool->cache_refresh_after = now + (int64_t)RESOLVER_INFRA_REFRESH_MS;
+				g_resolver_pool->cache_max_stale = now + (int64_t)RESOLVER_INFRA_MAX_STALE_MS;
 			}
-			pthread_cond_broadcast(&g_pool->infra_cv);
+			pthread_cond_broadcast(&g_resolver_pool->infra_cv);
 		}
 	}
 }
@@ -473,13 +404,13 @@ static void worker_finish(resolve_slot *slot, int gai_error, const resolver_addr
 {
 	resolver_sink *sink;
 	resolver_sink *die = NULL;
-	pthread_mutex_lock(&g_pool->mu);
-	if (g_pool->stopping && slot->request_class == RESOLVER_KIND_INFRA) {
-		if (slot->req_id == g_pool->cache_refresh_req)
-			g_pool->cache_refresh_inflight = 0;
-		pthread_cond_broadcast(&g_pool->infra_cv);
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	if (g_resolver_pool->stopping && slot->request_class == RESOLVER_KIND_INFRA) {
+		if (slot->req_id == g_resolver_pool->cache_refresh_req)
+			g_resolver_pool->cache_refresh_inflight = 0;
+		pthread_cond_broadcast(&g_resolver_pool->infra_cv);
 		die = slot_free_locked(slot);
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		destroy_later(die);
 		return;
 	}
@@ -492,13 +423,13 @@ static void worker_finish(resolve_slot *slot, int gai_error, const resolver_addr
 	if (!sink) {
 		commit_infra_locked(slot, gai_error);
 		die = slot_free_locked(slot);
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		destroy_later(die);
 		return;
 	}
 	slot->in_ring = 1;
 	slot->holds_ref = 0;
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	publish_slot(slot, sink);
 }
 
@@ -510,13 +441,13 @@ static void resolve_and_finish(resolve_slot *slot, const char *host, int family)
 #ifdef SNI_TEST_HOOKS
 	wait_if_held();
 #endif
-	if (g_pool->stopping) {
+	if (g_resolver_pool->stopping) {
 		worker_finish(slot, EAI_AGAIN, NULL, 0);
 		return;
 	}
 	gai_error = do_resolve(host, family, addrs, &count);
 	if (gai_error != 0)
-		__atomic_fetch_add(&g_pool->lookup_failures, 1u, __ATOMIC_RELAXED);
+		__atomic_fetch_add(&g_resolver_pool->lookup_failures, 1u, __ATOMIC_RELAXED);
 	worker_finish(slot, gai_error, addrs, count);
 }
 
@@ -526,27 +457,27 @@ static void worker_one(resolve_slot *slot)
 	int family;
 	int64_t now;
 	resolver_sink *die = NULL;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	if (slot->state == RESOLVE_CANCELLED) {
-		__atomic_fetch_add(&g_pool->skipped_cancelled, 1u, __ATOMIC_RELAXED);
+		__atomic_fetch_add(&g_resolver_pool->skipped_cancelled, 1u, __ATOMIC_RELAXED);
 		die = slot_free_locked(slot);
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		destroy_later(die);
 		return;
 	}
 	now = net_mono_ms();
 	if (now >= 0 && slot->deadline_ms > 0 && now >= slot->deadline_ms) {
-		__atomic_fetch_add(&g_pool->skipped_expired, 1u, __ATOMIC_RELAXED);
+		__atomic_fetch_add(&g_resolver_pool->skipped_expired, 1u, __ATOMIC_RELAXED);
 		slot->gai_error = EAI_AGAIN;
 		slot->address_count = 0;
 		slot->state = RESOLVE_DONE;
 		if (!slot->sink) {
-			if (slot->req_id == g_pool->cache_refresh_req) {
-				g_pool->cache_refresh_inflight = 0;
-				pthread_cond_broadcast(&g_pool->infra_cv);
+			if (slot->req_id == g_resolver_pool->cache_refresh_req) {
+				g_resolver_pool->cache_refresh_inflight = 0;
+				pthread_cond_broadcast(&g_resolver_pool->infra_cv);
 			}
 			die = slot_free_locked(slot);
-			pthread_mutex_unlock(&g_pool->mu);
+			pthread_mutex_unlock(&g_resolver_pool->mu);
 			destroy_later(die);
 			return;
 		}
@@ -554,21 +485,21 @@ static void worker_one(resolve_slot *slot)
 		slot->holds_ref = 0;
 		{
 			resolver_sink *sink = slot->sink;
-			pthread_mutex_unlock(&g_pool->mu);
+			pthread_mutex_unlock(&g_resolver_pool->mu);
 			publish_slot(slot, sink);
 			return;
 		}
 	}
-	if (g_pool->stopping) {
+	if (g_resolver_pool->stopping) {
 		die = slot_free_locked(slot);
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		destroy_later(die);
 		return;
 	}
 	slot->state = RESOLVE_RUNNING;
 	memcpy(host, slot->hostname, sizeof(host));
 	family = slot->family_policy;
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	resolve_and_finish(slot, host, family);
 }
 
@@ -649,7 +580,7 @@ static int pool_create(void)
 	pool->free_count = RESOLVER_SLOTS;
 	pool->next_req_id = 1;
 	pool->next_listener_id = 1;
-	g_pool = pool;
+	g_resolver_pool = pool;
 	for (i = 0; i < RESOLVER_THREADS; i++) {
 		if (pthread_create(&pool->threads[i], NULL, worker_main, pool) != 0) {
 			int j;
@@ -667,7 +598,7 @@ static int pool_create(void)
 			pthread_mutex_destroy(&pool->test_mu);
 #endif
 			free(pool);
-			g_pool = NULL;
+			g_resolver_pool = NULL;
 			return -1;
 		}
 	}
@@ -684,13 +615,13 @@ void resolver_get_stats(resolver_stats *out)
 	out->slots = RESOLVER_SLOTS;
 	/* g_start_mu keeps the pool from being freed under us; it is taken first, as in shutdown. */
 	pthread_mutex_lock(&g_start_mu);
-	if (g_pool && g_pool->started) {
-		pthread_mutex_lock(&g_pool->mu);
-		out->slots_in_use = RESOLVER_SLOTS - g_pool->free_count;
-		out->lookups = __atomic_load_n(&g_pool->calls, __ATOMIC_RELAXED);
-		out->lookup_failures = __atomic_load_n(&g_pool->lookup_failures, __ATOMIC_RELAXED);
-		out->ring_full = __atomic_load_n(&g_pool->ring_full, __ATOMIC_RELAXED);
-		pthread_mutex_unlock(&g_pool->mu);
+	if (g_resolver_pool && g_resolver_pool->started) {
+		pthread_mutex_lock(&g_resolver_pool->mu);
+		out->slots_in_use = RESOLVER_SLOTS - g_resolver_pool->free_count;
+		out->lookups = __atomic_load_n(&g_resolver_pool->calls, __ATOMIC_RELAXED);
+		out->lookup_failures = __atomic_load_n(&g_resolver_pool->lookup_failures, __ATOMIC_RELAXED);
+		out->ring_full = __atomic_load_n(&g_resolver_pool->ring_full, __ATOMIC_RELAXED);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 	}
 	pthread_mutex_unlock(&g_start_mu);
 }
@@ -724,11 +655,11 @@ bool resolver_start(void)
 {
 	int rc;
 	pthread_mutex_lock(&g_start_mu);
-	if (g_pool && g_pool->started && !g_pool->abandoned) {
+	if (g_resolver_pool && g_resolver_pool->started && !g_resolver_pool->abandoned) {
 		pthread_mutex_unlock(&g_start_mu);
 		return true;
 	}
-	if (g_pool && g_pool->abandoned) {
+	if (g_resolver_pool && g_resolver_pool->abandoned) {
 		pthread_mutex_unlock(&g_start_mu);
 		return false;
 	}
@@ -744,7 +675,7 @@ int resolver_shutdown(int timeout_ms)
 	int abandoned = 0;
 	int i;
 	pthread_mutex_lock(&g_start_mu);
-	pool = g_pool;
+	pool = g_resolver_pool;
 	if (!pool || !pool->started) {
 		pthread_mutex_unlock(&g_start_mu);
 		return 0;
@@ -788,7 +719,7 @@ int resolver_shutdown(int timeout_ms)
 	pthread_cond_destroy(&pool->test_cv);
 	pthread_mutex_destroy(&pool->test_mu);
 #endif
-	g_pool = NULL;
+	g_resolver_pool = NULL;
 	free(pool);
 	pthread_mutex_unlock(&g_start_mu);
 	return 0;
@@ -850,7 +781,7 @@ static int quota_ok_locked(resolver_sink *sink)
 	if (!sink || sink->closed)
 		return 0;
 	if (sink->kind == RESOLVER_SINK_DIRECT)
-		return g_pool->direct_used < RESOLVER_DIRECT_RESERVE;
+		return g_resolver_pool->direct_used < RESOLVER_DIRECT_RESERVE;
 	if (sink->quota_used < sink->quota_limit)
 		return 1;
 	return 0;
@@ -859,12 +790,12 @@ static int quota_ok_locked(resolver_sink *sink)
 static void quota_inc_locked(resolver_sink *sink, resolve_slot *slot)
 {
 	if (sink->kind == RESOLVER_SINK_DIRECT) {
-		g_pool->direct_used++;
+		g_resolver_pool->direct_used++;
 		slot->quota_kind = RESOLVER_QUOTA_DIRECT;
 		return;
 	}
 	sink->quota_used++;
-	g_pool->listener_used++;
+	g_resolver_pool->listener_used++;
 	slot->quota_kind = RESOLVER_QUOTA_LISTENER;
 }
 
@@ -878,26 +809,26 @@ bool resolver_sink_open(int kind, resolver_sink **out)
 	*out = NULL;
 	if (!resolver_start())
 		return false;
-	pthread_mutex_lock(&g_pool->mu);
-	if (g_pool->stopping) {
-		pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	if (g_resolver_pool->stopping) {
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return false;
 	}
 	if (kind == RESOLVER_SINK_DIRECT) {
 		quota = RESOLVER_DIRECT_RESERVE;
 	} else {
 		int remain = RESOLVER_SLOTS - RESOLVER_INFRA_RESERVE -
-				RESOLVER_DIRECT_RESERVE - g_pool->listener_quota_assigned;
+				RESOLVER_DIRECT_RESERVE - g_resolver_pool->listener_quota_assigned;
 		if (remain <= 0) {
-			pthread_mutex_unlock(&g_pool->mu);
+			pthread_mutex_unlock(&g_resolver_pool->mu);
 			return false;
 		}
 		quota = RESOLVER_LISTENER_QUOTA;
 		if (quota > remain)
 			quota = remain;
-		g_pool->listener_quota_assigned += quota;
+		g_resolver_pool->listener_quota_assigned += quota;
 	}
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	sink = (resolver_sink *)calloc(1, sizeof(*sink));
 	if (!sink)
 		goto fail_quota;
@@ -915,15 +846,15 @@ bool resolver_sink_open(int kind, resolver_sink **out)
 	sink->pipe_write = fds[1];
 	if (pthread_mutex_init(&sink->mutex, NULL) != 0)
 		goto fail_sink;
-	pthread_mutex_lock(&g_pool->mu);
-	sink->listener_id = g_pool->next_listener_id++;
-	if (g_pool->next_listener_id == 0)
-		g_pool->next_listener_id = 1;
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	sink->listener_id = g_resolver_pool->next_listener_id++;
+	if (g_resolver_pool->next_listener_id == 0)
+		g_resolver_pool->next_listener_id = 1;
 	sink->refcount = 1;
-	g_pool->sink_refs++;
-	g_pool->live_sinks++;
-	g_pool->open_pipes += 2;
-	pthread_mutex_unlock(&g_pool->mu);
+	g_resolver_pool->sink_refs++;
+	g_resolver_pool->live_sinks++;
+	g_resolver_pool->open_pipes += 2;
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	*out = sink;
 	return true;
 fail_sink:
@@ -936,10 +867,10 @@ fail_sink:
 		free(sink);
 	}
 fail_quota:
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	if (kind != RESOLVER_SINK_DIRECT)
-		g_pool->listener_quota_assigned -= quota;
-	pthread_mutex_unlock(&g_pool->mu);
+		g_resolver_pool->listener_quota_assigned -= quota;
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return false;
 }
 
@@ -971,10 +902,10 @@ static void sink_destroy(resolver_sink *sink)
 	pthread_mutex_unlock(&sink->mutex);
 	for (i = 0; i < n; i++) {
 		resolver_sink *die = NULL;
-		pthread_mutex_lock(&g_pool->mu);
+		pthread_mutex_lock(&g_resolver_pool->mu);
 		if (batch[i])
 			die = slot_free_locked(batch[i]);
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		if (die && die != sink)
 			sink_destroy(die);
 	}
@@ -986,14 +917,14 @@ static void sink_destroy(resolver_sink *sink)
 		close(sink->pipe_write);
 		sink->pipe_write = -1;
 	}
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	if (sink->kind != RESOLVER_SINK_DIRECT)
-		g_pool->listener_quota_assigned -= sink->quota_limit;
-	if (g_pool->live_sinks > 0)
-		g_pool->live_sinks--;
-	if (g_pool->open_pipes >= 2)
-		g_pool->open_pipes -= 2;
-	pthread_mutex_unlock(&g_pool->mu);
+		g_resolver_pool->listener_quota_assigned -= sink->quota_limit;
+	if (g_resolver_pool->live_sinks > 0)
+		g_resolver_pool->live_sinks--;
+	if (g_resolver_pool->open_pipes >= 2)
+		g_resolver_pool->open_pipes -= 2;
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	resolver_unwatch_bind(sink->listener_id);
 	pthread_mutex_destroy(&sink->mutex);
 	free(sink->ring);
@@ -1003,11 +934,11 @@ static void sink_destroy(resolver_sink *sink)
 void resolver_sink_release(resolver_sink *sink)
 {
 	resolver_sink *die = NULL;
-	if (!sink || !g_pool)
+	if (!sink || !g_resolver_pool)
 		return;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	die = ref_drop_locked(sink);
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	destroy_later(die);
 }
 
@@ -1035,14 +966,14 @@ size_t resolver_drain(resolver_sink *sink, resolve_slot **out, size_t max_out)
 		sink->ring_count--;
 	}
 	pthread_mutex_unlock(&sink->mutex);
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return n;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	for (i = 0; i < n; i++) {
 		if (out[i])
 			out[i]->in_ring = 0;
 	}
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return n;
 }
 
@@ -1060,18 +991,18 @@ int resolver_submit(resolver_sink *sink, uint32_t connection_index,
 		return RESOLVER_SUBMIT_BADNAME;
 	if (!resolver_normalize(hostname, norm, sizeof(norm)))
 		return RESOLVER_SUBMIT_BADNAME;
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return RESOLVER_SUBMIT_OVERFLOW;
-	pthread_mutex_lock(&g_pool->mu);
-	if (g_pool->stopping || !quota_ok_locked(sink) || g_pool->free_head == NULL) {
-		pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	if (g_resolver_pool->stopping || !quota_ok_locked(sink) || g_resolver_pool->free_head == NULL) {
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return RESOLVER_SUBMIT_OVERFLOW;
 	}
-	slot = g_pool->free_head;
-	g_pool->free_head = slot->qnext;
+	slot = g_resolver_pool->free_head;
+	g_resolver_pool->free_head = slot->qnext;
 	slot->qnext = NULL;
-	g_pool->free_count--;
-	slot->req_id = alloc_req_id_locked(g_pool);
+	g_resolver_pool->free_count--;
+	slot->req_id = alloc_req_id_locked(g_resolver_pool);
 	slot->listener_id = sink->listener_id;
 	slot->connection_index = connection_index;
 	slot->connection_generation = connection_generation;
@@ -1087,28 +1018,28 @@ int resolver_submit(resolver_sink *sink, uint32_t connection_index,
 	slot->holds_ref = 1;
 	slot->state = RESOLVE_QUEUED;
 	sink->refcount++;
-	g_pool->sink_refs++;
+	g_resolver_pool->sink_refs++;
 	quota_inc_locked(sink, slot);
-	enqueue(&g_pool->client_head, &g_pool->client_tail, slot);
-	pthread_cond_signal(&g_pool->work_cv);
+	enqueue(&g_resolver_pool->client_head, &g_resolver_pool->client_tail, slot);
+	pthread_cond_signal(&g_resolver_pool->work_cv);
 	*slot_index = slot->index;
 	*req_id = slot->req_id;
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return RESOLVER_SUBMIT_OK;
 }
 
 static int submit_infra_locked(const char *norm, uint16_t port)
 {
 	resolve_slot *slot;
-	if (g_pool->cache_refresh_inflight)
+	if (g_resolver_pool->cache_refresh_inflight)
 		return 0;
-	if (g_pool->infra_used >= RESOLVER_INFRA_RESERVE || g_pool->free_head == NULL)
+	if (g_resolver_pool->infra_used >= RESOLVER_INFRA_RESERVE || g_resolver_pool->free_head == NULL)
 		return -1;
-	slot = g_pool->free_head;
-	g_pool->free_head = slot->qnext;
+	slot = g_resolver_pool->free_head;
+	g_resolver_pool->free_head = slot->qnext;
 	slot->qnext = NULL;
-	g_pool->free_count--;
-	slot->req_id = alloc_req_id_locked(g_pool);
+	g_resolver_pool->free_count--;
+	slot->req_id = alloc_req_id_locked(g_resolver_pool);
 	slot->listener_id = 0;
 	slot->connection_index = 0;
 	slot->connection_generation = 0;
@@ -1126,49 +1057,49 @@ static int submit_infra_locked(const char *norm, uint16_t port)
 	slot->holds_ref = 0;
 	slot->quota_kind = RESOLVER_QUOTA_INFRA;
 	slot->state = RESOLVE_QUEUED;
-	g_pool->infra_used++;
-	g_pool->cache_refresh_inflight = 1;
-	g_pool->cache_refresh_req = slot->req_id;
-	memcpy(g_pool->cache_host, norm, strlen(norm) + 1);
-	g_pool->cache_port = port;
-	enqueue(&g_pool->infra_head, &g_pool->infra_tail, slot);
-	pthread_cond_signal(&g_pool->work_cv);
+	g_resolver_pool->infra_used++;
+	g_resolver_pool->cache_refresh_inflight = 1;
+	g_resolver_pool->cache_refresh_req = slot->req_id;
+	memcpy(g_resolver_pool->cache_host, norm, strlen(norm) + 1);
+	g_resolver_pool->cache_port = port;
+	enqueue(&g_resolver_pool->infra_head, &g_resolver_pool->infra_tail, slot);
+	pthread_cond_signal(&g_resolver_pool->work_cv);
 	return 0;
 }
 
 void resolver_cancel(int slot_index, uint64_t req_id)
 {
 	resolve_slot *slot;
-	if (!g_pool || req_id == 0 || slot_index < 0 || slot_index >= RESOLVER_SLOTS)
+	if (!g_resolver_pool || req_id == 0 || slot_index < 0 || slot_index >= RESOLVER_SLOTS)
 		return;
-	pthread_mutex_lock(&g_pool->mu);
-	slot = &g_pool->slots[slot_index];
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	slot = &g_resolver_pool->slots[slot_index];
 	if (slot->req_id != req_id) {
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return;
 	}
 	if (slot->state == RESOLVE_QUEUED)
 		slot->state = RESOLVE_CANCELLED;
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 }
 
 void resolver_release(int slot_index, uint64_t req_id)
 {
 	resolve_slot *slot;
 	resolver_sink *die = NULL;
-	if (!g_pool || req_id == 0 || slot_index < 0 || slot_index >= RESOLVER_SLOTS)
+	if (!g_resolver_pool || req_id == 0 || slot_index < 0 || slot_index >= RESOLVER_SLOTS)
 		return;
-	pthread_mutex_lock(&g_pool->mu);
-	slot = &g_pool->slots[slot_index];
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	slot = &g_resolver_pool->slots[slot_index];
 	if (slot->req_id != req_id || slot->state == RESOLVE_FREE) {
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return;
 	}
 	if (slot->state == RESOLVE_QUEUED)
 		slot->state = RESOLVE_CANCELLED;
 	if (slot->state == RESOLVE_DONE || slot->state == RESOLVE_CANCELLED)
 		die = slot_free_locked(slot);
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	destroy_later(die);
 }
 
@@ -1181,36 +1112,36 @@ void resolver_watch_bind(uint32_t listener_id, const char *bindip, uint16_t port
 		return;
 	if (inet_pton(AF_INET, bindip, &ip) != 1)
 		return;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
-		if (g_pool->binds[i].used && g_pool->binds[i].listener_id == listener_id) {
+		if (g_resolver_pool->binds[i].used && g_resolver_pool->binds[i].listener_id == listener_id) {
 			free_i = i;
 			break;
 		}
-		if (!g_pool->binds[i].used && free_i < 0)
+		if (!g_resolver_pool->binds[i].used && free_i < 0)
 			free_i = i;
 	}
 	if (free_i >= 0) {
-		g_pool->binds[free_i].used = 1;
-		g_pool->binds[free_i].listener_id = listener_id;
-		g_pool->binds[free_i].port = port;
-		g_pool->binds[free_i].ip = ip;
-		g_pool->binds[free_i].wildcard = (ip.s_addr == htonl(INADDR_ANY));
+		g_resolver_pool->binds[free_i].used = 1;
+		g_resolver_pool->binds[free_i].listener_id = listener_id;
+		g_resolver_pool->binds[free_i].port = port;
+		g_resolver_pool->binds[free_i].ip = ip;
+		g_resolver_pool->binds[free_i].wildcard = (ip.s_addr == htonl(INADDR_ANY));
 	}
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 }
 
 void resolver_unwatch_bind(uint32_t listener_id)
 {
 	int i;
-	if (!g_pool || listener_id == 0)
+	if (!g_resolver_pool || listener_id == 0)
 		return;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
-		if (g_pool->binds[i].used && g_pool->binds[i].listener_id == listener_id)
-			g_pool->binds[i].used = 0;
+		if (g_resolver_pool->binds[i].used && g_resolver_pool->binds[i].listener_id == listener_id)
+			g_resolver_pool->binds[i].used = 0;
 	}
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 }
 
 static int v4_private(uint32_t host)
@@ -1244,7 +1175,7 @@ static int v4_rejected(uint32_t host, uint16_t port, unsigned flags)
 	if ((flags & RESOLVER_POLICY_DENY_PRIVATE) && v4_private(host))
 		return 1;
 	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
-		sni_bind_rec *b = &g_pool->binds[i];
+		sni_bind_rec *b = &g_resolver_pool->binds[i];
 		uint32_t bip;
 		if (!b->used)
 			continue;
@@ -1269,7 +1200,7 @@ static int v6_rejected(const struct in6_addr *ip, uint16_t port, unsigned flags)
 		if (!(flags & RESOLVER_POLICY_ALLOW_LOOPBACK))
 			return 1;
 		for (i = 0; i < RESOLVER_BIND_MAX; i++) {
-			if (g_pool->binds[i].used && g_pool->binds[i].port == port)
+			if (g_resolver_pool->binds[i].used && g_resolver_pool->binds[i].port == port)
 				return 1;
 		}
 		return 0;
@@ -1315,9 +1246,9 @@ size_t resolver_policy_keep(resolver_addr *addrs, size_t count, unsigned flags)
 	size_t kept = 0;
 	if (!addrs)
 		return 0;
-	if (!g_pool && !resolver_start())
+	if (!g_resolver_pool && !resolver_start())
 		return 0;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	for (i = 0; i < count; i++) {
 		struct sockaddr *sa;
 		int drop = 0;
@@ -1344,7 +1275,7 @@ size_t resolver_policy_keep(resolver_addr *addrs, size_t count, unsigned flags)
 			kept++;
 		}
 	}
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return kept;
 }
 
@@ -1352,16 +1283,16 @@ static int cache_copy_locked(uint16_t port, resolver_addr *out, size_t *count)
 {
 	size_t i;
 	int64_t now = net_mono_ms();
-	if (!g_pool->cache_valid || g_pool->cache_count == 0)
+	if (!g_resolver_pool->cache_valid || g_resolver_pool->cache_count == 0)
 		return RESOLVER_UP_UNRESOLVED;
-	if (now >= 0 && g_pool->cache_max_stale > 0 && now > g_pool->cache_max_stale)
+	if (now >= 0 && g_resolver_pool->cache_max_stale > 0 && now > g_resolver_pool->cache_max_stale)
 		return RESOLVER_UP_UNRESOLVED;
-	*count = g_pool->cache_count;
-	memcpy(out, g_pool->cache_addrs, (*count) * sizeof(*out));
+	*count = g_resolver_pool->cache_count;
+	memcpy(out, g_resolver_pool->cache_addrs, (*count) * sizeof(*out));
 	for (i = 0; i < *count; i++)
 		apply_port_one(&out[i], port);
-	if (now >= 0 && now >= g_pool->cache_refresh_after)
-		(void)submit_infra_locked(g_pool->cache_host, g_pool->cache_port);
+	if (now >= 0 && now >= g_resolver_pool->cache_refresh_after)
+		(void)submit_infra_locked(g_resolver_pool->cache_host, g_resolver_pool->cache_port);
 	return RESOLVER_UP_READY;
 }
 
@@ -1379,27 +1310,27 @@ bool resolver_prime_socks(const char *host, uint16_t port, int wait_ms)
 		return true;
 	if (!resolver_start())
 		return false;
-	pthread_mutex_lock(&g_pool->mu);
-	if (g_pool->cache_valid && strcmp(g_pool->cache_host, norm) == 0 &&
-			g_pool->cache_port == port) {
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	if (g_resolver_pool->cache_valid && strcmp(g_resolver_pool->cache_host, norm) == 0 &&
+			g_resolver_pool->cache_port == port) {
 		int64_t now = net_mono_ms();
-		if (now >= 0 && now < g_pool->cache_refresh_after) {
-			pthread_mutex_unlock(&g_pool->mu);
+		if (now >= 0 && now < g_resolver_pool->cache_refresh_after) {
+			pthread_mutex_unlock(&g_resolver_pool->mu);
 			return true;
 		}
 	}
-	if (submit_infra_locked(norm, port) != 0 && !g_pool->cache_refresh_inflight) {
-		pthread_mutex_unlock(&g_pool->mu);
+	if (submit_infra_locked(norm, port) != 0 && !g_resolver_pool->cache_refresh_inflight) {
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return true;
 	}
 	if (mono_deadline(wait_ms, &ts) == 0) {
-		while (g_pool->cache_refresh_inflight) {
-			int wr = pthread_cond_timedwait(&g_pool->infra_cv, &g_pool->mu, &ts);
+		while (g_resolver_pool->cache_refresh_inflight) {
+			int wr = pthread_cond_timedwait(&g_resolver_pool->infra_cv, &g_resolver_pool->mu, &ts);
 			if (wr == ETIMEDOUT)
 				break;
 		}
 	}
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return true;
 }
 
@@ -1415,19 +1346,19 @@ int resolver_copy_upstream(const char *host, uint16_t port,
 		return RESOLVER_UP_READY;
 	if (!resolver_normalize(host, norm, sizeof(norm)))
 		return RESOLVER_UP_NEED_RESOLVE;
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return RESOLVER_UP_NEED_RESOLVE;
-	pthread_mutex_lock(&g_pool->mu);
-	if (!g_pool->cache_valid || strcmp(g_pool->cache_host, norm) != 0) {
-		if (g_pool->cache_host[0] != '\0' && strcmp(g_pool->cache_host, norm) == 0)
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	if (!g_resolver_pool->cache_valid || strcmp(g_resolver_pool->cache_host, norm) != 0) {
+		if (g_resolver_pool->cache_host[0] != '\0' && strcmp(g_resolver_pool->cache_host, norm) == 0)
 			(void)submit_infra_locked(norm, port);
-		pthread_mutex_unlock(&g_pool->mu);
+		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return RESOLVER_UP_NEED_RESOLVE;
 	}
 	st = cache_copy_locked(port, out, count);
 	if (st == RESOLVER_UP_UNRESOLVED)
 		(void)submit_infra_locked(norm, port);
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return st;
 }
 
@@ -1436,10 +1367,10 @@ void resolver_test_set_hook(resolver_hook hook, void *cookie)
 {
 	if (!resolver_start())
 		return;
-	pthread_mutex_lock(&g_pool->mu);
-	g_pool->hook = hook;
-	g_pool->hook_cookie = cookie;
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	g_resolver_pool->hook = hook;
+	g_resolver_pool->hook_cookie = cookie;
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 }
 
 void resolver_test_stats(resolver_counters *out)
@@ -1447,69 +1378,69 @@ void resolver_test_stats(resolver_counters *out)
 	if (!out)
 		return;
 	memset(out, 0, sizeof(*out));
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return;
-	out->calls = __atomic_load_n(&g_pool->calls, __ATOMIC_RELAXED);
-	out->skipped_expired = __atomic_load_n(&g_pool->skipped_expired, __ATOMIC_RELAXED);
-	out->skipped_cancelled = __atomic_load_n(&g_pool->skipped_cancelled, __ATOMIC_RELAXED);
-	out->eagain_wakeups = __atomic_load_n(&g_pool->eagain_wakeups, __ATOMIC_RELAXED);
-	out->closed_drops = __atomic_load_n(&g_pool->closed_drops, __ATOMIC_RELAXED);
-	out->ring_full = __atomic_load_n(&g_pool->ring_full, __ATOMIC_RELAXED);
+	out->calls = __atomic_load_n(&g_resolver_pool->calls, __ATOMIC_RELAXED);
+	out->skipped_expired = __atomic_load_n(&g_resolver_pool->skipped_expired, __ATOMIC_RELAXED);
+	out->skipped_cancelled = __atomic_load_n(&g_resolver_pool->skipped_cancelled, __ATOMIC_RELAXED);
+	out->eagain_wakeups = __atomic_load_n(&g_resolver_pool->eagain_wakeups, __ATOMIC_RELAXED);
+	out->closed_drops = __atomic_load_n(&g_resolver_pool->closed_drops, __ATOMIC_RELAXED);
+	out->ring_full = __atomic_load_n(&g_resolver_pool->ring_full, __ATOMIC_RELAXED);
 }
 
 void resolver_test_reset_stats(void)
 {
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return;
-	__atomic_store_n(&g_pool->calls, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_pool->skipped_expired, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_pool->skipped_cancelled, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_pool->eagain_wakeups, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_pool->closed_drops, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_pool->ring_full, 0u, __ATOMIC_RELAXED);
-	__atomic_store_n(&g_pool->lookup_failures, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_resolver_pool->calls, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_resolver_pool->skipped_expired, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_resolver_pool->skipped_cancelled, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_resolver_pool->eagain_wakeups, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_resolver_pool->closed_drops, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_resolver_pool->ring_full, 0u, __ATOMIC_RELAXED);
+	__atomic_store_n(&g_resolver_pool->lookup_failures, 0u, __ATOMIC_RELAXED);
 }
 
 void resolver_test_pause_dequeue(int pause)
 {
 	if (!resolver_start())
 		return;
-	pthread_mutex_lock(&g_pool->mu);
-	g_pool->pause_dequeue = pause ? 1 : 0;
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	g_resolver_pool->pause_dequeue = pause ? 1 : 0;
 	if (!pause)
-		pthread_cond_broadcast(&g_pool->work_cv);
-	pthread_mutex_unlock(&g_pool->mu);
+		pthread_cond_broadcast(&g_resolver_pool->work_cv);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 }
 
 void resolver_test_hold_running(int hold)
 {
 	if (!resolver_start())
 		return;
-	pthread_mutex_lock(&g_pool->test_mu);
+	pthread_mutex_lock(&g_resolver_pool->test_mu);
 	if (hold)
-		g_pool->running_entered = 0;
-	g_pool->hold_running = hold ? 1 : 0;
+		g_resolver_pool->running_entered = 0;
+	g_resolver_pool->hold_running = hold ? 1 : 0;
 	if (!hold)
-		pthread_cond_broadcast(&g_pool->test_cv);
-	pthread_mutex_unlock(&g_pool->test_mu);
+		pthread_cond_broadcast(&g_resolver_pool->test_cv);
+	pthread_mutex_unlock(&g_resolver_pool->test_mu);
 }
 
 int resolver_test_wait_running(int want, int timeout_ms)
 {
 	struct timespec ts;
 	int ok = 0;
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return 0;
 	if (mono_deadline(timeout_ms, &ts) != 0)
 		return 0;
-	pthread_mutex_lock(&g_pool->test_mu);
-	while (g_pool->running_entered < want) {
-		int wr = pthread_cond_timedwait(&g_pool->test_cv, &g_pool->test_mu, &ts);
+	pthread_mutex_lock(&g_resolver_pool->test_mu);
+	while (g_resolver_pool->running_entered < want) {
+		int wr = pthread_cond_timedwait(&g_resolver_pool->test_cv, &g_resolver_pool->test_mu, &ts);
 		if (wr == ETIMEDOUT)
 			break;
 	}
-	ok = g_pool->running_entered >= want;
-	pthread_mutex_unlock(&g_pool->test_mu);
+	ok = g_resolver_pool->running_entered >= want;
+	pthread_mutex_unlock(&g_resolver_pool->test_mu);
 	return ok;
 }
 
@@ -1519,11 +1450,11 @@ bool resolver_test_accounting(resolver_accounting *out)
 	if (!out)
 		return false;
 	memset(out, 0, sizeof(*out));
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return false;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	for (i = 0; i < RESOLVER_SLOTS; i++) {
-		resolve_slot *slot = &g_pool->slots[i];
+		resolve_slot *slot = &g_resolver_pool->slots[i];
 		if (slot->state == RESOLVE_FREE)
 			out->free_n++;
 		else if (slot->state == RESOLVE_QUEUED)
@@ -1537,40 +1468,40 @@ bool resolver_test_accounting(resolver_accounting *out)
 		else if (slot->state == RESOLVE_DONE)
 			out->done++;
 	}
-	out->quota_used = g_pool->direct_used + g_pool->infra_used + g_pool->listener_used;
-	out->direct_used = g_pool->direct_used;
-	out->infra_used = g_pool->infra_used;
-	out->listener_used = g_pool->listener_used;
-	out->sink_refs = (int)g_pool->sink_refs;
-	out->open_pipes = g_pool->open_pipes;
-	out->double_free = g_pool->double_free;
-	out->live_sinks = g_pool->live_sinks;
-	out->abandoned = g_pool->abandoned;
-	out->listener_quota_assigned = g_pool->listener_quota_assigned;
-	pthread_mutex_unlock(&g_pool->mu);
+	out->quota_used = g_resolver_pool->direct_used + g_resolver_pool->infra_used + g_resolver_pool->listener_used;
+	out->direct_used = g_resolver_pool->direct_used;
+	out->infra_used = g_resolver_pool->infra_used;
+	out->listener_used = g_resolver_pool->listener_used;
+	out->sink_refs = (int)g_resolver_pool->sink_refs;
+	out->open_pipes = g_resolver_pool->open_pipes;
+	out->double_free = g_resolver_pool->double_free;
+	out->live_sinks = g_resolver_pool->live_sinks;
+	out->abandoned = g_resolver_pool->abandoned;
+	out->listener_quota_assigned = g_resolver_pool->listener_quota_assigned;
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return true;
 }
 
 int resolver_test_mutex_ok(void)
 {
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return 0;
-	if (pthread_mutex_lock(&g_pool->mu) != 0)
+	if (pthread_mutex_lock(&g_resolver_pool->mu) != 0)
 		return 0;
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return 1;
 }
 
 void resolver_test_age_cache(int64_t last_success_ms, int64_t refresh_after_ms,
 		int64_t max_stale_ms)
 {
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return;
-	pthread_mutex_lock(&g_pool->mu);
-	g_pool->cache_last_success = last_success_ms;
-	g_pool->cache_refresh_after = refresh_after_ms;
-	g_pool->cache_max_stale = max_stale_ms;
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	g_resolver_pool->cache_last_success = last_success_ms;
+	g_resolver_pool->cache_refresh_after = refresh_after_ms;
+	g_resolver_pool->cache_max_stale = max_stale_ms;
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 }
 
 int resolver_sink_quota(const resolver_sink *sink)
@@ -1583,16 +1514,16 @@ int resolver_sink_quota(const resolver_sink *sink)
 int resolver_test_fill_infra(void)
 {
 	int n = 0;
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return 0;
-	pthread_mutex_lock(&g_pool->mu);
-	while (g_pool->infra_used < RESOLVER_INFRA_RESERVE && g_pool->free_head != NULL) {
-		resolve_slot *slot = g_pool->free_head;
+	pthread_mutex_lock(&g_resolver_pool->mu);
+	while (g_resolver_pool->infra_used < RESOLVER_INFRA_RESERVE && g_resolver_pool->free_head != NULL) {
+		resolve_slot *slot = g_resolver_pool->free_head;
 		int64_t now;
-		g_pool->free_head = slot->qnext;
+		g_resolver_pool->free_head = slot->qnext;
 		slot->qnext = NULL;
-		g_pool->free_count--;
-		slot->req_id = alloc_req_id_locked(g_pool);
+		g_resolver_pool->free_count--;
+		slot->req_id = alloc_req_id_locked(g_resolver_pool);
 		slot->listener_id = 0;
 		slot->connection_index = 0;
 		slot->connection_generation = 0;
@@ -1609,28 +1540,28 @@ int resolver_test_fill_infra(void)
 		slot->holds_ref = 0;
 		slot->quota_kind = RESOLVER_QUOTA_INFRA;
 		slot->state = RESOLVE_QUEUED;
-		g_pool->infra_used++;
-		enqueue(&g_pool->infra_head, &g_pool->infra_tail, slot);
+		g_resolver_pool->infra_used++;
+		enqueue(&g_resolver_pool->infra_head, &g_resolver_pool->infra_tail, slot);
 		n++;
 	}
-	pthread_mutex_unlock(&g_pool->mu);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return n;
 }
 
 void resolver_test_reap(void)
 {
 	int i;
-	if (!g_pool)
+	if (!g_resolver_pool)
 		return;
-	pthread_mutex_lock(&g_pool->mu);
+	pthread_mutex_lock(&g_resolver_pool->mu);
 	for (i = 0; i < RESOLVER_SLOTS; i++) {
-		resolve_slot *slot = &g_pool->slots[i];
+		resolve_slot *slot = &g_resolver_pool->slots[i];
 		if (slot->state == RESOLVE_QUEUED)
 			slot->state = RESOLVE_CANCELLED;
 	}
-	g_pool->pause_dequeue = 0;
-	pthread_cond_broadcast(&g_pool->work_cv);
-	pthread_mutex_unlock(&g_pool->mu);
+	g_resolver_pool->pause_dequeue = 0;
+	pthread_cond_broadcast(&g_resolver_pool->work_cv);
+	pthread_mutex_unlock(&g_resolver_pool->mu);
 }
 
 int resolver_test_wait_idle(int timeout_ms)

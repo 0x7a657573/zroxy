@@ -70,8 +70,11 @@ target_include_directories(zroxy_core PUBLIC ${PROJECT_SOURCE_DIR}/src/core)
 # Hostname resolution is shared by the SNI and DNS data planes.  Keeping it
 # outside either module prevents a second bounded resolver pool from being
 # created when both services are enabled.
+set(ZROXY_RESOLVER_SOURCES
+    src/resolver/resolver.c)
+
 zroxy_add_module(zroxy_resolver
-    SOURCES src/resolver/resolver.c
+    SOURCES ${ZROXY_RESOLVER_SOURCES}
     DEPS zroxy_net zroxy_log Threads::Threads)
 target_include_directories(zroxy_resolver PUBLIC ${PROJECT_SOURCE_DIR}/src/resolver)
 
@@ -150,11 +153,11 @@ endif()
 if(BUILD_TESTING)
     # SNI engine builds with test hooks, once per event backend.
     zroxy_add_module(zroxy_sni_hooks
-        SOURCES ${ZROXY_SNI_SOURCES} src/resolver/resolver.c
+        SOURCES ${ZROXY_SNI_SOURCES} ${ZROXY_RESOLVER_SOURCES}
         DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal zroxy_resolver_internal
         DEFINES SNI_TEST_HOOKS)
     zroxy_add_module(zroxy_sni_hooks_poll
-        SOURCES ${ZROXY_SNI_SOURCES} src/resolver/resolver.c
+        SOURCES ${ZROXY_SNI_SOURCES} ${ZROXY_RESOLVER_SOURCES}
         DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal zroxy_resolver_internal
         DEFINES SNI_TEST_HOOKS SNI_FORCE_POLL)
 
