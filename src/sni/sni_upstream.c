@@ -26,7 +26,7 @@ static void socks_deadline(sni_conn *c)
 /* The codec moved to its next step: restart the I/O counters and the deadline. */
 static void socks_next(sni_conn *c, s5_step step)
 {
-	c->socks_step = step;
+	c->socks_step = (int)step;
 	c->socks_out_off = 0;
 	c->socks_in_len = 0;
 	socks_deadline(c);
