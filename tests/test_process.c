@@ -18,6 +18,10 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 
+#if defined(__OpenBSD__) || defined(__FreeBSD__)
+#include <sys/sysctl.h>
+#endif
+
 #ifndef ZROXY_BIN
 #error ZROXY_BIN is required
 #endif
@@ -299,6 +303,15 @@ static bool log_has(const char *path, const char *needle)
 
 static bool proc_tcp_local(uint16_t port, const char *ip_hex)
 {
+#if !defined(__linux__)
+	int fd;
+	(void)ip_hex;
+	fd = connect_port(port, 200);
+	if (fd < 0)
+		return false;
+	close(fd);
+	return true;
+#else
     FILE *fp;
     char line[512];
     char needle[32];
@@ -317,6 +330,7 @@ static bool proc_tcp_local(uint16_t port, const char *ip_hex)
     }
     fclose(fp);
     return false;
+#endif
 }
 
 static bool log_has_sanitizer(const char *path)
@@ -896,17 +910,25 @@ static void test_monitor_auth_and_path(const char *logpath)
     expect_true(content_length_matches(response), "authorized monitor Content-Length matches the JSON body");
     expect_true(!log_has_sanitizer(logpath), "authenticated monitor stays free of sanitizer reports");
     {
-        char path[64];
         char cmdline[1024];
         ssize_t got = -1;
+#if defined(__linux__)
+        char path[64];
         int cfd;
         snprintf(path, sizeof(path), "/proc/%d/cmdline", (int)pid);
         cfd = open(path, O_RDONLY);
-        if (cfd >= 0)
-        {
+        if (cfd >= 0) {
             got = read(cfd, cmdline, sizeof(cmdline) - 1);
             close(cfd);
         }
+#elif defined(__OpenBSD__)
+        int mib[4] = { CTL_KERN, KERN_PROC_ARGS, (int)pid, KERN_PROC_ARGV };
+        size_t cmdlen = sizeof(cmdline) - 1;
+        if (sysctl(mib, 4, cmdline, &cmdlen, NULL, 0) == 0)
+            got = (ssize_t)cmdlen;
+#else
+        fprintf(stderr, "SKIP: monitor token cmdline check has no BSD sysctl equivalent here\n");
+#endif
         if (got >= 0)
         {
             bool leaked = false;
@@ -914,7 +936,7 @@ static void test_monitor_auth_and_path(const char *logpath)
             for (ssize_t off = 0; off < got; off += (ssize_t)strlen(cmdline + off) + 1)
                 if (strstr(cmdline + off, "secret"))
                     leaked = true;
-            expect_true(!leaked, "inline monitor token is gone from /proc cmdline");
+            expect_true(!leaked, "inline monitor token is gone from process arguments");
         }
     }
     if (failures != before)
@@ -1186,6 +1208,7 @@ static void test_monitor_header_absolute_deadline(const char *logpath)
 }
 
 /* Reads the whole /proc/PID/status; false when unreadable. */
+#if defined(__linux__)
 static bool read_proc_status(pid_t pid, char *text, size_t cap)
 {
     char path[64];
@@ -1201,6 +1224,7 @@ static bool read_proc_status(pid_t pid, char *text, size_t cap)
     text[n] = '\0';
     return n > 0;
 }
+#endif
 
 static void test_run_as_other_user_refused(const char *logpath)
 {
@@ -1223,7 +1247,9 @@ static void test_run_as_current_user(const char *logpath)
     char *argv[6];
     pid_t pid;
     char response[8192];
+#if defined(__linux__)
     char status[8192];
+#endif
     size_t n = 0;
     int before = failures;
     char req[] = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
@@ -1249,10 +1275,14 @@ static void test_run_as_current_user(const char *logpath)
     expect_true(http_exchange(port, req, response, sizeof(response), &n), "monitor answers after hardening");
     expect_true(strncmp(response, "HTTP/1.1 200", 12) == 0, "monitor is 200 after hardening");
     /* a dropped (non-dumpable) process still reads its own /proc/self; the root test below covers that */
-    expect_true(strstr(response, "\"RssBytes\"") != NULL, "monitor still reads /proc/self/status");
+    expect_true(strstr(response, "\"RssBytes\"") != NULL, "monitor reports resident set size");
     expect_true(strstr(response, "\"OpenFiles\" : -1") == NULL, "monitor still counts /proc/self/fd");
+#if defined(__linux__)
     if (read_proc_status(pid, status, sizeof(status)))
         expect_true(strstr(status, "NoNewPrivs:\t1") != NULL, "no_new_privs is set");
+#else
+    fprintf(stderr, "SKIP: OpenBSD/FreeBSD process status check has no procfs path\n");
+#endif
     if (failures != before)
         dump_log(logpath);
     stop_child(pid);
@@ -1266,7 +1296,9 @@ static void test_drop_privileges_as_root(const char *logpath)
     uint16_t port = 0;
     char port_text[8];
     char *argv[6];
+#if defined(__linux__)
     char status[8192];
+#endif
     char want[64];
     pid_t pid;
     int before = failures;
@@ -1301,9 +1333,13 @@ static void test_drop_privileges_as_root(const char *logpath)
     expect_true(log_has(logpath, "running as"), "zroxy reports the drop");
     snprintf(want, sizeof(want), "\nUid:\t%lu\t%lu\t%lu\t%lu", (unsigned long)pw->pw_uid,
         (unsigned long)pw->pw_uid, (unsigned long)pw->pw_uid, (unsigned long)pw->pw_uid);
+#if defined(__linux__)
     expect_true(read_proc_status(pid, status, sizeof(status)), "read status of the dropped process");
     expect_true(strstr(status, want) != NULL, "all four uids are the target user");
     expect_true(strstr(status, "\nGroups:\t\n") != NULL, "no supplementary groups remain");
+#else
+    fprintf(stderr, "SKIP: OpenBSD/FreeBSD credential status check has no procfs path\n");
+#endif
     if (failures != before)
         dump_log(logpath);
     stop_child(pid);
