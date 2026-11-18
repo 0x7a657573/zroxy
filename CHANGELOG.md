@@ -1,6 +1,65 @@
 # Changelog
 
-These notes describe the `2.1.0` release. Nothing here says the result is production-ready.
+These notes describe the `2.2.0` release. Nothing here says the result is production-ready.
+
+## 2.2.0 - 2026-11-18
+
+Existing configurations keep working unchanged. No option was removed and
+every new option defaults to the old behavior.
+
+### SNI
+
+- `SNIMAXCONN` / `--snimaxconn` (`-n`) sets the cap on live SNI connections
+  shared by all listeners, `1..65535`. The default stays 1024.
+- zroxy sizes its open-file limit at startup. Each SNI connection holds two
+  descriptors, so the old 1024 soft limit capped a host at about 500
+  connections. zroxy now raises the soft `RLIMIT_NOFILE` toward
+  `2 x SNIMAXCONN` plus what DNS, the monitor and the listeners need, never
+  above the hard limit. If that is still too low it does not fail: it lowers
+  the cap, logs a warning naming both numbers, and reports the lowered cap as
+  `ConnectionLimit`.
+- `SACL` / `--sacl` (`-N`) limits the SNI listeners to IPv4 networks, in the
+  same CIDR list form as `DACL`. A client outside the list is closed right
+  after accept. Unset, everyone is allowed, as before.
+- A full cap no longer lets silent connections starve real clients. The
+  listener closes its own oldest connection that has not sent its hostname
+  yet and accepts the new one. Connections past that point are never evicted;
+  with none to evict, the new client is refused as before.
+- When `accept` runs out of descriptors, the listener stops accepting for
+  100 ms while established connections keep relaying. Before, the loop thread
+  slept, which stalled every relay on that listener and flooded the log.
+
+### Monitor
+
+- The `SNI_Server` object reports `Evicted` (handshakes closed to make room
+  at the cap) and `AclDenied` (clients outside `SACL`). `ConnectionLimit`
+  shows the effective cap.
+- One monitor thread now serves up to 32 non-blocking clients, instead of
+  one thread per client. Slow or stalled clients no longer delay a fetch.
+
+### OpenWrt and systemd
+
+- UCI `main` options `snimaxconn` and `list sacl` map to `SNIMAXCONN` and
+  `SACL`.
+- The init script and the sample systemd unit raise the open-file limit to
+  65536, so the default cap is not lowered at startup.
+- The package version in `openwrt/Makefile` matches the release again.
+
+### Fixed
+
+- A ClientHello followed in the same read by more data (a request body or
+  TLS early data) could fill the hello buffer and be refused as too large.
+  The hello is now parsed before the buffer is treated as overflowing.
+- A monitor client that shuts down its write side after the request now gets
+  its report. Before, the connection was reset without a response.
+- Shutdown keeps the whitelist alive while monitor workers may still read it,
+  and frees the monitor port and secret file paths.
+
+### Internal
+
+- The SNI engine, the resolver and the DNS event loop are split into smaller
+  source files, and the argument parser and log library are reorganized. No
+  behavior change.
 
 ## 2.1.0 - 2026-11-07
 

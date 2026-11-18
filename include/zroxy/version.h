@@ -8,7 +8,16 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "2.1.0"
+#define version	 "2.2.0"
+/*
+* sni : make the connection cap configurable with SNIMAXCONN
+* sni : restrict clients by source network with SACL
+* sni : evict the oldest silent handshake when the cap is full
+* sni : pause accept on descriptor exhaustion instead of sleeping
+* process : size the open-file limit to the configured caps
+* monitor : serve clients from one non-blocking thread
+*/
+//#define version	 "2.1.0"
 /*
 * args : accept up to four DNS routes, each with optional per-route SOCKS
 * dns : fail over between DNS routes, sticky on the working route
