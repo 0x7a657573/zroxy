@@ -185,5 +185,8 @@ int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream,
 uint32_t dnsev_upstream_interest(const dns_upstream_t *upstream);
 void dnsev_upstream_dispatch(dns_event_t *event, dns_upstream_t *upstream,
 		uint32_t revents);
+bool dnsev_resolution_submit(dns_event_t *event, uint32_t index);
+void dnsev_resolution_tick(dns_event_t *event, int64_t now);
+void dnsev_dns_drain_resolver(dns_event_t *event);
 
 #endif /* DNS_EVENT_INTERNAL_H */
