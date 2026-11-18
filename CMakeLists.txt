@@ -51,7 +51,7 @@ endfunction()
 # Modules (dependency order)
 # ---------------------------------------------------------------------------
 zroxy_add_module(zroxy_log
-    SOURCES src/log/log.c src/log/loglock.c
+    SOURCES src/log/log.c
     DEPS Threads::Threads)
 
 zroxy_add_module(zroxy_priv

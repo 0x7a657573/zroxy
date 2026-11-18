@@ -317,7 +317,7 @@ path, then returns `1`.
 | `src/dns/dns.c` | DNS decode/encode | Bounded packet representation |
 | `src/stats/statistics.c` | Per-service counters | One mutex per statistics object |
 | `src/stats/monitor.c` | HTTP monitor accept/workers/JSON | Maximum 32 monitor workers |
-| `src/log/log.c`, `src/log/loglock.c` | Logging | Shared logging path |
+| `src/log/log.c` | Logging | Shared logging path |
 
 ## Thread and ownership model
 
