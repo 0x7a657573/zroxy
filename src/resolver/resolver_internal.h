@@ -3,6 +3,8 @@
 
 #include "resolver.h"
 
+#include <time.h>
+
 #define RESOLVER_QUOTA_LISTENER 1
 #define RESOLVER_QUOTA_DIRECT 2
 #define RESOLVER_QUOTA_INFRA 3
@@ -77,5 +79,8 @@ extern resolver_pool *g_resolver_pool;
 int resolver_copy_numeric(const char *host, uint16_t port, resolver_addr *out,
 		size_t *count);
 void resolver_apply_port_one(resolver_addr *addr, uint16_t port);
+void resolver_enqueue(resolve_slot **head, resolve_slot **tail, resolve_slot *slot);
+uint64_t resolver_alloc_req_id_locked(resolver_pool *pool);
+int resolver_mono_deadline(int timeout_ms, struct timespec *ts);
 
 #endif /* RESOLVER_INTERNAL_H_ */
