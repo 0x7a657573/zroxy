@@ -245,5 +245,7 @@ void sni_socks_pump(sni_engine *e, sni_conn *c);
 void sni_connect_pump(sni_engine *e, sni_conn *c, uint32_t ev);
 void sni_begin_upstream(sni_engine *e, sni_conn *c);
 void sni_drain_resolve(sni_engine *e);
+void sni_relay_pump(sni_engine *e, sni_conn *c);
+void sni_count_relayed(void);
 
 #endif
