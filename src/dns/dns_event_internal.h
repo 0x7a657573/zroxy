@@ -151,4 +151,21 @@ struct dns_event {
 	size_t response_bytes;
 };
 
+void dnsev_close_fd(int *fd);
+int64_t dnsev_mono_now(void);
+void dnsev_send_udp(dns_event_t *event, const struct sockaddr_in *peer,
+		const uint8_t *buf, size_t len);
+void dnsev_client_close(dns_event_t *event, dns_client_t *client);
+void dnsev_client_reap(dns_event_t *event);
+bool dnsev_client_queue_reply(dns_client_t *client, const uint8_t *buf, size_t len);
+void dnsev_client_pump(dns_event_t *event, dns_client_t *client, uint32_t revents);
+void dnsev_accept_clients(dns_event_t *event);
+void dnsev_pull_udp(dns_event_t *event);
+uint32_t dnsev_client_interest(const dns_client_t *client);
+dns_request_t *dnsev_request_new(dns_event_t *event, int kind,
+		const uint8_t *query, size_t len, const struct sockaddr_in *peer,
+		dns_client_t *client);
+void dnsev_request_start(dns_event_t *event, dns_request_t *request);
+void dnsev_schedule(dns_event_t *event);
+
 #endif /* DNS_EVENT_INTERNAL_H */
