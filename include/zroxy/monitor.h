@@ -7,9 +7,8 @@
 #ifndef MONITOR_H_
 #define MONITOR_H_
 #include <stdbool.h>
+#include <stdint.h>
 #include <zroxy/statistics.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 
 /*
  * Appends the members of a top-level report object as `"Key" : value` pairs
@@ -17,27 +16,7 @@
  */
 typedef bool (*mon_section_fn)(void *ctx, char **ptr, char *end);
 
-typedef struct mon_section
-{
-	char name[32];
-	mon_section_fn fn;
-	void *ctx;
-	struct mon_section *next;
-}mon_section_t;
-
-typedef struct
-{
-	int fd;
-	uint16_t Port;
-	statistics_t *state;
-	mon_section_t *sections; /* guarded by stats_lock; nodes are never freed */
-	pthread_mutex_t stats_lock; /* guards the state list head only */
-	char *token; /* optional bearer secret; NULL disables authentication */
-	int header_timeout; /* seconds to wait for a complete header */
-	pthread_t thread; /* joined by monitor_stop */
-	int wake[2]; /* pipe that wakes the monitor thread */
-	void *private_data; /* monitor reactor and private client slots */
-}mon_t;
+typedef struct mon mon_t;
 
 mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int header_timeout_sec);
 /*
