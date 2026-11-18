@@ -111,6 +111,7 @@ set(ZROXY_SNI_SOURCES
     src/sni/sni_conn_limit.c
     src/sni/sni_event_loop.c
     src/sni/sni_io.c
+    src/sni/sni_relay.c
     src/sni/sni_test_hooks.c
     src/sni/sni_upstream.c
 )
