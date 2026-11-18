@@ -110,6 +110,7 @@ set(ZROXY_SNI_SOURCES
     src/sni/sniproxy.c
     src/sni/sni_conn_limit.c
     src/sni/sni_event_loop.c
+    src/sni/sni_test_hooks.c
 )
 set(ZROXY_SNI_DEPS zroxy_core zroxy_net zroxy_resolver zroxy_filter zroxy_stats)
 
