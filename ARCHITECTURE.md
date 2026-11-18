@@ -26,8 +26,9 @@ the executable and the unit tests link only the libraries they need.
 The SNI listener and the DNS service each own an event loop. The SNI loop is
 implemented across `src/sni/sni_event_loop.c`, `src/sni/sni_io.c`,
 `src/sni/sni_upstream.c`, and `src/sni/sni_relay.c`; the DNS loop is
-implemented in `src/dns/dns_event_loop.c`. “The main thread” means the thread
-running `src/main.c`.
+implemented across `src/dns/dns_event_loop.c`, `src/dns/dns_event_client.c`,
+`src/dns/dns_event_upstream.c`, and `src/dns/dns_event_resolve.c`. “The main
+thread” means the thread running `src/main.c`.
 
 ## Design summary
 
@@ -319,7 +320,11 @@ path, then returns `1`.
 | `src/net/socks5_codec.c` | Sans-IO SOCKS5 client handshake | Owns no fd; shared by the test SOCKS client, the SNI loop and the DNS loop |
 | `tests/support/socks_client.c` | Blocking SOCKS5 client helper | Test-only; drives the codec with deadline-bounded I/O |
 | `src/dns/dnsserver.c` | DNS service socket start/stop | Owns listener sockets and shutdown sequencing |
-| `src/dns/dns_event_loop.c` | Non-blocking DNS state machines | Owns DNS listener, client, upstream, resolver and wake fds; registers them in the shared reactor |
+| `src/dns/dns_event_loop.c` | DNS event-loop coordination | Owns scheduling, deadlines, reactor synchronization, lifecycle and wake handling |
+| `src/dns/dns_event_client.c` | UDP and TCP client handling | Owns DNS client intake, framing, replies and client fd state |
+| `src/dns/dns_event_upstream.c` | Upstream connections | Owns upstream TCP/SOCKS5 state machines and connection dispatch |
+| `src/dns/dns_event_resolve.c` | Upstream target resolution | Owns literal target handling, resolver submissions and completions |
+| `src/dns/dns_event_internal.h` | Private DNS event-loop types and cross-file declarations | Shared only by the dns_event_* sources |
 | `src/dns/dnsproxy.c` | DNS local answers and legacy test helpers | Shared request validation and reply construction |
 | `src/dns/dns.c` | DNS decode/encode | Bounded packet representation |
 | `src/stats/statistics.c` | Per-service counters | One mutex per statistics object |
