@@ -89,7 +89,7 @@ zroxy_add_module(zroxy_stats
 
 zroxy_add_module(zroxy_monitor
     SOURCES src/stats/monitor.c
-    DEPS zroxy_stats zroxy_net)
+    DEPS zroxy_core zroxy_stats zroxy_net)
 
 zroxy_add_module(zroxy_dns
     SOURCES src/dns/dns.c src/dns/dnscache.c src/dns/dnsrate.c src/dns/dnsproxy.c src/dns/dns_event_loop.c src/dns/dnsserver.c

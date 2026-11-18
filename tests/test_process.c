@@ -22,7 +22,7 @@
 #error ZROXY_BIN is required
 #endif
 
-/* Matches MON_MAX_WORKERS in statistics/monitor.c. */
+/* Matches MON_MAX_CLIENTS in statistics/monitor.c. */
 #define MON_CAP 32
 
 static int failures = 0;
