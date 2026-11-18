@@ -1,11 +1,11 @@
-/* SOCKS upstream cache and listener bind tracking. */
-
 #include "resolver_internal.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <string.h>
+
+/* SOCKS upstream cache and listener bind tracking. */
 
 #include <zroxy/net_io.h>
 

@@ -1,11 +1,11 @@
-/* Test-only resolver hooks and accounting helpers. */
-
 #include "resolver_internal.h"
 
 #include <errno.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Test-only resolver hooks and accounting helpers. */
 
 #include <zroxy/net_io.h>
 

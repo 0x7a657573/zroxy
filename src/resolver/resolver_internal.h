@@ -1,6 +1,8 @@
 #ifndef RESOLVER_INTERNAL_H_
 #define RESOLVER_INTERNAL_H_
 
+/* Private resolver pool types and cross-file declarations. */
+
 #include "resolver.h"
 
 #include <time.h>
@@ -83,5 +85,12 @@ void resolver_enqueue(resolve_slot **head, resolve_slot **tail, resolve_slot *sl
 uint64_t resolver_alloc_req_id_locked(resolver_pool *pool);
 int resolver_mono_deadline(int timeout_ms, struct timespec *ts);
 void resolver_commit_infra_locked(resolve_slot *slot, int gai_error);
+resolver_sink *resolver_ref_drop_locked(resolver_sink *sink);
+resolver_sink *resolver_slot_free_locked(resolve_slot *slot);
+void resolver_sink_destroy(resolver_sink *sink);
+void resolver_destroy_later(resolver_sink *sink);
+int resolver_quota_ok_locked(resolver_sink *sink);
+void resolver_quota_inc_locked(resolver_sink *sink, resolve_slot *slot);
+void resolver_publish_slot(resolve_slot *slot, resolver_sink *sink);
 
 #endif /* RESOLVER_INTERNAL_H_ */
