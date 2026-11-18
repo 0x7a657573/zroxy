@@ -30,6 +30,7 @@ enum upstream_state {
 	UP_SOCKS_WRITE, UP_SOCKS_READ
 };
 enum attempt_result { ATTEMPT_ERROR, ATTEMPT_BAD, ATTEMPT_LOCAL, ATTEMPT_TIMEOUT };
+enum open_result { OPEN_OK, OPEN_WAIT, OPEN_FAILED };
 enum watch_kind { WATCH_UDP, WATCH_TCP_LISTEN, WATCH_WAKE, WATCH_RESOLVER,
 	WATCH_UPSTREAM, WATCH_CLIENT };
 
@@ -167,5 +168,22 @@ dns_request_t *dnsev_request_new(dns_event_t *event, int kind,
 		dns_client_t *client);
 void dnsev_request_start(dns_event_t *event, dns_request_t *request);
 void dnsev_schedule(dns_event_t *event);
+void dnsev_pending_push_front(dns_event_t *event, dns_request_t *request);
+void dnsev_request_fail(dns_event_t *event, dns_request_t *request);
+void dnsev_request_finish_upstream(dns_event_t *event, dns_request_t *request);
+bool dnsev_request_ensure_response(dns_event_t *event, dns_request_t *request,
+		size_t cap);
+void dnsev_upstream_close(dns_event_t *event, dns_upstream_t *upstream);
+int dnsev_request_pick_route(dns_event_t *event, const dns_request_t *request);
+void dnsev_request_attempt_failed(dns_event_t *event, dns_request_t *request,
+		int mode, bool reused);
+void dnsev_upstream_fail_mode(dns_event_t *event, dns_upstream_t *upstream, int mode);
+void dnsev_upstream_fail(dns_event_t *event, dns_upstream_t *upstream);
+bool dnsev_upstream_queue_query(dns_upstream_t *upstream);
+int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream,
+		dns_request_t *request, unsigned route);
+uint32_t dnsev_upstream_interest(const dns_upstream_t *upstream);
+void dnsev_upstream_dispatch(dns_event_t *event, dns_upstream_t *upstream,
+		uint32_t revents);
 
 #endif /* DNS_EVENT_INTERNAL_H */

@@ -22,7 +22,6 @@
 #include <zroxy/net_io.h>
 #include <zroxy/socks5_codec.h>
 
-static void request_fail(dns_event_t *event, dns_request_t *request);
 static void request_complete(dns_event_t *event, dns_request_t *request,
 		const uint8_t *response, size_t len);
 
@@ -92,7 +91,7 @@ static void pending_push(dns_event_t *event, dns_request_t *request)
 	event->pending_tail = request;
 }
 
-static void pending_push_front(dns_event_t *event, dns_request_t *request)
+void dnsev_pending_push_front(dns_event_t *event, dns_request_t *request)
 {
 	request->next = event->pending_head;
 	event->pending_head = request;
@@ -157,10 +156,10 @@ static void request_complete_followers(dns_event_t *event, dns_request_t *leader
 				free(copy);
 			} else {
 				free(copy);
-				request_fail(event, follower);
+				dnsev_request_fail(event, follower);
 			}
 		} else {
-			request_fail(event, follower);
+			dnsev_request_fail(event, follower);
 		}
 		follower = next;
 	}
@@ -208,7 +207,7 @@ static void request_complete(dns_event_t *event, dns_request_t *request,
 	request_free(event, request);
 }
 
-static void request_finish_upstream(dns_event_t *event, dns_request_t *request)
+void dnsev_request_finish_upstream(dns_event_t *event, dns_request_t *request)
 {
 	if (!request || !request->response || request->response_len == 0 ||
 		!dns_reply_matches(request->query, request->query_len,
@@ -230,7 +229,7 @@ static void request_finish_upstream(dns_event_t *event, dns_request_t *request)
 	request_complete(event, request, request->response, request->response_len);
 }
 
-static void request_fail(dns_event_t *event, dns_request_t *request)
+void dnsev_request_fail(dns_event_t *event, dns_request_t *request)
 {
 	dns_request_t *follower;
 	if (!request)
@@ -244,7 +243,7 @@ static void request_fail(dns_event_t *event, dns_request_t *request)
 	while (follower) {
 		dns_request_t *next = follower->follow_next;
 		follower->follow_next = NULL;
-		request_fail(event, follower);
+		dnsev_request_fail(event, follower);
 		follower = next;
 	}
 	log_error("NO DATA DNS upstream request failed");
@@ -264,7 +263,7 @@ static dns_request_t *find_flight_leader(dns_event_t *event, dnscache_flight *fl
 	return NULL;
 }
 
-static bool request_ensure_response(dns_event_t *event, dns_request_t *request, size_t cap)
+bool dnsev_request_ensure_response(dns_event_t *event, dns_request_t *request, size_t cap)
 {
 	uint8_t *buf;
 	if (cap > DNS_EVENT_RESPONSE_BYTES || event->response_bytes > DNS_EVENT_RESPONSE_BYTES - cap)
@@ -320,8 +319,8 @@ void dnsev_request_start(dns_event_t *event, dns_request_t *request)
 
 	if (handle_local(event, request))
 		return;
-	if (!request_ensure_response(event, request, DNS_UDP_MAX_PAYLOAD)) {
-		request_fail(event, request);
+	if (!dnsev_request_ensure_response(event, request, DNS_UDP_MAX_PAYLOAD)) {
+		dnsev_request_fail(event, request);
 		return;
 	}
 	cached = dnscache_begin(event->dns->cache, request->query, request->query_len,
@@ -372,340 +371,6 @@ dns_request_t *dnsev_request_new(dns_event_t *event, int kind,
 	return request;
 }
 
-static void upstream_close(dns_event_t *event, dns_upstream_t *upstream)
-{
-	if (upstream->fd >= 0 && event->dns->active_upstreams > 0)
-		__atomic_sub_fetch(&event->dns->active_upstreams, 1u, __ATOMIC_RELAXED);
-	if (upstream->registered)
-		reactor_del(&event->re, upstream->fd);
-	upstream->registered = 0;
-	/*
-	 * The slot may be reopened in this same batch while a ready event for
-	 * the old connection is still queued: upstream_dispatch drops it.
-	 */
-	upstream->closed_batch = event->batch;
-	dnsev_close_fd(&upstream->fd);
-	upstream->state = UP_CLOSED;
-	upstream->out_len = upstream->out_off = 0;
-	upstream->in_len = upstream->in_need = 0;
-}
-
-static bool route_ready(dns_event_t *event, unsigned route)
-{
-	return event->routes[route].upstream.ready &&
-		(!event->dns->routes[route].socks || event->routes[route].socks.ready);
-}
-
-/* Route for the next attempt: the first ready one from active that is not yet tried. */
-static int request_pick_route(dns_event_t *event, const dns_request_t *request)
-{
-	unsigned count = event->dns->route_count;
-	unsigned k;
-	for (k = 0; k < count; k++) {
-		unsigned route = (event->active + k) % count;
-		if (count > 1 && (request->tried & (1u << route)))
-			continue;
-		if (route_ready(event, route))
-			return (int)route;
-	}
-	return -1;
-}
-
-/* Only the route that is still active moves it, so a burst of failures does not skip a route. */
-static void route_failed(dns_event_t *event, unsigned route)
-{
-	unsigned count = event->dns->route_count;
-	if (count > 1 && route == event->active) {
-		event->active = (route + 1) % count;
-		__atomic_store_n(&event->dns->active_route, event->active, __ATOMIC_RELAXED);
-		(void)__atomic_fetch_add(&event->dns->route_switches, 1u, __ATOMIC_RELAXED);
-		log_debug("dns route %u failed; using route %u", route, event->active);
-	}
-}
-
-/*
- * An attempt on request->route failed. With several routes the request moves
- * to one it has not tried while time is left; with one route a fast error is
- * retried once and a timeout is not.
- */
-static void request_attempt_failed(dns_event_t *event, dns_request_t *request,
-		int mode, bool reused)
-{
-	unsigned count = event->dns->route_count;
-	int64_t now = dnsev_mono_now();
-
-	if (mode != ATTEMPT_TIMEOUT && now < request->deadline_ms)
-		(void)__atomic_fetch_add(&event->dns->upstream_errors, 1u, __ATOMIC_RELAXED);
-	if (mode == ATTEMPT_LOCAL) {
-		request_fail(event, request);
-		return;
-	}
-	if (reused && mode == ATTEMPT_ERROR && request->attempts == 0 && now < request->deadline_ms) {
-		/* a pooled connection the server had already closed says nothing about the route */
-		request->attempts = 1;
-		pending_push_front(event, request);
-		return;
-	}
-	if (count > 1) {
-		request->tried |= 1u << request->route;
-		route_failed(event, request->route);
-		if (now < request->deadline_ms && request->tried != (1u << count) - 1u) {
-			pending_push_front(event, request);
-			return;
-		}
-	} else if (mode == ATTEMPT_ERROR && now < request->deadline_ms &&
-			request->attempts++ == 0) {
-		pending_push_front(event, request);
-		return;
-	}
-	request_fail(event, request);
-}
-
-static void upstream_fail_mode(dns_event_t *event, dns_upstream_t *upstream, int mode)
-{
-	dns_request_t *request = upstream->request;
-	bool reused = upstream->reused != 0;
-	upstream->request = NULL;
-	upstream_close(event, upstream);
-	if (request)
-		request_attempt_failed(event, request, mode, reused);
-}
-
-static void upstream_fail(dns_event_t *event, dns_upstream_t *upstream)
-{
-	upstream_fail_mode(event, upstream, ATTEMPT_ERROR);
-}
-
-static bool upstream_queue_query(dns_upstream_t *upstream)
-{
-	dns_request_t *request = upstream->request;
-	if (!request || request->query_len + 2u > sizeof(upstream->out))
-		return false;
-	upstream->out[0] = (uint8_t)(request->query_len >> 8);
-	upstream->out[1] = (uint8_t)request->query_len;
-	memcpy(upstream->out + 2, request->query, request->query_len);
-	upstream->out_len = request->query_len + 2u;
-	upstream->out_off = 0;
-	upstream->state = UP_QUERY_WRITE;
-	return true;
-}
-
-static bool upstream_socks_apply(dns_event_t *event, dns_upstream_t *upstream, s5_step step)
-{
-	sockshost_t *socks = event->dns->routes[upstream->route].socks;
-	if (step == S5_SEND) {
-		memcpy(upstream->out, upstream->socks.out, upstream->socks.out_len);
-		upstream->out_len = upstream->socks.out_len;
-		upstream->out_off = 0;
-		upstream->state = UP_SOCKS_WRITE;
-		return true;
-	}
-	if (step == S5_READ) {
-		upstream->in_len = 0;
-		upstream->in_need = upstream->socks.need;
-		upstream->state = UP_SOCKS_READ;
-		return true;
-	}
-	if (step == S5_DONE) {
-		upstream->state = UP_IDLE;
-		upstream->idle_since_ms = dnsev_mono_now();
-		return upstream_queue_query(upstream);
-	}
-	log_error("[!] SOCKS server %s:%u: %s", socks && socks->host ? socks->host : "?",
-			socks ? (unsigned)socks->port : 0u, socks5_client_strerror(&upstream->socks));
-	return false;
-}
-
-static void upstream_connected(dns_event_t *event, dns_upstream_t *upstream)
-{
-	if (event->dns->routes[upstream->route].socks) {
-		sockshost_t *socks = event->dns->routes[upstream->route].socks;
-		/* The codec offers user/pass only when both are configured. */
-		if (!socks5_client_init(&upstream->socks, socks->user, socks->pass,
-				event->dns->routes[upstream->route].upstream.ip,
-				(uint16_t)event->dns->routes[upstream->route].upstream.port) ||
-			!upstream_socks_apply(event, upstream, socks5_client_start(&upstream->socks)))
-			upstream_fail(event, upstream);
-	} else if (!upstream_queue_query(upstream)) {
-		upstream_fail(event, upstream);
-	}
-}
-
-enum open_result { OPEN_OK, OPEN_WAIT, OPEN_FAILED };
-
-static int upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_request_t *request,
-		unsigned route)
-{
-	const struct sockaddr *addr;
-	socklen_t len;
-	int fd;
-	int rc;
-	int one = 1;
-	dns_route_state_t *state = &event->routes[route];
-	if (!route_ready(event, route))
-		return OPEN_WAIT;
-	if (event->dns->routes[route].socks) {
-		addr = (const struct sockaddr *)&state->socks.addr;
-		len = state->socks.len;
-	} else {
-		addr = (const struct sockaddr *)&state->upstream.addr;
-		len = state->upstream.len;
-	}
-	fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
-	if (fd < 0 || !net_set_nonblock_cloexec(fd)) {
-		if (fd >= 0)
-			close(fd);
-		return OPEN_WAIT;
-	}
-	(void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-	upstream->request = request;
-	upstream->route = route;
-	upstream->reused = 0;
-	upstream->address_generation = state->address_generation;
-	upstream->fd = fd;
-	rc = connect(fd, addr, len);
-	if (rc == 0) {
-		(void)__atomic_fetch_add(&event->dns->active_upstreams, 1u, __ATOMIC_RELAXED);
-		upstream_connected(event, upstream);
-		return OPEN_OK;
-	}
-	if (errno != EINPROGRESS && errno != EALREADY) {
-		upstream->request = NULL;
-		dnsev_close_fd(&upstream->fd);
-		return OPEN_FAILED;
-	}
-	upstream->state = UP_CONNECT;
-	(void)__atomic_fetch_add(&event->dns->active_upstreams, 1u, __ATOMIC_RELAXED);
-	return OPEN_OK;
-}
-
-static void upstream_write(dns_event_t *event, dns_upstream_t *upstream)
-{
-	for (;;) {
-		ssize_t n = write(upstream->fd, upstream->out + upstream->out_off,
-				upstream->out_len - upstream->out_off);
-		if (n > 0) {
-			upstream->out_off += (size_t)n;
-			if (upstream->out_off < upstream->out_len)
-				return;
-			break;
-		}
-		if (n < 0 && errno == EINTR)
-			continue;
-		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-			return;
-		upstream_fail(event, upstream);
-		return;
-	}
-	if (upstream->state == UP_QUERY_WRITE) {
-		upstream->in_len = 0;
-		upstream->in_need = 2;
-		upstream->state = UP_REPLY_LEN;
-		return;
-	}
-	if (!upstream_socks_apply(event, upstream, socks5_client_sent(&upstream->socks)))
-		upstream_fail(event, upstream);
-}
-
-static void upstream_read(dns_event_t *event, dns_upstream_t *upstream)
-{
-	dns_request_t *request = upstream->request;
-	uint8_t *dst;
-	size_t left;
-	for (;;) {
-		if (upstream->state == UP_SOCKS_READ || upstream->state == UP_REPLY_LEN) {
-			dst = upstream->in;
-			left = upstream->in_need - upstream->in_len;
-		} else if (upstream->state == UP_REPLY_BODY && request && request->response) {
-			dst = request->response;
-			left = request->response_len - request->response_off;
-		} else {
-			upstream_fail(event, upstream);
-			return;
-		}
-		ssize_t n = read(upstream->fd, dst +
-			(upstream->state == UP_REPLY_BODY ? request->response_off : upstream->in_len), left);
-		if (n > 0) {
-			if (upstream->state == UP_REPLY_BODY)
-				request->response_off += (size_t)n;
-			else
-				upstream->in_len += (size_t)n;
-			if ((upstream->state == UP_REPLY_BODY && request->response_off < request->response_len) ||
-				(upstream->state != UP_REPLY_BODY && upstream->in_len < upstream->in_need))
-				return;
-			if (upstream->state == UP_SOCKS_READ) {
-				if (!upstream_socks_apply(event, upstream,
-						socks5_client_feed(&upstream->socks, upstream->in, upstream->in_len))) {
-					upstream_fail(event, upstream);
-					return;
-				}
-				if (upstream->state == UP_SOCKS_READ)
-					continue;
-				return;
-			}
-			if (upstream->state == UP_REPLY_LEN) {
-				size_t length = ((size_t)upstream->in[0] << 8) | upstream->in[1];
-				if (length < DNS_HEADER_SIZE) {
-						upstream_fail_mode(event, upstream, ATTEMPT_BAD);
-					return;
-				}
-				if (!request_ensure_response(event, request, length)) {
-						upstream_fail_mode(event, upstream, ATTEMPT_LOCAL);
-					return;
-				}
-				request->response_len = length;
-				request->response_off = 0;
-				upstream->state = UP_REPLY_BODY;
-				continue;
-			}
-			upstream->request = NULL;
-			upstream->state = UP_IDLE;
-			upstream->idle_since_ms = dnsev_mono_now();
-			request_finish_upstream(event, request);
-			dnsev_schedule(event);
-			return;
-		}
-		if (n < 0 && errno == EINTR)
-			continue;
-		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-			return;
-		upstream_fail(event, upstream);
-		return;
-	}
-}
-
-static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, uint32_t revents)
-{
-	if (!upstream || upstream->fd < 0)
-		return;
-	if (upstream->state == UP_CONNECT && (revents & (RE_OUT | RE_ERR | RE_HUP))) {
-		int error = 0;
-		socklen_t len = sizeof(error);
-		if (getsockopt(upstream->fd, SOL_SOCKET, SO_ERROR, &error, &len) != 0 || error != 0) {
-			upstream_fail(event, upstream);
-			return;
-		}
-		upstream_connected(event, upstream);
-	}
-	if (upstream->state == UP_QUERY_WRITE || upstream->state == UP_SOCKS_WRITE) {
-		if (revents & RE_OUT)
-			upstream_write(event, upstream);
-		else if (revents & (RE_ERR | RE_HUP))
-			upstream_fail(event, upstream);
-		return;
-	}
-	if (upstream->state == UP_REPLY_LEN || upstream->state == UP_REPLY_BODY ||
-		upstream->state == UP_SOCKS_READ) {
-		if (revents & RE_IN)
-			upstream_read(event, upstream);
-		else if (revents & (RE_ERR | RE_HUP))
-			upstream_fail(event, upstream);
-		return;
-	}
-	if (upstream->state == UP_IDLE && revents & (RE_IN | RE_ERR | RE_HUP))
-		upstream_close(event, upstream);
-}
-
 void dnsev_schedule(dns_event_t *event)
 {
 	unsigned i;
@@ -714,7 +379,7 @@ void dnsev_schedule(dns_event_t *event)
 		if (upstream->state == UP_IDLE &&
 				(upstream->route != event->active ||
 				upstream->address_generation != event->routes[upstream->route].address_generation))
-			upstream_close(event, upstream);
+			dnsev_upstream_close(event, upstream);
 	}
 	while (event->pending_head) {
 		dns_upstream_t *upstream = NULL;
@@ -723,10 +388,10 @@ void dnsev_schedule(dns_event_t *event)
 		if (dnsev_mono_now() >= request->deadline_ms) {
 			(void)pending_pop(event);
 			(void)__atomic_fetch_add(&event->dns->upstream_timeouts, 1u, __ATOMIC_RELAXED);
-			request_fail(event, request);
+			dnsev_request_fail(event, request);
 			continue;
 		}
-		route = request_pick_route(event, request);
+		route = dnsev_request_pick_route(event, request);
 		if (route < 0)
 			return;
 		for (i = 0; i < event->dns->upstream_connections; i++) {
@@ -749,7 +414,7 @@ void dnsev_schedule(dns_event_t *event)
 			for (i = 0; i < event->dns->upstream_connections; i++) {
 				if (event->upstreams[i].state == UP_IDLE && !event->upstreams[i].request) {
 					upstream = &event->upstreams[i];
-					upstream_close(event, upstream);
+					dnsev_upstream_close(event, upstream);
 					break;
 				}
 			}
@@ -767,16 +432,16 @@ void dnsev_schedule(dns_event_t *event)
 		if (upstream->state == UP_IDLE) {
 			upstream->request = request;
 			upstream->reused = 1;
-			if (!upstream_queue_query(upstream))
-				upstream_fail(event, upstream);
+			if (!dnsev_upstream_queue_query(upstream))
+				dnsev_upstream_fail(event, upstream);
 		} else {
-			int rc = upstream_open(event, upstream, request, (unsigned)route);
+			int rc = dnsev_upstream_open(event, upstream, request, (unsigned)route);
 			if (rc == OPEN_WAIT) {
-				pending_push_front(event, request);
+				dnsev_pending_push_front(event, request);
 				return;
 			}
 			if (rc == OPEN_FAILED)
-				request_attempt_failed(event, request, ATTEMPT_ERROR, false);
+				dnsev_request_attempt_failed(event, request, ATTEMPT_ERROR, false);
 		}
 	}
 }
@@ -919,7 +584,7 @@ static void sweep(dns_event_t *event, int64_t now)
 		if (now >= request->deadline_ms) {
 			request_unlink_pending(event, request);
 			__atomic_fetch_add(&event->dns->upstream_timeouts, 1u, __ATOMIC_RELAXED);
-			request_fail(event, request);
+			dnsev_request_fail(event, request);
 		}
 		request = next;
 	}
@@ -927,9 +592,9 @@ static void sweep(dns_event_t *event, int64_t now)
 		dns_upstream_t *upstream = &event->upstreams[i];
 		if (upstream->request && now >= upstream->request->attempt_deadline_ms) {
 			__atomic_fetch_add(&event->dns->upstream_timeouts, 1u, __ATOMIC_RELAXED);
-			upstream_fail_mode(event, upstream, ATTEMPT_TIMEOUT);
+			dnsev_upstream_fail_mode(event, upstream, ATTEMPT_TIMEOUT);
 		} else if (upstream->state == UP_IDLE && now - upstream->idle_since_ms >= DNS_EVENT_IDLE_MS) {
-			upstream_close(event, upstream);
+			dnsev_upstream_close(event, upstream);
 		}
 	}
 	while (client) {
@@ -948,18 +613,6 @@ static void drain_wake(dns_event_t *event)
 		ssize_t n = read(event->dns->wake[0], buf, sizeof(buf));
 		if (n < 0 && errno == EINTR) continue;
 		if (n <= 0) return;
-	}
-}
-
-static uint32_t upstream_interest(const dns_upstream_t *upstream)
-{
-	switch (upstream->state) {
-	case UP_CONNECT: case UP_QUERY_WRITE: case UP_SOCKS_WRITE:
-		return RE_OUT;
-	case UP_IDLE: case UP_REPLY_LEN: case UP_REPLY_BODY: case UP_SOCKS_READ:
-		return RE_IN;
-	default:
-		return 0;
 	}
 }
 
@@ -983,13 +636,13 @@ static void sync_interest(dns_event_t *event)
 			bool ok = true;
 			if (upstream->fd < 0)
 				continue;
-			want = upstream_interest(upstream);
+			want = dnsev_upstream_interest(upstream);
 			if (!upstream->registered)
 				ok = reactor_add(&event->re, upstream->fd, want, &upstream->watch);
 			else if (upstream->interest != want)
 				ok = reactor_mod(&event->re, upstream->fd, want, &upstream->watch);
 			if (!ok) {
-				upstream_fail(event, upstream);
+				dnsev_upstream_fail(event, upstream);
 				again = true;
 				continue;
 			}
@@ -1013,13 +666,6 @@ static void sync_interest(dns_event_t *event)
 	} while (again);
 }
 
-static void upstream_dispatch(dns_event_t *event, dns_upstream_t *upstream, uint32_t revents)
-{
-	/* Closed earlier in this batch (maybe reopened): the event is stale. */
-	if (upstream->closed_batch == event->batch)
-		return;
-	upstream_pump(event, upstream, revents);
-}
 
 static void *event_main(void *arg)
 {
@@ -1039,7 +685,7 @@ static void *event_main(void *arg)
 			case WATCH_TCP_LISTEN: dnsev_accept_clients(event); break;
 			case WATCH_WAKE: drain_wake(event); event->stop = 1; break;
 			case WATCH_RESOLVER: dns_drain_resolver(event); break;
-			case WATCH_UPSTREAM: upstream_dispatch(event, watch->ptr, ready[i].ev); break;
+			case WATCH_UPSTREAM: dnsev_upstream_dispatch(event, watch->ptr, ready[i].ev); break;
 			case WATCH_CLIENT:
 				/* Closed by an earlier event of this batch; freed after it. */
 				if (!((dns_client_t *)watch->ptr)->dead)
@@ -1059,10 +705,10 @@ static void event_destroy(dns_event_t *event)
 {
 	unsigned i;
 	if (!event) return;
-	while (event->pending_head) { dns_request_t *request = pending_pop(event); request_fail(event, request); }
+	while (event->pending_head) { dns_request_t *request = pending_pop(event); dnsev_request_fail(event, request); }
 	for (i = 0; i < DNS_EVENT_UPSTREAMS; i++) {
-		if (event->upstreams[i].request) { dns_request_t *request = event->upstreams[i].request; event->upstreams[i].request = NULL; request_fail(event, request); }
-		upstream_close(event, &event->upstreams[i]);
+		if (event->upstreams[i].request) { dns_request_t *request = event->upstreams[i].request; event->upstreams[i].request = NULL; dnsev_request_fail(event, request); }
+		dnsev_upstream_close(event, &event->upstreams[i]);
 	}
 	while (event->clients) dnsev_client_close(event, event->clients);
 	dnsev_client_reap(event);
