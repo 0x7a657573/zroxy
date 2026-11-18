@@ -19,6 +19,8 @@ void args_warn_secret_mode(const struct stat *st, const char *path, const char *
 bool args_load_secret_files(zroxy_t *ptr);
 void args_reset_secret_tracking(void);
 char *args_ltrim(char *s);
+char *args_trim(char *s);
 char *args_find_dns_via(char *str);
+int args_apply_option(int key, char *arg, void *userprm);
 
 #endif /* ARGS_INTERNAL_H_ */

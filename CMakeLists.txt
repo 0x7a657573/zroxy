@@ -119,7 +119,7 @@ zroxy_add_module(zroxy_sni
 target_include_directories(zroxy_sni PRIVATE ${PROJECT_SOURCE_DIR}/src/sni)
 
 zroxy_add_module(zroxy_args
-    SOURCES src/args/args.c src/args/args_secret.c
+    SOURCES src/args/args.c src/args/args_options.c src/args/args_secret.c
     DEPS zroxy_log zroxy_net)
 target_include_directories(zroxy_args PRIVATE ${PROJECT_SOURCE_DIR}/src/args)
 
