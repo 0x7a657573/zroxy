@@ -26,7 +26,6 @@ enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
 #define log_error(...) log_log(LOG_ERROR, LOG_FILENAME , __LINE__, __VA_ARGS__)
 #define log_fatal(...) log_log(LOG_FATAL, LOG_FILENAME , __LINE__, __VA_ARGS__)
 
-void log_set_fp(FILE *fp);
 void log_set_level(int level);
 void log_set_quiet(int enable);
 

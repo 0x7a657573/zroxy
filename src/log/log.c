@@ -32,7 +32,6 @@
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static struct {
-  FILE *fp;
   int level;
   int quiet;
 } L;
@@ -47,11 +46,6 @@ static const char *level_colors[] = {
   "\x1b[94m", "\x1b[36m", "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[35m"
 };
 #endif
-
-
-void log_set_fp(FILE *fp) {
-  L.fp = fp;
-}
 
 
 void log_set_level(int level) {
@@ -93,19 +87,6 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
     va_end(args);
     fprintf(stderr, "\n");
     fflush(stderr);
-  }
-
-  /* Log to file */
-  if (L.fp) {
-    va_list args;
-    char buf[32];
-    buf[strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", lt)] = '\0';
-    fprintf(L.fp, "%s %-5s %s:%d: ", buf, level_names[level], file, line);
-    va_start(args, fmt);
-    vfprintf(L.fp, fmt, args);
-    va_end(args);
-    fprintf(L.fp, "\n");
-    fflush(L.fp);
   }
 
   /* Release lock */
