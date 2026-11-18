@@ -74,4 +74,8 @@ typedef struct resolver_pool {
 
 extern resolver_pool *g_resolver_pool;
 
+int resolver_copy_numeric(const char *host, uint16_t port, resolver_addr *out,
+		size_t *count);
+void resolver_apply_port_one(resolver_addr *addr, uint16_t port);
+
 #endif /* RESOLVER_INTERNAL_H_ */

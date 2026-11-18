@@ -71,7 +71,8 @@ target_include_directories(zroxy_core PUBLIC ${PROJECT_SOURCE_DIR}/src/core)
 # outside either module prevents a second bounded resolver pool from being
 # created when both services are enabled.
 set(ZROXY_RESOLVER_SOURCES
-    src/resolver/resolver.c)
+    src/resolver/resolver.c
+    src/resolver/resolver_policy.c)
 
 zroxy_add_module(zroxy_resolver
     SOURCES ${ZROXY_RESOLVER_SOURCES}
