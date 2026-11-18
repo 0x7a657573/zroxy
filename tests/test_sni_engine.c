@@ -24,6 +24,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__OpenBSD__) || defined(__FreeBSD__)
+#include <sys/sysctl.h>
+#endif
+
 #include <zroxy/log.h>
 #include <zroxy/net.h>
 #include "sni_event_loop.h"
@@ -243,6 +247,65 @@ static int count_dir(const char *path)
 
 static int count_threads(void)
 {
+#if defined(__OpenBSD__)
+	int mib[6] = { CTL_KERN, KERN_PROC, KERN_PROC_PID | KERN_PROC_SHOW_THREADS,
+		(int)getpid(), sizeof(struct kinfo_proc), 0 };
+	struct kinfo_proc *procs = NULL;
+	size_t len = 0;
+	int count = -1;
+	if (sysctl(mib, 6, NULL, &len, NULL, 0) == 0 &&
+	    len > 0 && len % sizeof(*procs) == 0) {
+		procs = malloc(len);
+		mib[5] = (int)(len / sizeof(*procs));
+		if (procs && sysctl(mib, 6, procs, &len, NULL, 0) == 0 &&
+		    len % sizeof(*procs) == 0) {
+			int i;
+			count = 0;
+			for (i = 0; i < (int)(len / sizeof(*procs)); i++)
+				if (procs[i].p_tid != -1)
+					count++;
+		}
+	}
+	free(procs);
+	/* Ignore a resolver thread that exits between samples. */
+	if (count >= 0) {
+		int prev = count;
+		int i;
+		for (i = 0; i < 20; i++) {
+			usleep(10000);
+			count = -1;
+			len = 0;
+			if (sysctl(mib, 6, NULL, &len, NULL, 0) == 0 &&
+			    len > 0 && len % sizeof(*procs) == 0) {
+				procs = malloc(len);
+				mib[5] = (int)(len / sizeof(*procs));
+				if (procs && sysctl(mib, 6, procs, &len, NULL, 0) == 0 &&
+				    len % sizeof(*procs) == 0) {
+					int j;
+					count = 0;
+					for (j = 0; j < (int)(len / sizeof(*procs)); j++)
+						if (procs[j].p_tid != -1)
+							count++;
+				}
+				free(procs);
+				procs = NULL;
+			}
+			if (count == prev)
+				return count;
+			if (count >= 0)
+				prev = count;
+		}
+		return prev;
+	}
+	return count;
+#elif defined(__FreeBSD__)
+	struct kinfo_proc kp;
+	size_t len = sizeof(kp);
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid() };
+	if (sysctl(mib, 4, &kp, &len, NULL, 0) == 0 && len >= sizeof(kp))
+		return kp.ki_numthreads;
+	return -1;
+#else
 	int prev = count_dir("/proc/self/task");
 	int i;
 	/* Ignore a resolver thread that exits between samples. */
@@ -255,11 +318,16 @@ static int count_threads(void)
 		prev = now;
 	}
 	return prev;
+#endif
 }
 
 static int count_fds(void)
 {
+#if defined(__OpenBSD__) || defined(__FreeBSD__)
+	return count_dir("/dev/fd");
+#else
 	return count_dir("/proc/self/fd");
+#endif
 }
 
 static void raise_nofile(void)
