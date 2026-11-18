@@ -271,6 +271,30 @@ def test_monitor_http_framing():
             raise AssertionError("unexpected 404 response %r" % data)
 
 
+def test_monitor_slow_clients_do_not_block():
+    """Slow monitor clients must not block a normal fetch."""
+    with zroxy_lab.Lab() as lab:
+        mon_port = zroxy_lab.free_tcp_port()
+        proc = lab.zroxy(["-l", "0", "-m", str(mon_port)], tcp_ports=[mon_port])
+        clients = []
+        try:
+            for _ in range(8):
+                client = socket.create_connection(("127.0.0.1", mon_port), timeout=2.0)
+                client.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n")
+                clients.append(client)
+            started = time.monotonic()
+            doc = zroxy_lab.fetch_monitor(mon_port, timeout=2.0)["json"]
+            elapsed = time.monotonic() - started
+            if elapsed >= 1.0:
+                raise AssertionError("monitor fetch took %.3fs" % elapsed)
+            if "ZroxyVersion" not in doc:
+                raise AssertionError("monitor JSON has no ZroxyVersion: %r" % doc)
+        finally:
+            for client in clients:
+                client.close()
+        proc.check_alive()
+
+
 def test_monitor_process_object():
     with zroxy_lab.Lab() as lab:
         mon_port = zroxy_lab.free_tcp_port()
@@ -512,7 +536,8 @@ def test_monitor_whitelist_object():
 def main():
     failed = 0
     for test in (test_monitor_after_traffic, test_dns_timeout_is_not_also_an_error,
-                 test_monitor_http_framing, test_monitor_process_object,
+                 test_monitor_http_framing, test_monitor_slow_clients_do_not_block,
+                 test_monitor_process_object,
                  test_sni_close_reasons, test_sni_connect_failure_and_handshake_timeout,
                  test_sni_loopback_refused_by_default,
                  test_sni_idle_timeout, test_monitor_whitelist_object):
