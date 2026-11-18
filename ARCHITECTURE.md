@@ -24,9 +24,10 @@ Each `src/<module>/` directory builds one static library (`zroxy_<module>`);
 the executable and the unit tests link only the libraries they need.
 
 The SNI listener and the DNS service each own an event loop. The SNI loop is
-implemented in `src/sni/sni_event_loop.c`; the DNS loop is implemented in
-`src/dns/dns_event_loop.c`. “The main thread” means the thread running
-`src/main.c`.
+implemented across `src/sni/sni_event_loop.c`, `src/sni/sni_io.c`,
+`src/sni/sni_upstream.c`, and `src/sni/sni_relay.c`; the DNS loop is
+implemented in `src/dns/dns_event_loop.c`. “The main thread” means the thread
+running `src/main.c`.
 
 ## Design summary
 
@@ -295,7 +296,12 @@ path, then returns `1`.
 | `include/zroxy/version.h` | Current version and release notes | Used by monitor output |
 | `src/sni/sniproxy.c` | SOCKS priming, listener start/stop | One loop per configured port |
 | `src/core/reactor.c` | epoll/poll readiness reactor (private) | Registers fds for one loop thread; callers delete an fd before closing it |
-| `src/sni/sni_event_loop.c` | Non-blocking SNI state machine | Owns listener/client/upstream fds on its thread |
+| `src/sni/sni_event_loop.c` | SNI engine lifecycle, connection state, dispatch, and listener management | Owns listener/client/upstream fds on its thread |
+| `src/sni/sni_io.c` | Socket and reactor wrappers | Keeps non-blocking I/O and readiness details behind the engine |
+| `src/sni/sni_upstream.c` | Resolver, connect, and SOCKS5 upstream path | Delivers an upstream socket or a counted failure |
+| `src/sni/sni_relay.c` | Relay buffers, half-closes, idle tracking, and fairness budget | Copies data between client and upstream |
+| `src/sni/sni_test_hooks.c` | Test-only fault and counter state | Compiled into the hook libraries only |
+| `src/sni/sni_internal.h` | Private SNI engine types and cross-file declarations | Shared only by SNI implementation sources |
 | `src/sni/sni_event_loop.h` | Event-loop API and test hooks (private) | Joinable listener: open/close |
 | `src/resolver/resolver.c` | Process-wide bounded resolver pool | Publishes completion records through pipes |
 | `src/resolver/resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
@@ -482,7 +488,7 @@ never sleeps. The error is logged at most once per second per listener.
 ### Connection state machine
 
 The state names below correspond to the implementation constants in
-`sni_event_loop.c`.
+`src/sni/sni_internal.h`.
 
 ```mermaid
 stateDiagram-v2
