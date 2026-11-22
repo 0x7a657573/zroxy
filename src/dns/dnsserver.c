@@ -1,8 +1,5 @@
 /*
- * DnsServer.c
  *
- *  Created on: Jun 2, 2021
- *      Author: zeus
  */
 #include <zroxy/dnsserver.h>
 
@@ -36,9 +33,9 @@ struct dnsserver *dnsserver_start(dnshost_t *conf)
 		localdns_free(dns);
 		return NULL;
 	}
-	stats_set_extra(dns->Stat, dns_stats_json, dns);
+	stats_set_extra(dns->stats, dns_stats_json, dns);
 
-	log_info("dns server start on %s:%d", conf->Local.ip, conf->Local.port);
+	log_info("dns server start on %s:%d", conf->local.ip, conf->local.port);
 	return dns;
 }
 
@@ -47,7 +44,7 @@ void dnsserver_stop(struct dnsserver *dns)
 	if (!dns)
 		return;
 	dns_event_loop_stop(dns);
-	stats_set_extra(dns->Stat, NULL, NULL);
+	stats_set_extra(dns->stats, NULL, NULL);
 	localdns_free(dns);
 	log_info("dns server stopped");
 }

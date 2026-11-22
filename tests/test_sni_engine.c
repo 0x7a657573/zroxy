@@ -452,13 +452,13 @@ static sniclient_t *make_client(int fd, uint16_t remote, int timeout,
 	if (!c)
 		return NULL;
 	c->connid = fd;
-	memcpy(c->SniConfig.Port.bindip, "127.0.0.1", 10);
-	c->SniConfig.Port.remote_port = remote;
-	c->SniConfig.snitimeout = timeout;
-	c->SniConfig.allow_loopback = true;
-	c->SniConfig.sta = st;
-	c->SniConfig.wlist = wl;
-	c->SniConfig.Socks = socks;
+	memcpy(c->config.port.bindip, "127.0.0.1", 10);
+	c->config.port.remote_port = remote;
+	c->config.snitimeout = timeout;
+	c->config.allow_loopback = true;
+	c->config.stats = st;
+	c->config.whitelist = wl;
+	c->config.socks = socks;
 	return c;
 }
 
@@ -752,17 +752,17 @@ static int echo_roundtrip(uint16_t port, const void *msg, size_t len, int timeou
 	return 0;
 }
 
-static void fill_listener(SniServer_t *cfg, uint16_t local, uint16_t remote, int timeout,
+static void fill_listener(sni_server_t *cfg, uint16_t local, uint16_t remote, int timeout,
         statistics_t *st, filter_t *wl, sockshost_t *socks)
 {
 	memset(cfg, 0, sizeof(*cfg));
-	memcpy(cfg->Port.bindip, "127.0.0.1", 10);
-	cfg->Port.local_port = local;
-	cfg->Port.remote_port = remote;
+	memcpy(cfg->port.bindip, "127.0.0.1", 10);
+	cfg->port.local_port = local;
+	cfg->port.remote_port = remote;
 	cfg->snitimeout = timeout;
-	cfg->sta = st;
-	cfg->wlist = wl;
-	cfg->Socks = socks;
+	cfg->stats = st;
+	cfg->whitelist = wl;
+	cfg->socks = socks;
 	cfg->allow_loopback = true;
 }
 
@@ -770,7 +770,7 @@ static void state_drop(statistics_t *st)
 {
 	if (!st)
 		return;
-	pthread_mutex_destroy(&st->Lock);
+	pthread_mutex_destroy(&st->lock);
 	free(st);
 }
 
@@ -1487,7 +1487,7 @@ static void test_idle_timeout_separate(void)
 		return;
 	client = make_client(pair[1], port, 1, NULL, NULL, NULL);
 	if (client)
-		client->SniConfig.sniidletimeout = 3;
+		client->config.sniidletimeout = 3;
 	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0,
 	        "idle-separate handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "idle-separate request");
@@ -1515,7 +1515,7 @@ static void test_idle_timeout_separate(void)
 /* The loop may exit on its own; closing the listener afterwards must not write to its fds. */
 static void test_listener_self_exit(void)
 {
-	SniServer_t cfg;
+	sni_server_t cfg;
 	sni_listener *ls = NULL;
 	sni_test_faults faults;
 	uint16_t local = 0;
@@ -1804,7 +1804,7 @@ static void test_hello_with_trailing_data(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	statistics_t *st = NULL;
 	uint16_t local = 0;
 	int binder;
@@ -1853,7 +1853,7 @@ static void test_alloc_failure(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	statistics_t *st = NULL;
 	uint16_t local = 0;
 	int binder;
@@ -1882,8 +1882,8 @@ static void test_alloc_failure(void)
 	}
 	usleep(50000);
 	stats_get(st, &snap);
-	expect_int((int)snap.ActiveConnection, 0, "alloc failure does not stick active");
-	expect_int((int)snap.TotalConnection, 0, "alloc failure is not a completed connection");
+	expect_int((int)snap.active_connections, 0, "alloc failure does not stick active");
+	expect_int((int)snap.total_connections, 0, "alloc failure is not a completed connection");
 	expect_true(slots_are_clear(), "alloc failure released its slot");
 	sni_test_clear_faults();
 	/* A later connection still works. */
@@ -1891,8 +1891,8 @@ static void test_alloc_failure(void)
 	sni_listener_close(ls);
 	echo_stop(&echo);
 	stats_get(st, &snap);
-	expect_int((int)snap.ActiveConnection, 0, "active after alloc test");
-	expect_int((int)snap.TotalConnection, 1, "only the successful connection was counted");
+	expect_int((int)snap.active_connections, 0, "active after alloc test");
+	expect_int((int)snap.total_connections, 1, "only the successful connection was counted");
 	state_drop(st);
 }
 
@@ -1900,7 +1900,7 @@ static void test_stats_once(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	statistics_t *st = NULL;
 	uint16_t local = 0;
 	int binder;
@@ -1944,16 +1944,16 @@ static void test_stats_once(void)
 	}
 	usleep(100000);
 	stats_get(st, &snap);
-	expect_int((int)snap.ActiveConnection, 0, "stats active back to zero");
-	expect_int((int)snap.TotalConnection, 4, "stats counted each accepted connection once");
-	expect_true(snap.TotalTx == (uint64_t)(sizeof(REQ) - 1) * 2, "tx counted on the successes only");
-	expect_true(snap.TotalRx == (uint64_t)(sizeof(REQ) - 1) * 2, "rx counted on the successes only");
-	expect_true(snap.MaxConnection >= 1, "max connection observed");
+	expect_int((int)snap.active_connections, 0, "stats active back to zero");
+	expect_int((int)snap.total_connections, 4, "stats counted each accepted connection once");
+	expect_true(snap.total_tx == (uint64_t)(sizeof(REQ) - 1) * 2, "tx counted on the successes only");
+	expect_true(snap.total_rx == (uint64_t)(sizeof(REQ) - 1) * 2, "rx counted on the successes only");
+	expect_true(snap.max_connections >= 1, "max connection observed");
 	sni_listener_close(ls);
 	echo_stop(&echo);
 	stats_get(st, &snap);
-	expect_int((int)snap.ActiveConnection, 0, "stats stay zero after listener stop");
-	expect_int((int)snap.TotalConnection, 4, "listener stop does not count twice");
+	expect_int((int)snap.active_connections, 0, "stats stay zero after listener stop");
+	expect_int((int)snap.total_connections, 4, "listener stop does not count twice");
 	state_drop(st);
 }
 
@@ -1961,7 +1961,7 @@ static void test_whitelist_and_ip(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	static const char *const allow[] = {"localhost"};
 	filter_t *wl;
 	uint16_t local = 0;
@@ -2012,8 +2012,8 @@ static void test_two_listeners(void)
 	echo_srv b;
 	sni_listener *la = NULL;
 	sni_listener *lb = NULL;
-	SniServer_t ca;
-	SniServer_t cb;
+	sni_server_t ca;
+	sni_server_t cb;
 	uint16_t pa = 0;
 	uint16_t pb = 0;
 	int ba;
@@ -2046,7 +2046,7 @@ static void test_load_and_threads(void)
 	echo_srv echo;
 	sni_listener *ls = NULL;
 	sni_listener *extra = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	uint16_t local = 0;
 	int binder;
 	int base_threads;
@@ -2133,7 +2133,7 @@ static void test_load_and_threads(void)
 	{
 		uint16_t extra_port = 0;
 		int eb = listen_loopback(&extra_port);
-		SniServer_t cfg2;
+		sni_server_t cfg2;
 		if (eb >= 0)
 			close(eb);
 		fill_listener(&cfg2, extra_port, echo.port, 3, NULL, NULL, NULL);
@@ -2153,7 +2153,7 @@ static void test_stall_stays_responsive(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	uint16_t local = 0;
 	int binder;
 	int hold;
@@ -2192,7 +2192,7 @@ static void test_accept_pause(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	sni_test_faults faults;
 	uint16_t local = 0;
 	int binder;
@@ -2276,7 +2276,7 @@ static int wait_active(statistics_t *st, int target, int timeout_ms)
 	do
 	{
 		stats_get(st, &snap);
-		if ((int)snap.ActiveConnection == target)
+		if ((int)snap.active_connections == target)
 			return 0;
 		usleep(5000);
 	} while (mono_ms() < deadline);
@@ -2292,7 +2292,7 @@ static void test_evict_idle_hello(void)
 	};
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	statistics_t *st = NULL;
 	uint16_t local = 0;
 	int binder;
@@ -2354,7 +2354,7 @@ static void test_no_evict_when_relaying(void)
 	};
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	statistics_t *st = NULL;
 	uint16_t local = 0;
 	int binder;
@@ -2411,7 +2411,7 @@ static void test_client_acl(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	statistics_t *st = NULL;
 	zroxy_cidr_t deny[1];
 	zroxy_cidr_t allow[2];
@@ -2448,7 +2448,7 @@ static void test_client_acl(void)
 	{
 		stat_t snap;
 		stats_get(st, &snap);
-		expect_int((int)snap.TotalConnection, 0, "denied client was not counted as a connection");
+		expect_int((int)snap.total_connections, 0, "denied client was not counted as a connection");
 	}
 	sni_listener_close(ls);
 	cfg.acl = allow;
@@ -2466,7 +2466,7 @@ static void test_client_acl(void)
 static void test_connection_cap(void)
 {
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	uint16_t local = 0;
 	int binder;
 	int *fds;
@@ -2526,7 +2526,7 @@ static void test_connection_cap(void)
 		{
 			int j;
 			stats_get(st, &snap);
-			if (snap.ActiveConnection >= 1024)
+			if (snap.active_connections >= 1024)
 				break;
 			for (j = 0; j < opened; j++)
 			{
@@ -2553,13 +2553,13 @@ static void test_connection_cap(void)
 		do
 		{
 			stats_get(st, &snap);
-			if (snap.TotalConnection >= 1025)
+			if (snap.total_connections >= 1025)
 				break;
 			usleep(5000);
 		} while (mono_ms() < deadline);
 	}
 	stats_get(st, &snap);
-	expect_int((int)snap.ActiveConnection, 1024, "active matches the cap");
+	expect_int((int)snap.active_connections, 1024, "active matches the cap");
 	for (i = 0; i < opened; i++)
 		close(fds[i]);
 	if (extra >= 0)
@@ -2569,14 +2569,14 @@ static void test_connection_cap(void)
 		do
 		{
 			stats_get(st, &snap);
-			if (snap.ActiveConnection == 0)
+			if (snap.active_connections == 0)
 				break;
 			usleep(20000);
 		} while (mono_ms() < deadline);
 	}
 	stats_get(st, &snap);
-	expect_int((int)snap.ActiveConnection, 0, "cap connections drained");
-	expect_int((int)snap.TotalConnection, 1025, "the evicting connection was counted");
+	expect_int((int)snap.active_connections, 0, "cap connections drained");
+	expect_int((int)snap.total_connections, 1025, "the evicting connection was counted");
 	expect_int(count_threads(), base + 1, "threads after draining the cap");
 	sni_listener_close(ls);
 	sni_test_set_hello_idle_ms(SNI_HELLO_IDLE_MS);
@@ -2589,7 +2589,7 @@ static void test_stress_cycles(void)
 {
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	uint16_t local = 0;
 	int binder;
 	int holds[8];
@@ -2649,7 +2649,7 @@ static void test_production_spawn(void)
 	if (pid == 0)
 	{
 		echo_srv echo;
-		SniServer_t cfg;
+		sni_server_t cfg;
 		uint16_t local = 0;
 		int binder;
 		int rc;
@@ -3341,7 +3341,7 @@ static void test_sni_resolver_behavior(void)
 	hook_cfg cfg;
 	echo_srv echo;
 	sni_listener *ls = NULL;
-	SniServer_t scfg;
+	sni_server_t scfg;
 	uint16_t local = 0;
 	int binder;
 	int calls_before;
@@ -3436,8 +3436,8 @@ static void test_sni_resolver_behavior(void)
 	binder = listen_loopback(&local);
 	if (binder >= 0)
 		close(binder);
-	scfg.Port.local_port = local;
-	scfg.Port.remote_port = local;
+	scfg.port.local_port = local;
+	scfg.port.remote_port = local;
 	expect_true(sni_listener_open(&scfg, &ls), "self listener");
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "self write");
@@ -3480,7 +3480,7 @@ static void test_socks_resolver_cache(void)
 	socks_job job;
 	pthread_t stid;
 	sni_listener *ls = NULL;
-	SniServer_t scfg;
+	sni_server_t scfg;
 	sockshost_t socks;
 	uint16_t sport = 0;
 	uint16_t local = 0;
@@ -3573,7 +3573,7 @@ static void test_socks_resolver_cache(void)
 	socks.port = sport;
 	fill_listener(&scfg, local, echo.port, 2, NULL, NULL, &socks);
 	expect_true(echo_start(&echo) == 0, "unresolved echo");
-	scfg.Port.remote_port = echo.port;
+	scfg.port.remote_port = echo.port;
 	expect_true(sni_listener_open(&scfg, &ls), "unresolved listener still starts");
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "unresolved write");

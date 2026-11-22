@@ -1,8 +1,5 @@
 /*
- * socks.h
  *
- *  Created on: Feb 1, 2020
- *      Author: zeus
  */
 
 #ifndef SOCKS_H_

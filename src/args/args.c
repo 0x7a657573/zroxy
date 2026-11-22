@@ -1,8 +1,5 @@
 /*
- * args.c
  *
- *  Created on: Feb 16, 2020
- *      Author: zeus
  */
 #include <zroxy/args.h>
 #include <string.h>
@@ -34,8 +31,8 @@ void args_free(zroxy_t *ptr)
 	args_free_socks(ptr);
 	args_free_sacl(ptr);
 	args_free_monitor_token(ptr);
-	free(ptr->WhitePath);
-	ptr->WhitePath = NULL;
+	free(ptr->whitelist_path);
+	ptr->whitelist_path = NULL;
 	free(ptr->monitor_token_file);
 	ptr->monitor_token_file = NULL;
 	free(ptr->socks_pass_file);
@@ -193,7 +190,7 @@ bool args_init(zroxy_t *pgp, int argc, const char **argv)
 	pgp->ports = NULL;
 	pgp->socks = NULL;
 	pgp->monitor_port = 0;
-	pgp->WhitePath = NULL;
+	pgp->whitelist_path = NULL;
 	pgp->dnsserver = NULL;
 	/*ran without parameter*/
 	if (argc == 1)
@@ -331,7 +328,7 @@ bool args_validate(zroxy_t *ptr)
 		return false;
 	if (!resolve_run_identity(ptr))
 		return false;
-	if (ptr->ports && !ptr->WhitePath)
+	if (ptr->ports && !ptr->whitelist_path)
 	{
 		if (!ptr->open_proxy)
 		{
@@ -356,7 +353,7 @@ bool args_validate(zroxy_t *ptr)
 	              ptr->dnsserver->sni_ip[1] == 0 &&
 	              ptr->dnsserver->sni_ip[2] == 0 &&
 	              ptr->dnsserver->sni_ip[3] == 0;
-	if (ptr->WhitePath && sni_ip_zero)
+	if (ptr->whitelist_path && sni_ip_zero)
 		log_warn("whitelisted names will resolve to 0.0.0.0");
 	return true;
 }

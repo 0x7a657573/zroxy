@@ -1,8 +1,5 @@
 /*
- * DnsServer.h
  *
- *  Created on: Jun 2, 2021
- *      Author: zeus
  */
 
 #ifndef DNSSERVER_H_

@@ -1,8 +1,5 @@
 /*
- * config.h
  *
- *  Created on: Jun 2, 2021
- *      Author: zeus
  */
 
 #ifndef CONFIG_H_

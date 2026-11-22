@@ -1,5 +1,4 @@
 /*
- * sni_conn_limit.c
  *
  * Process-wide cap on SNI connections. It defaults to 1024 and is set once at
  * startup with sni_conn_set_limit. Slots are connections on the listener

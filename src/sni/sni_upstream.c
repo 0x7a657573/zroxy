@@ -84,8 +84,8 @@ void sni_socks_pump(sni_engine *e, sni_conn *c)
 		if (c->socks_step == S5_FAIL)
 		{
 			log_error("[!] SOCKS server %s:%u: %s",
-			        c->cfg.Socks->host ? c->cfg.Socks->host : "?",
-			        (unsigned)c->cfg.Socks->port, socks5_client_strerror(&c->socks));
+			        c->cfg.socks->host ? c->cfg.socks->host : "?",
+			        (unsigned)c->cfg.socks->port, socks5_client_strerror(&c->socks));
 			sni_conn_kill(e, c, SNI_CLOSE_SOCKS);
 			return;
 		}
@@ -97,8 +97,8 @@ void sni_socks_pump(sni_engine *e, sni_conn *c)
 static void socks_begin(sni_engine *e, sni_conn *c)
 {
 	sni_conn_set_state(e, c, SNI_ST_SOCKS);
-	if (!socks5_client_init(&c->socks, c->cfg.Socks->user, c->cfg.Socks->pass, c->host,
-	            c->cfg.Port.remote_port))
+	if (!socks5_client_init(&c->socks, c->cfg.socks->user, c->cfg.socks->pass, c->host,
+	            c->cfg.port.remote_port))
 	{
 		sni_conn_kill(e, c, SNI_CLOSE_SOCKS);
 		return;
@@ -157,7 +157,7 @@ static void try_connect(sni_engine *e, sni_conn *c);
 
 static void on_connected(sni_engine *e, sni_conn *c)
 {
-	if (c->cfg.Socks)
+	if (c->cfg.socks)
 		socks_begin(e, c);
 	else
 		sni_enter_relay(e, c);
@@ -291,14 +291,14 @@ void sni_begin_upstream(sni_engine *e, sni_conn *c)
 	resolver_addr got[RESOLVER_ADDR_MAX];
 	size_t n = 0;
 	int st;
-	if (c->cfg.Socks)
+	if (c->cfg.socks)
 	{
-		if (!c->cfg.Socks->host || c->cfg.Socks->host[0] == '\0')
+		if (!c->cfg.socks->host || c->cfg.socks->host[0] == '\0')
 		{
 			sni_conn_kill(e, c, SNI_CLOSE_SOCKS);
 			return;
 		}
-		st = resolver_copy_upstream(c->cfg.Socks->host, c->cfg.Socks->port, got, &n);
+		st = resolver_copy_upstream(c->cfg.socks->host, c->cfg.socks->port, got, &n);
 		if (st != RESOLVER_UP_READY || !install_addrs(c, got, n))
 		{
 			log_trace("socks_unresolved");
@@ -308,7 +308,7 @@ void sni_begin_upstream(sni_engine *e, sni_conn *c)
 		start_connect(e, c);
 		return;
 	}
-	submit_resolve(e, c, c->host, c->cfg.Port.remote_port);
+	submit_resolve(e, c, c->host, c->cfg.port.remote_port);
 }
 
 static sni_conn *find_pending(sni_engine *e, const resolve_slot *slot)

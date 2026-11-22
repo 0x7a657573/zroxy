@@ -1,12 +1,4 @@
-/*
- ============================================================================
- Name        : Zroxy.c
- Author      : Zeus
- Version     :
- Copyright   : Copyright 2020 zeus This program is free software
- Description : simple and smart sni-proxy.
- ============================================================================
- */
+/* Copyright 2020 zeus. This program is free software. */
 #include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -22,7 +14,7 @@
 #include <zroxy/priv.h>
 #include <zroxy/fdlimit.h>
 
-static zroxy_t prg_setting = {0};
+static zroxy_t settings = {0};
 
 /*
  * A running service. main pushes one as each service starts and stops them
@@ -99,9 +91,9 @@ int main(int argc, const char **argv)
 	service_t *services = NULL;
 	size_t service_count = 0;
 	size_t listener_count = 0;
-	statistics_t *SniStat = NULL;
-	statistics_t *DnsStat = NULL;
-	SniServer_t Xconf;
+	statistics_t *sni_stats = NULL;
+	statistics_t *dns_stats = NULL;
+	sni_server_t sni_cfg;
 
 	memset(&ignore_pipe, 0, sizeof(ignore_pipe));
 	ignore_pipe.sa_handler = SIG_IGN;
@@ -114,20 +106,20 @@ int main(int argc, const char **argv)
 	sigaddset(&sigs, SIGHUP);
 	pthread_sigmask(SIG_BLOCK, &sigs, NULL);
 
-	bool args_ok = args_init(&prg_setting, argc, argv);
+	bool args_ok = args_init(&settings, argc, argv);
 	args_scrub_argv();
 	if (args_ok == false)
 	{
 		args_print_usage();
 		return 1;
 	}
-	if (!args_validate(&prg_setting))
+	if (!args_validate(&settings))
 	{
 		args_print_usage();
 		return 1;
 	}
 
-	for (lport_t *p = prg_setting.ports; p; p = p->next)
+	for (lport_t *p = settings.ports; p; p = p->next)
 		listener_count++;
 	/*
 	 * Raise the open-file limit before any socket is made. A limit that stays
@@ -136,17 +128,17 @@ int main(int argc, const char **argv)
 	if (listener_count > 0)
 	{
 		fdlimit_plan plan = {
-		        .sni_conns = prg_setting.snimaxconn,
+		        .sni_conns = settings.snimaxconn,
 		        .sni_listeners = (int)listener_count,
-		        .dns_enabled = prg_setting.dnsserver != NULL,
-		        .dns_upstreams = prg_setting.dnsserver ? prg_setting.dnsserver->upstream_connections : 0,
-		        .monitor_enabled = prg_setting.monitor_port != 0};
-		int cap = prg_setting.snimaxconn;
+		        .dns_enabled = settings.dnsserver != NULL,
+		        .dns_upstreams = settings.dnsserver ? settings.dnsserver->upstream_connections : 0,
+		        .monitor_enabled = settings.monitor_port != 0};
+		int cap = settings.snimaxconn;
 		unsigned long soft = fdlimit_apply(&plan, &cap);
-		if (cap < prg_setting.snimaxconn)
+		if (cap < settings.snimaxconn)
 			log_warn("open-file limit %lu serves only %d SNI connections, not the configured %d; raise LimitNOFILE or ulimit -n",
-			        soft, cap, prg_setting.snimaxconn);
-		prg_setting.snimaxconn = cap;
+			        soft, cap, settings.snimaxconn);
+		settings.snimaxconn = cap;
 	}
 
 	/* whitelist, monitor, DNS and one entry per SNI listener */
@@ -158,12 +150,12 @@ int main(int argc, const char **argv)
 	}
 
 	/*check white list before listeners so a bad file does not become an open proxy*/
-	if (prg_setting.WhitePath)
+	if (settings.whitelist_path)
 	{
-		log_info("load white list from %s", prg_setting.WhitePath);
-		whitelist = filter_init(prg_setting.WhitePath);
-		free(prg_setting.WhitePath);
-		prg_setting.WhitePath = NULL;
+		log_info("load white list from %s", settings.whitelist_path);
+		whitelist = filter_init(settings.whitelist_path);
+		free(settings.whitelist_path);
+		settings.whitelist_path = NULL;
 		if (!whitelist)
 		{
 			log_error("whitelist load failed");
@@ -173,12 +165,12 @@ int main(int argc, const char **argv)
 	}
 
 	/*check Monitor*/
-	if (prg_setting.monitor_port)
+	if (settings.monitor_port)
 	{
-		const char *bind_ip = prg_setting.monitor_bind[0] ? prg_setting.monitor_bind : "127.0.0.1";
-		log_info("enable monitor on %s:%i", bind_ip, prg_setting.monitor_port);
-		monitor = monitor_init(prg_setting.monitor_port, bind_ip, prg_setting.monitor_token, prg_setting.monitor_header_timeout);
-		args_free_monitor_token(&prg_setting); /*monitor keeps its own copy*/
+		const char *bind_ip = settings.monitor_bind[0] ? settings.monitor_bind : "127.0.0.1";
+		log_info("enable monitor on %s:%i", bind_ip, settings.monitor_port);
+		monitor = monitor_init(settings.monitor_port, bind_ip, settings.monitor_token, settings.monitor_header_timeout);
+		args_free_monitor_token(&settings); /*monitor keeps its own copy*/
 		if (!monitor)
 		{
 			log_error("monitor failed to start");
@@ -200,17 +192,17 @@ int main(int argc, const char **argv)
 	}
 
 	/*check for dns server*/
-	if (prg_setting.dnsserver)
+	if (settings.dnsserver)
 	{
-		stats_init(&DnsStat, "DNS_Server");
+		stats_init(&dns_stats, "DNS_Server");
 		if (monitor)
-			monitor_attach_stat(monitor, DnsStat);
-		prg_setting.dnsserver->Stat = DnsStat;
+			monitor_attach_stat(monitor, dns_stats);
+		settings.dnsserver->stats = dns_stats;
 
-		prg_setting.dnsserver->whitelist = whitelist;
+		settings.dnsserver->whitelist = whitelist;
 
 		log_info("start dns server ...");
-		dns = dnsserver_start(prg_setting.dnsserver);
+		dns = dnsserver_start(settings.dnsserver);
 		if (!dns)
 		{
 			log_error("dns server failed to start");
@@ -221,60 +213,60 @@ int main(int argc, const char **argv)
 
 	if (listener_count > 0 || monitor)
 	{
-		stats_init(&SniStat, "SNI_Server");
+		stats_init(&sni_stats, "SNI_Server");
 		if (monitor)
 		{
-			monitor_attach_stat(monitor, SniStat);
-			stats_set_extra(SniStat, sni_stats_json, NULL);
+			monitor_attach_stat(monitor, sni_stats);
+			stats_set_extra(sni_stats, sni_stats_json, NULL);
 		}
 	}
 
-	sni_conn_set_limit(prg_setting.snimaxconn);
-	memset(&Xconf, 0, sizeof(Xconf));
-	Xconf.sta = SniStat;
-	Xconf.wlist = whitelist;
-	Xconf.snitimeout = prg_setting.snitimeout;
-	Xconf.sniidletimeout = prg_setting.sniidletimeout;
-	Xconf.allow_loopback = prg_setting.allow_loopback;
-	Xconf.deny_private = prg_setting.deny_private;
-	Xconf.acl = prg_setting.sacl;
-	Xconf.acl_count = prg_setting.sacl_count;
-	/*if Set Socks proxy*/
-	if (prg_setting.socks)
+	sni_conn_set_limit(settings.snimaxconn);
+	memset(&sni_cfg, 0, sizeof(sni_cfg));
+	sni_cfg.stats = sni_stats;
+	sni_cfg.whitelist = whitelist;
+	sni_cfg.snitimeout = settings.snitimeout;
+	sni_cfg.sniidletimeout = settings.sniidletimeout;
+	sni_cfg.allow_loopback = settings.allow_loopback;
+	sni_cfg.deny_private = settings.deny_private;
+	sni_cfg.acl = settings.sacl;
+	sni_cfg.acl_count = settings.sacl_count;
+	/*if Set socks proxy*/
+	if (settings.socks)
 	{
-		log_info("enable socks on %s:%i", prg_setting.socks->host, prg_setting.socks->port);
-		Xconf.Socks = prg_setting.socks;
+		log_info("enable socks on %s:%i", settings.socks->host, settings.socks->port);
+		sni_cfg.socks = settings.socks;
 	}
 
-	for (lport_t *p = prg_setting.ports; p; p = p->next)
+	for (lport_t *p = settings.ports; p; p = p->next)
 	{
 		sni_listener *ls;
-		Xconf.Port = *p;
-		ls = sniproxy_start(&Xconf);
+		sni_cfg.port = *p;
+		ls = sniproxy_start(&sni_cfg);
 		if (!ls)
 		{
-			log_error("sni listener failed on %s:%u", Xconf.Port.bindip, (unsigned)Xconf.Port.local_port);
+			log_error("sni listener failed on %s:%u", sni_cfg.port.bindip, (unsigned)sni_cfg.port.local_port);
 			goto out;
 		}
 		service_add(services, &service_count, &(service_t){"sni", ls, stop_sni, NULL});
 	}
-	args_free_ports(&prg_setting); /*free Port List*/
+	args_free_ports(&settings); /*free port List*/
 
 	/*
 	 * Everything that needs root is done: the sockets are bound and the
 	 * config, whitelist and secret files are read. The threads already
 	 * run; priv_drop checks that each one took the change.
 	 */
-	if (prg_setting.drop_priv)
+	if (settings.drop_priv)
 	{
-		if (!priv_drop(prg_setting.drop_uid, prg_setting.drop_gid))
+		if (!priv_drop(settings.drop_uid, settings.drop_gid))
 		{
-			log_error("can not drop privileges to %s", prg_setting.run_user);
+			log_error("can not drop privileges to %s", settings.run_user);
 			goto out;
 		}
-		log_info("running as %s (uid %lu)", prg_setting.run_user, (unsigned long)prg_setting.drop_uid);
+		log_info("running as %s (uid %lu)", settings.run_user, (unsigned long)settings.drop_uid);
 	}
-	priv_harden(prg_setting.drop_priv);
+	priv_harden(settings.drop_priv);
 
 	log_info("shutting down on signal %d", wait_for_shutdown(&sigs, services, service_count));
 	rc = 0;
@@ -282,10 +274,10 @@ int main(int argc, const char **argv)
 out:
 	/* reverse start order: SNI and DNS first, then the monitor, then the whitelist */
 	services_stop(services, &service_count);
-	stats_free(SniStat);
-	stats_free(DnsStat);
+	stats_free(sni_stats);
+	stats_free(dns_stats);
 	free(services);
-	args_free(&prg_setting);
+	args_free(&settings);
 	if (rc == 0)
 		log_info("zroxy stopped");
 	return rc;

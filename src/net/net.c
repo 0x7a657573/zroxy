@@ -1,8 +1,5 @@
 /*
- * net.c
  *
- *  Created on: Feb 9, 2020
- *      Author: zeus
  */
 #include <ctype.h>
 #include <stdbool.h>
@@ -47,7 +44,7 @@ bool net_set_nodelay(int fd)
 	                          &one, sizeof(one)) == 0;
 }
 
-bool net_listen_ipv4(in_addr_t addr, uint16_t Port, int *sockfd)
+bool net_listen_ipv4(in_addr_t addr, uint16_t port, int *sockfd)
 {
 
 	struct sockaddr_in servaddr;
@@ -71,7 +68,7 @@ bool net_listen_ipv4(in_addr_t addr, uint16_t Port, int *sockfd)
 	*sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (*sockfd == -1)
 	{
-		log_error("socket creation on port %d failed.", Port);
+		log_error("socket creation on port %d failed.", port);
 		return false;
 	}
 	memset(&servaddr, 0, sizeof(servaddr));
@@ -79,7 +76,7 @@ bool net_listen_ipv4(in_addr_t addr, uint16_t Port, int *sockfd)
 	// assign IP, PORT
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_addr.s_addr = addr; //htonl(INADDR_ANY);
-	servaddr.sin_port = htons(Port);
+	servaddr.sin_port = htons(port);
 
 	int opt = 1;
 	if (setsockopt(*sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0)
@@ -105,7 +102,7 @@ bool net_listen_ipv4(in_addr_t addr, uint16_t Port, int *sockfd)
 	 */
 	if ((listen(*sockfd, SOMAXCONN)) != 0)
 	{
-		log_error("Listen failed on port %d", Port);
+		log_error("Listen failed on port %d", port);
 		close(*sockfd);
 		*sockfd = -1;
 		return false;

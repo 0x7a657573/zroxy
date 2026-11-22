@@ -171,7 +171,7 @@ void sni_conn_kill(sni_engine *e, sni_conn *c, int reason)
 	c->settled = 1;
 	count_close(reason);
 	if (c->close_stats)
-		stats_close_connection(c->cfg.sta, c->rx, c->tx);
+		stats_close_connection(c->cfg.stats, c->rx, c->tx);
 	if (c->slot_held)
 	{
 		sni_conn_release();
@@ -305,7 +305,7 @@ static bool host_ready(sni_engine *e, sni_conn *c)
 		sni_conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 		return true;
 	}
-	if (c->cfg.wlist && filter_match(c->cfg.wlist, c->host) == false)
+	if (c->cfg.whitelist && filter_match(c->cfg.whitelist, c->host) == false)
 	{
 		log_trace("SNI filter Host { %s }", c->host);
 		sni_conn_kill(e, c, SNI_CLOSE_BLOCKED);
@@ -532,9 +532,9 @@ static void accept_clients(sni_engine *e)
 		c->slot_held = 1;
 		if (!conn_start(e, c))
 			continue;
-		if (e->cfg.sta)
+		if (e->cfg.stats)
 		{
-			stats_open_connection(e->cfg.sta);
+			stats_open_connection(e->cfg.stats);
 			c->close_stats = 1;
 		}
 	}
@@ -777,7 +777,7 @@ static void sni_engine_deinit(sni_engine *e)
 	reactor_close(&e->re);
 }
 
-static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg)
+static bool sni_engine_init(sni_engine *e, int listen_fd, const sni_server_t *cfg)
 {
 	int pipes[2];
 	memset(e, 0, sizeof(*e));
@@ -800,7 +800,7 @@ static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg
 	if (!resolver_sink_open(listen_fd >= 0 ? RESOLVER_SINK_LISTENER : RESOLVER_SINK_DIRECT,
 	            &e->sink))
 		goto fail;
-	resolver_watch_bind(e->sink->listener_id, e->cfg.Port.bindip, e->cfg.Port.local_port);
+	resolver_watch_bind(e->sink->listener_id, e->cfg.port.bindip, e->cfg.port.local_port);
 	if (!reactor_open(&e->re, SNI_POLL_MAX, SNI_USE_POLL))
 		goto fail;
 	if (pipe(pipes) != 0)
@@ -850,7 +850,7 @@ static void *engine_thread(void *arg)
 	sni_boot *boot = (sni_boot *)arg;
 	sni_listener *ls = boot->joinable;
 	int fd = boot->listen_fd;
-	SniServer_t cfg = boot->cfg;
+	sni_server_t cfg = boot->cfg;
 	sni_engine eng;
 	free(boot);
 	if (!sni_engine_init(&eng, fd, &cfg))
@@ -884,7 +884,7 @@ static void request_stop(sni_engine *e)
 	} while (n < 0 && errno == EINTR);
 }
 
-bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
+bool sni_listener_open(const sni_server_t *cfg, sni_listener **out)
 {
 	int fd = -1;
 	in_addr_t ip;
@@ -893,13 +893,13 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 	if (!cfg || !out)
 		return false;
 	*out = NULL;
-	ip = inet_addr(cfg->Port.bindip);
-	if (!net_listen_ipv4(ip, cfg->Port.local_port, &fd))
+	ip = inet_addr(cfg->port.bindip);
+	if (!net_listen_ipv4(ip, cfg->port.local_port, &fd))
 	{
-		log_error("can not listen on Port %s:%i", cfg->Port.bindip, cfg->Port.local_port);
+		log_error("can not listen on Port %s:%i", cfg->port.bindip, cfg->port.local_port);
 		return false;
 	}
-	log_info("socket listen on %s:%d", cfg->Port.bindip, cfg->Port.local_port);
+	log_info("socket listen on %s:%d", cfg->port.bindip, cfg->port.local_port);
 	ls = (sni_listener *)calloc(1, sizeof(*ls));
 	if (!ls)
 	{
@@ -984,31 +984,31 @@ void sni_connection_run(sniclient_t *client)
 	{
 		if (fd >= 0)
 			close(fd);
-		stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->config.stats, 0, 0);
 		return;
 	}
-	if (!sni_engine_init(&eng, -1, &client->SniConfig))
+	if (!sni_engine_init(&eng, -1, &client->config))
 	{
 		close(fd);
-		stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->config.stats, 0, 0);
 		return;
 	}
 	c = conn_new(&eng, fd);
 	if (!c)
 	{
 		close(fd);
-		stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->config.stats, 0, 0);
 		sni_engine_deinit(&eng);
 		return;
 	}
 	if (!conn_start(&eng, c))
 	{
-		stats_close_connection(client->SniConfig.sta, 0, 0);
+		stats_close_connection(client->config.stats, 0, 0);
 		sni_engine_run(&eng);
 		sni_engine_deinit(&eng);
 		return;
 	}
-	if (client->SniConfig.sta)
+	if (client->config.stats)
 		c->close_stats = 1;
 	sni_engine_run(&eng);
 	sni_engine_deinit(&eng);

@@ -223,14 +223,14 @@ static void test_sni_forwarding_basic(void)
 	}
 
 	client->connid = pair[1];
-	strcpy(client->SniConfig.Port.bindip, "127.0.0.1");
-	client->SniConfig.Port.local_port = 0;
-	client->SniConfig.Port.remote_port = ntohs(addr.sin_port);
-	client->SniConfig.Socks = NULL;
-	client->SniConfig.allow_loopback = true;
-	client->SniConfig.sta = NULL;
-	client->SniConfig.wlist = NULL;
-	client->SniConfig.snitimeout = 2;
+	strcpy(client->config.port.bindip, "127.0.0.1");
+	client->config.port.local_port = 0;
+	client->config.port.remote_port = ntohs(addr.sin_port);
+	client->config.socks = NULL;
+	client->config.allow_loopback = true;
+	client->config.stats = NULL;
+	client->config.whitelist = NULL;
+	client->config.snitimeout = 2;
 
 	expect_true(pthread_create(&sni_tid, NULL, sni_client_handler, client) == 0, "start sniclient handler");
 	if (failures != 0)
@@ -329,10 +329,10 @@ static void test_stalled_upstream_releases_worker(void)
 	}
 
 	client->connid = pair[1];
-	strcpy(client->SniConfig.Port.bindip, "127.0.0.1");
-	client->SniConfig.Port.remote_port = ntohs(addr.sin_port);
-	client->SniConfig.snitimeout = 1;
-	client->SniConfig.allow_loopback = true;
+	strcpy(client->config.port.bindip, "127.0.0.1");
+	client->config.port.remote_port = ntohs(addr.sin_port);
+	client->config.snitimeout = 1;
+	client->config.allow_loopback = true;
 	expect_true(sni_conn_acquire(), "reserve one SNI connection slot");
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = on_sni_alarm;

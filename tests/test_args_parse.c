@@ -71,7 +71,7 @@ static void free_settings(zroxy_t *cfg)
 	free(cfg->monitor_token);
 	free(cfg->run_user);
 	free(cfg->run_group);
-	free(cfg->WhitePath);
+	free(cfg->whitelist_path);
 	free(cfg->monitor_token_file);
 	free(cfg->socks_pass_file);
 	free(cfg->dsocks_pass_file);
@@ -248,7 +248,7 @@ static void test_config_value_case_preserved(void)
 		expect_string(cfg.socks->host, "ProxyHost.Example", "config socks host preserved");
 		expect_u16(cfg.socks->port, 1081, "config socks port");
 	}
-	expect_string(cfg.WhitePath, "/TMP/WhiteList.TXT", "config white path preserved");
+	expect_string(cfg.whitelist_path, "/TMP/WhiteList.TXT", "config white path preserved");
 
 	unlink(template_path);
 	free_settings(&cfg);
@@ -350,7 +350,7 @@ static void test_config_dns_only_cleanup_safe(void)
 	expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
 	if (cfg.dnsserver)
 	{
-		expect_true(cfg.dnsserver->Socks == NULL, "dns only Socks is NULL");
+		expect_true(cfg.dnsserver->socks == NULL, "dns only Socks is NULL");
 		expect_true(cfg.dnsserver->whitelist == NULL, "dns only whitelist is NULL");
 	}
 
@@ -382,13 +382,13 @@ static void test_config_dns_with_dsocks_no_auth_cleanup_safe(void)
 	expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
 	if (cfg.dnsserver)
 	{
-		expect_true(cfg.dnsserver->Socks != NULL, "dns dsocks allocated");
-		if (cfg.dnsserver->Socks)
+		expect_true(cfg.dnsserver->socks != NULL, "dns dsocks allocated");
+		if (cfg.dnsserver->socks)
 		{
-			expect_string(cfg.dnsserver->Socks->host, "127.0.0.1", "dns dsocks host");
-			expect_u16(cfg.dnsserver->Socks->port, 9050, "dns dsocks port");
-			expect_true(cfg.dnsserver->Socks->user == NULL, "dns dsocks user is NULL");
-			expect_true(cfg.dnsserver->Socks->pass == NULL, "dns dsocks pass is NULL");
+			expect_string(cfg.dnsserver->socks->host, "127.0.0.1", "dns dsocks host");
+			expect_u16(cfg.dnsserver->socks->port, 9050, "dns dsocks port");
+			expect_true(cfg.dnsserver->socks->user == NULL, "dns dsocks user is NULL");
+			expect_true(cfg.dnsserver->socks->pass == NULL, "dns dsocks pass is NULL");
 		}
 		expect_true(cfg.dnsserver->whitelist == NULL, "dns dsocks whitelist is NULL");
 	}
@@ -421,7 +421,7 @@ static void test_config_dns_with_snip_cleanup_safe(void)
 	expect_true(cfg.dnsserver != NULL, "config dnsserver allocated");
 	if (cfg.dnsserver)
 	{
-		expect_true(cfg.dnsserver->Socks == NULL, "dns with snip Socks is NULL");
+		expect_true(cfg.dnsserver->socks == NULL, "dns with snip Socks is NULL");
 		expect_true(cfg.dnsserver->whitelist == NULL, "dns with snip whitelist is NULL");
 	}
 
@@ -501,7 +501,7 @@ static void test_dns_option_order_and_last_listener_wins(void)
 		reset_getopt();
 		expect_true(args_init(&last, 5, last_argv), "repeated LDNS parses");
 		if (last.dnsserver)
-			expect_u16(last.dnsserver->Local.port, 5454, "last LDNS wins");
+			expect_u16(last.dnsserver->local.port, 5454, "last LDNS wins");
 		free_settings(&last);
 	}
 }
@@ -522,8 +522,8 @@ static void test_repeated_ldns_resets_default_port(void)
 	expect_true(args_init(&cfg, 7, argv), "LDNS without port resets previous port");
 	if (cfg.dnsserver)
 	{
-		expect_u16(cfg.dnsserver->Local.port, 53, "LDNS default port replaces previous port");
-		expect_string(cfg.dnsserver->Local.ip, "127.0.0.1", "LDNS default-port address");
+		expect_u16(cfg.dnsserver->local.port, 53, "LDNS default port replaces previous port");
+		expect_string(cfg.dnsserver->local.ip, "127.0.0.1", "LDNS default-port address");
 		expect_int((int)cfg.dnsserver->timeout, 2, "LDNS replacement preserves timeout");
 	}
 	free_settings(&cfg);
@@ -540,8 +540,8 @@ static void test_repeated_ldns_resets_default_port(void)
 		expect_true(args_init(&next, 5, next_argv), "LDNS with port replaces default port");
 		if (next.dnsserver)
 		{
-			expect_u16(next.dnsserver->Local.port, 5300, "LDNS explicit replacement port");
-			expect_string(next.dnsserver->Local.ip, "127.0.0.2", "LDNS explicit replacement address");
+			expect_u16(next.dnsserver->local.port, 5300, "LDNS explicit replacement port");
+			expect_string(next.dnsserver->local.ip, "127.0.0.2", "LDNS explicit replacement address");
 		}
 		free_settings(&next);
 	}
@@ -933,7 +933,7 @@ static void test_open_proxy_option(void)
 		const char *argv[] = {a0, p1, p2, o1, o2, w1, w2};
 		reset_getopt();
 		expect_true(args_init(&cfg, 7, argv), "whitelist with openproxy yes parses");
-		expect_true(cfg.WhitePath != NULL, "whitelist stays configured with openproxy");
+		expect_true(cfg.whitelist_path != NULL, "whitelist stays configured with openproxy");
 		expect_true(args_validate(&cfg), "whitelist with openproxy validates");
 		free_settings(&cfg);
 	}
@@ -1095,7 +1095,7 @@ static void test_config_minimal_cleanup_safe(void)
 	expect_true(cfg.ports != NULL, "config port parsed");
 	expect_true(cfg.socks == NULL, "minimal socks is NULL");
 	expect_true(cfg.dnsserver == NULL, "minimal dnsserver is NULL");
-	expect_true(cfg.WhitePath == NULL, "minimal WhitePath is NULL");
+	expect_true(cfg.whitelist_path == NULL, "minimal WhitePath is NULL");
 	expect_true(cfg.monitor_port == 0, "minimal monitor port is disabled");
 
 	unlink(template_path);
@@ -1607,9 +1607,9 @@ static void test_socks_pass_file(void)
 	memset(&cfg, 0, sizeof(cfg));
 	/* validate fails on the missing LDNS, after the secret files are loaded */
 	init_validate(&cfg, "-X", path, "-x", "bob@127.0.0.1");
-	expect_true(cfg.dnsserver && cfg.dnsserver->Socks, "dns socks parsed with pass file");
-	if (cfg.dnsserver && cfg.dnsserver->Socks)
-		expect_string(cfg.dnsserver->Socks->pass, "p@ss:word", "dns socks pass loaded from file");
+	expect_true(cfg.dnsserver && cfg.dnsserver->socks, "dns socks parsed with pass file");
+	if (cfg.dnsserver && cfg.dnsserver->socks)
+		expect_string(cfg.dnsserver->socks->pass, "p@ss:word", "dns socks pass loaded from file");
 	free_settings(&cfg);
 	unlink(path);
 
@@ -1982,7 +1982,7 @@ static void test_dns_global_dsocks_only_for_plain_routes(void)
 	            "DNS = 1.1.1.1 via direct\n"))
 		return;
 	expect_true(args_parse_config(&cfg, path), "dsocks with mixed routes parses");
-	if (!cfg.dnsserver || cfg.dnsserver->route_count != 3 || !cfg.dnsserver->Socks)
+	if (!cfg.dnsserver || cfg.dnsserver->route_count != 3 || !cfg.dnsserver->socks)
 	{
 		expect_true(false, "dsocks and three routes present");
 		unlink(path);
@@ -1995,9 +1995,9 @@ static void test_dns_global_dsocks_only_for_plain_routes(void)
 	if (dns)
 	{
 		expect_int((int)dns->route_count, 3, "server copies the routes");
-		expect_true(dns->routes[0].socks == cfg.dnsserver->Socks, "plain route uses the global DSOCKS");
+		expect_true(dns->routes[0].socks == cfg.dnsserver->socks, "plain route uses the global DSOCKS");
 		expect_true(dns->routes[1].socks == cfg.dnsserver->routes[1].socks &&
-		                    dns->routes[1].socks != cfg.dnsserver->Socks,
+		                    dns->routes[1].socks != cfg.dnsserver->socks,
 		        "via route keeps its own proxy");
 		expect_true(dns->routes[2].socks == NULL, "direct route ignores DSOCKS");
 		localdns_free(dns);

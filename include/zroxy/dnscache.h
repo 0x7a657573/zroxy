@@ -1,5 +1,4 @@
 /*
- * dnscache.h
  *
  * Answer cache and in-flight coalescing for forwarded DNS queries.
  *

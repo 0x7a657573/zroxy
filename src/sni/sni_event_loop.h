@@ -8,7 +8,7 @@
  * Each connection is a state machine: read the ClientHello or HTTP Host,
  * check the whitelist and reject IP literals, connect upstream directly or
  * through SOCKS5, then relay with fixed buffers. Sockets stay non-blocking.
- * Configuration objects pointed to by SniServer_t stay owned by the caller.
+ * Configuration objects pointed to by sni_server_t stay owned by the caller.
  */
 #ifndef SNI_EVENT_LOOP_H_
 #define SNI_EVENT_LOOP_H_
@@ -28,7 +28,7 @@
 typedef struct sni_listener sni_listener;
 
 /* Joinable listener. Caller must sni_listener_close it. */
-bool sni_listener_open(const SniServer_t *cfg, sni_listener **out);
+bool sni_listener_open(const sni_server_t *cfg, sni_listener **out);
 void sni_listener_close(sni_listener *ls);
 
 #ifdef SNI_TEST_HOOKS
@@ -38,7 +38,7 @@ typedef struct
 	int connid;
 	struct sockaddr_in cli;
 	socklen_t addr_len;
-	SniServer_t SniConfig;
+	sni_server_t config;
 } sniclient_t;
 
 /* Thread entry: run one client via sni_connection_run, release its slot, free it. */
@@ -48,7 +48,7 @@ void *sni_client_handler(void *arg);
  * Run one already-accepted client to completion on the calling thread.
  * Closes client->connid and stores -1. Does not free client and does not
  * take or release an SNI connection slot. Reports stats_close_connection when
- * SniConfig.sta is set, matching the previous handler.
+ * config.stats is set, matching the previous handler.
  */
 void sni_connection_run(sniclient_t *client);
 

@@ -1,8 +1,5 @@
 /*
- * filter.h
  *
- *  Created on: Mar 8, 2020
- *      Author: zeus
  *
  * Hostname whitelist. One name or pattern per line; blank lines and lines
  * starting with '#' are ignored. Matching is ASCII case-insensitive and a

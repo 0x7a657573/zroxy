@@ -152,12 +152,12 @@ static dnshost_t *dns_config(zroxy_t *ptr)
 		ptr->dnsserver = (dnshost_t *)calloc(1, sizeof(dnshost_t));
 		if (!ptr->dnsserver)
 			return NULL;
-		ptr->dnsserver->Local.port = 53;
+		ptr->dnsserver->local.port = 53;
 		ptr->dnsserver->timeout = 5;
 		ptr->dnsserver->cache_entries = DNSCACHE_ENTRIES;
 		ptr->dnsserver->local_ttl = DNS_LOCAL_TTL_DEFAULT;
 		ptr->dnsserver->upstream_connections = DNS_UPSTREAM_CONNECTIONS_DEFAULT;
-		memcpy(ptr->dnsserver->Local.ip, "127.0.0.1", sizeof("127.0.0.1"));
+		memcpy(ptr->dnsserver->local.ip, "127.0.0.1", sizeof("127.0.0.1"));
 	}
 	return ptr->dnsserver;
 }
@@ -307,8 +307,8 @@ static bool parse_whitelist(zroxy_t *ptr, char *str)
 	path = dup_bounded(str, ZROXY_MAX_CONFIG_VALUE);
 	if (!path)
 		return false;
-	free(ptr->WhitePath);
-	ptr->WhitePath = path;
+	free(ptr->whitelist_path);
+	ptr->whitelist_path = path;
 	return true;
 }
 
@@ -429,7 +429,7 @@ static bool parse_dns_server(zroxy_t *ptr, char *str)
 
 	if (!dns)
 		return false;
-	dns->Local.port = 53;
+	dns->local.port = 53;
 
 	endname = strchr(str, ':');
 	if (endname)
@@ -437,9 +437,9 @@ static bool parse_dns_server(zroxy_t *ptr, char *str)
 		*endname++ = 0;
 		if (!parse_u16(endname, &port, 0, 65535))
 			return false;
-		dns->Local.port = port;
+		dns->local.port = port;
 	}
-	if (!validate_ip(str) || !copy_bounded(dns->Local.ip, sizeof(dns->Local.ip), str))
+	if (!validate_ip(str) || !copy_bounded(dns->local.ip, sizeof(dns->local.ip), str))
 	{
 		log_error("invalid local DNS address");
 		return false;
@@ -697,7 +697,7 @@ static uint32_t ip_value(const char *ip)
 
 /*
  * True when binding port would fail because other listens on the same local
- * port: the same address, or either one is the wildcard. Port 0 asks for any
+ * port: the same address, or either one is the wildcard. port 0 asks for any
  * free port, so two of them never collide.
  */
 static bool listener_conflict(const lport_t *port, const lport_t *other)
@@ -850,9 +850,9 @@ void args_free_dns(zroxy_t *ptr)
 {
 	if (ptr->dnsserver)
 	{
-		if (ptr->dnsserver->Socks)
+		if (ptr->dnsserver->socks)
 		{
-			free_sockshost(ptr->dnsserver->Socks);
+			free_sockshost(ptr->dnsserver->socks);
 		}
 		for (unsigned i = 0; i < ptr->dnsserver->route_count; i++)
 			free_sockshost(ptr->dnsserver->routes[i].socks);
@@ -876,8 +876,8 @@ static bool parse_dns_socks(zroxy_t *ptr, char *str)
 		free_sockshost(socks);
 		return false;
 	}
-	free_sockshost(dns->Socks);
-	dns->Socks = socks;
+	free_sockshost(dns->socks);
+	dns->socks = socks;
 	return true;
 }
 

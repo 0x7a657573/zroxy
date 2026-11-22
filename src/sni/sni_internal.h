@@ -181,7 +181,7 @@ struct sni_conn
 	uint8_t socks_in[SNI_SOCKS_CAP];
 	socks5_client socks;
 	sni_addr addrs[SNI_ADDR_MAX];
-	SniServer_t cfg;
+	sni_server_t cfg;
 };
 
 struct sni_engine
@@ -196,7 +196,7 @@ struct sni_engine
 	int64_t accept_log_at;
 	uint32_t wake_interest;
 	int stop;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	sni_conn *head;
 	sni_conn *hello_head;
 	sni_conn *hello_tail;
@@ -222,7 +222,7 @@ struct sni_listener
 typedef struct sni_boot
 {
 	int listen_fd;
-	SniServer_t cfg;
+	sni_server_t cfg;
 	sni_listener *joinable;
 } sni_boot;
 

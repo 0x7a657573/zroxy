@@ -1,5 +1,4 @@
 /*
- * socks5_codec.h
  *
  * Sans-IO SOCKS5 client (RFC 1928 CONNECT, RFC 1929 username/password).
  *

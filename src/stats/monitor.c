@@ -1,9 +1,6 @@
 #define _GNU_SOURCE
 /*
- * monitor.c
  *
- *  Created on: Feb 17, 2020
- *      Author: zeus
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -74,7 +71,7 @@ typedef struct mon_section
 struct mon
 {
 	int fd;
-	uint16_t Port;
+	uint16_t port;
 	statistics_t *state;
 	mon_section_t *sections;    /* guarded by stats_lock; nodes are never freed */
 	pthread_mutex_t stats_lock; /* guards the state list head only */
@@ -351,7 +348,7 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	/* The listener is nonblocking, so accept can drain it without blocking. */
 	fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL, 0) | O_NONBLOCK);
 	mon->fd = sockfd;
-	mon->Port = port;
+	mon->port = port;
 	mon->header_timeout = header_timeout_sec < 1 ? 5 : header_timeout_sec;
 	if (mon->header_timeout > 60)
 		mon->header_timeout = 60;
@@ -566,7 +563,7 @@ static void *monitor_thread(void *vargp)
 	int n;
 	int i;
 
-	log_info("Monitor thread start on socket %i Port %d", mon->fd, mon->Port);
+	log_info("Monitor thread start on socket %i Port %d", mon->fd, mon->port);
 	for (;;)
 	{
 		int64_t now = net_mono_ms();
@@ -895,25 +892,25 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 		time_t LiveTime;
 		bool ok;
 
-		pthread_mutex_lock(&sta->Lock);
+		pthread_mutex_lock(&sta->lock);
 		stdata = sta->stat;
 		extra = sta->extra;
 		extra_ctx = sta->extra_ctx;
 		time(&CurrentTime);
-		LiveTime = CurrentTime - stdata.StartTime;
+		LiveTime = CurrentTime - stdata.start_time;
 
 		ok = mon_append(&ptr, end, "\"%s\" : {\n", sta->name) &&
 		     mon_append(&ptr, end, "\"UpTime\" : %lld ,\n", (long long)LiveTime) &&
-		     mon_append(&ptr, end, "\"MaxConnection\" : %" PRIu32 " ,\n", stdata.MaxConnection) &&
-		     mon_append(&ptr, end, "\"ActiveConnection\" : %" PRIu32 " ,\n", stdata.ActiveConnection) &&
-		     mon_append(&ptr, end, "\"TotalConnection\" : %" PRIu32 " ,\n", stdata.TotalConnection) &&
-		     mon_append(&ptr, end, "\"TotalRx\" : %" PRIu64 " ,\n", stdata.TotalRx) &&
-		     mon_append(&ptr, end, "\"TotalTx\" : %" PRIu64, stdata.TotalTx);
+		     mon_append(&ptr, end, "\"MaxConnection\" : %" PRIu32 " ,\n", stdata.max_connections) &&
+		     mon_append(&ptr, end, "\"ActiveConnection\" : %" PRIu32 " ,\n", stdata.active_connections) &&
+		     mon_append(&ptr, end, "\"TotalConnection\" : %" PRIu32 " ,\n", stdata.total_connections) &&
+		     mon_append(&ptr, end, "\"TotalRx\" : %" PRIu64 " ,\n", stdata.total_rx) &&
+		     mon_append(&ptr, end, "\"TotalTx\" : %" PRIu64, stdata.total_tx);
 		if (ok && extra)
 			ok = extra(extra_ctx, &ptr, end);
 		if (ok)
 			ok = mon_append(&ptr, end, "\n},\n");
-		pthread_mutex_unlock(&sta->Lock);
+		pthread_mutex_unlock(&sta->lock);
 		if (!ok)
 		{
 			return mon_report_failed(response, response_cap, owner);

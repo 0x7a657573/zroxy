@@ -1,8 +1,4 @@
 /*
- * pargs.h
- *
- *  Created on: Feb 16, 2020
- *      Author: zeus
  */
 
 #ifndef ARGS_H_
@@ -25,7 +21,7 @@ typedef struct
 	char *socks_pass_file;
 	char *dsocks_pass_file;
 	int monitor_header_timeout;
-	char *WhitePath;
+	char *whitelist_path;
 	dnshost_t *dnsserver;
 	int snitimeout;
 	int sniidletimeout;

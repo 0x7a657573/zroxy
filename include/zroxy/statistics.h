@@ -1,8 +1,5 @@
 /*
- * statistics.h
  *
- *  Created on: Feb 17, 2020
- *      Author: zeus
  */
 
 #ifndef STATISTICS_H_
@@ -16,12 +13,12 @@ typedef bool (*stats_extra_fn)(void *ctx, char **ptr, char *end);
 
 typedef struct
 {
-	time_t StartTime;
-	uint64_t TotalRx;
-	uint64_t TotalTx;
-	uint32_t TotalConnection;
-	uint32_t ActiveConnection;
-	uint32_t MaxConnection;
+	time_t start_time;
+	uint64_t total_rx;
+	uint64_t total_tx;
+	uint32_t total_connections;
+	uint32_t active_connections;
+	uint32_t max_connections;
 } stat_t;
 
 typedef struct
@@ -30,7 +27,7 @@ typedef struct
 	stat_t stat;
 	char name[128];
 	/*thered lock*/
-	pthread_mutex_t Lock;
+	pthread_mutex_t lock;
 	void *next;
 	stats_extra_fn extra;
 	void *extra_ctx;

@@ -1,8 +1,5 @@
 /*
- * net.h
  *
- *  Created on: Feb 9, 2020
- *      Author: zeus
  */
 
 #ifndef NET_H_
@@ -15,10 +12,10 @@
 
 /* Listen ipv4
  * addr -> Ip Address For Listen
- * Port -> Port Number
+ * port -> port Number
  * sockfd -> Store Socket fd in this Pointer
  */
-bool net_listen_ipv4(in_addr_t addr, uint16_t Port, int *sockfd);
+bool net_listen_ipv4(in_addr_t addr, uint16_t port, int *sockfd);
 
 /*
  * net_get_host is smart function for extract host name from http/https packet

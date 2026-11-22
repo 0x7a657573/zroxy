@@ -32,7 +32,7 @@ typedef struct
 {
 	char ip[ZROXY_MAX_DNS_HOST + 1];
 	uint16_t port;
-} dnsStream_t;
+} dns_stream_t;
 
 /*
  * One way to reach an upstream DNS server. In dnshost_t, socks is the
@@ -42,7 +42,7 @@ typedef struct
  */
 typedef struct
 {
-	dnsStream_t upstream;
+	dns_stream_t upstream;
 	sockshost_t *socks;
 	bool direct;
 } dns_route_t;
@@ -51,11 +51,11 @@ typedef struct
 {
 	filter_t *whitelist;
 	uint8_t sni_ip[4];
-	dnsStream_t Local;
+	dns_stream_t local;
 	dns_route_t routes[DNS_ROUTES_MAX];
 	unsigned route_count;
-	sockshost_t *Socks; /* global DSOCKS; routes without via/direct use it */
-	statistics_t *Stat;
+	sockshost_t *socks; /* global DSOCKS; routes without via/direct use it */
+	statistics_t *stats;
 	uint32_t timeout;
 	bool listen_set;
 	uint32_t cache_entries;

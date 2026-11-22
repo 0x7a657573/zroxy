@@ -1,5 +1,4 @@
 /*
- * socks5_codec.c
  *
  * Sans-IO SOCKS5 client; see zroxy/socks5_codec.h.
  */

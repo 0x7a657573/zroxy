@@ -1,8 +1,5 @@
 /*
- * statistics.c
  *
- *  Created on: Feb 17, 2020
- *      Author: zeus
  */
 #include <zroxy/statistics.h>
 #include <zroxy/log.h>
@@ -18,7 +15,7 @@ void stats_init(statistics_t **self, char *name)
 		exit(1);
 	}
 	memset(*self, 0, sizeof(statistics_t));
-	if (pthread_mutex_init(&(*self)->Lock, NULL) != 0)
+	if (pthread_mutex_init(&(*self)->lock, NULL) != 0)
 	{
 		log_error("statistics mutex init has failed");
 		exit(1);
@@ -29,7 +26,7 @@ void stats_init(statistics_t **self, char *name)
 		exit(1);
 	}
 	memcpy((*self)->name, name, strlen(name) + 1);
-	time(&(*self)->stat.StartTime);
+	time(&(*self)->stat.start_time);
 	(*self)->next = NULL;
 }
 
@@ -37,7 +34,7 @@ void stats_free(statistics_t *self)
 {
 	if (!self)
 		return;
-	pthread_mutex_destroy(&self->Lock);
+	pthread_mutex_destroy(&self->lock);
 	free(self);
 }
 
@@ -45,24 +42,24 @@ void stats_close_connection(statistics_t *self, uint32_t rx, uint32_t tx)
 {
 	if (!self)
 		return;
-	pthread_mutex_lock(&self->Lock);
-	self->stat.TotalRx += rx;
-	self->stat.TotalTx += tx;
-	if (self->stat.ActiveConnection > 0)
-		self->stat.ActiveConnection--;
-	self->stat.TotalConnection++;
-	pthread_mutex_unlock(&self->Lock);
+	pthread_mutex_lock(&self->lock);
+	self->stat.total_rx += rx;
+	self->stat.total_tx += tx;
+	if (self->stat.active_connections > 0)
+		self->stat.active_connections--;
+	self->stat.total_connections++;
+	pthread_mutex_unlock(&self->lock);
 }
 
 void stats_open_connection(statistics_t *self)
 {
 	if (!self)
 		return;
-	pthread_mutex_lock(&self->Lock);
-	self->stat.ActiveConnection++;
-	if (self->stat.ActiveConnection > self->stat.MaxConnection)
-		self->stat.MaxConnection = self->stat.ActiveConnection;
-	pthread_mutex_unlock(&self->Lock);
+	pthread_mutex_lock(&self->lock);
+	self->stat.active_connections++;
+	if (self->stat.active_connections > self->stat.max_connections)
+		self->stat.max_connections = self->stat.active_connections;
+	pthread_mutex_unlock(&self->lock);
 }
 
 void stats_get(statistics_t *self, stat_t *st)
@@ -72,17 +69,17 @@ void stats_get(statistics_t *self, stat_t *st)
 		memset(st, 0, sizeof(*st));
 		return;
 	}
-	pthread_mutex_lock(&self->Lock);
+	pthread_mutex_lock(&self->lock);
 	*st = self->stat;
-	pthread_mutex_unlock(&self->Lock);
+	pthread_mutex_unlock(&self->lock);
 }
 
 void stats_set_extra(statistics_t *self, stats_extra_fn fn, void *ctx)
 {
 	if (!self)
 		return;
-	pthread_mutex_lock(&self->Lock);
+	pthread_mutex_lock(&self->lock);
 	self->extra = fn;
 	self->extra_ctx = ctx;
-	pthread_mutex_unlock(&self->Lock);
+	pthread_mutex_unlock(&self->lock);
 }

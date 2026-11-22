@@ -1,8 +1,5 @@
 /*
- * dns_internal.h
  *
- *  Created on: Jun 3, 2021
- *      Author: zeus
  */
 
 #ifndef DNS_INTERNAL_H_
@@ -73,7 +70,7 @@ typedef struct dnsserver
 	zroxy_cidr_t *acl;
 	size_t acl_count;
 	dns_rate_t rate;
-	statistics_t *Stat;
+	statistics_t *stats;
 } dnsserver_t;
 
 dnsserver_t *localdns_init_config(dnshost_t *conf);

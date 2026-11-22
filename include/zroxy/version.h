@@ -1,8 +1,5 @@
 /*
- * version.h
  *
- *  Created on: Feb 15, 2020
- *      Author: zeus
  */
 
 #ifndef VERSION_H_
@@ -146,7 +143,7 @@
 
 //#define version	 "0.5"
 /*
- * Socks : Fix bug in detection domain/ip
+ * socks : Fix bug in detection domain/ip
  * SNI   : add remote port for send request to this port
  * SNI   : add local port for listen to this port
  * SNI   : add bind ip
@@ -157,8 +154,8 @@
  * Add DNS Proxy
  * Add Config File
  * Add u & d key for input argumant
- * DNS : Add dns proxy from Socks socket
- * Socks : add domain/ip support
+ * DNS : Add dns proxy from socks socket
+ * socks : add domain/ip support
  */
 
 //#define version	 "0.3"

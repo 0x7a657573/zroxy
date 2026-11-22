@@ -1,8 +1,5 @@
 /*
- * SniProxy.h
  *
- *  Created on: Jan 28, 2020
- *      Author: zeus
  */
 
 #ifndef SNIPROXY_H_
@@ -19,10 +16,10 @@
 
 typedef struct
 {
-	lport_t Port;
-	sockshost_t *Socks;
-	statistics_t *sta;
-	filter_t *wlist;
+	lport_t port;
+	sockshost_t *socks;
+	statistics_t *stats;
+	filter_t *whitelist;
 	int snitimeout;
 	/* Relay idle limit in seconds; 0 falls back to snitimeout. */
 	int sniidletimeout;
@@ -33,12 +30,12 @@ typedef struct
 	/* Client networks allowed to connect; owned by the caller. No list allows all. */
 	const zroxy_cidr_t *acl;
 	size_t acl_count;
-} SniServer_t;
+} sni_server_t;
 
 typedef struct sni_listener sni_listener;
 
 /* Listen and start the event loop. NULL on failure. */
-sni_listener *sniproxy_start(SniServer_t *Sni);
+sni_listener *sniproxy_start(sni_server_t *cfg);
 /* Stop accepting, close every connection, join the loop and free. */
 void sniproxy_stop(sni_listener *ls);
 bool sni_conn_acquire(void);

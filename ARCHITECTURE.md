@@ -378,7 +378,7 @@ flowchart TB
   them.
 - The whitelist object is created by `main` and referenced by SNI and DNS
   services. Services do not own or free it.
-- An SNI loop receives a copy of `SniServer_t`; the pointed-to SOCKS,
+- An SNI loop receives a copy of `sni_server_t`; the pointed-to SOCKS,
   filter, and statistics objects remain owned by the caller/process. `main`
   keeps the listener handle and stops it with `sniproxy_stop`.
 - After startup, the SNI event-loop thread owns its listening socket, wake pipe,

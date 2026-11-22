@@ -1,9 +1,6 @@
 #define _GNU_SOURCE
 /*
- * filter.c
  *
- *  Created on: Mar 8, 2020
- *      Author: zeus
  */
 #include <zroxy/filter.h>
 #include <zroxy/log.h>

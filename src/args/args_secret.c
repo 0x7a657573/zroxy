@@ -199,7 +199,7 @@ bool args_load_secret_files(zroxy_t *ptr)
 	bool ok = true;
 	if (!load_socks_pass_file(ptr->socks, &ptr->socks_pass_file, "SOCKS password"))
 		ok = false;
-	if (!load_socks_pass_file(ptr->dnsserver ? ptr->dnsserver->Socks : NULL, &ptr->dsocks_pass_file, "DNS SOCKS password"))
+	if (!load_socks_pass_file(ptr->dnsserver ? ptr->dnsserver->socks : NULL, &ptr->dsocks_pass_file, "DNS SOCKS password"))
 		ok = false;
 	if (ptr->monitor_token_file)
 	{

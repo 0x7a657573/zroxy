@@ -1,8 +1,6 @@
 /*
  * socks_client.c - blocking SOCKS5 client, used by tests only.
  *
- *  Created on: Feb 1, 2020
- *      Author: zeus
  */
 #include <stdio.h>
 #include <stdlib.h>

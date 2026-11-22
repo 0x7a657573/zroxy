@@ -111,7 +111,7 @@ static void request_free(dns_event_t *event, dns_request_t *request)
 		free(request->response);
 	}
 	if (request->stats_open)
-		stats_close_connection(event->dns->Stat, 0, (uint32_t)request->query_len + 2u);
+		stats_close_connection(event->dns->stats, 0, (uint32_t)request->query_len + 2u);
 	if (event->request_count > 0)
 		event->request_count--;
 	free(request);
@@ -121,7 +121,7 @@ static void request_close_stats(dns_event_t *event, dns_request_t *request, size
 {
 	(void)response_len;
 	if (request->stats_open)
-		stats_close_connection(event->dns->Stat, request->stats_rx,
+		stats_close_connection(event->dns->stats, request->stats_rx,
 		        (uint32_t)request->query_len + 2u);
 	request->stats_open = 0;
 }
@@ -381,7 +381,7 @@ dns_request_t *dnsev_request_new(dns_event_t *event, int kind,
 	request->deadline_ms = now + 2 * (int64_t)net_timeout_ms((int)event->dns->timeout);
 	request->stats_open = 1;
 	event->request_count++;
-	stats_open_connection(event->dns->Stat);
+	stats_open_connection(event->dns->stats);
 	return request;
 }
 
