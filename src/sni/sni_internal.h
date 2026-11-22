@@ -99,7 +99,8 @@ enum {
 	SNI_CLOSE_IDLE_TIMEOUT,
 	SNI_CLOSE_STALL_TIMEOUT,
 	SNI_CLOSE_EVICTED,
-	SNI_CLOSE_ACL_DENIED
+	SNI_CLOSE_ACL_DENIED,
+	SNI_CLOSE_COUNT
 };
 
 typedef struct sni_engine sni_engine;
@@ -146,7 +147,6 @@ struct sni_conn {
 	int naddr;
 	int addr_i;
 	int resolve_slot;
-	uint32_t index;
 	uint64_t generation;
 	uint64_t pending_req_id;
 	int64_t hello_abs;
@@ -196,7 +196,6 @@ struct sni_engine {
 	sni_tag sink_tag;
 	resolver_sink *sink;
 	uint32_t sink_interest;
-	uint32_t next_index;
 	uint64_t next_generation;
 };
 

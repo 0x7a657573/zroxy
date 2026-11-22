@@ -241,7 +241,8 @@ static void submit_resolve(sni_engine *e, sni_conn *c, const char *host, uint16_
 	}
 	c->resolve_deadline = now + (int64_t)c->io_ms;
 	sni_conn_set_state(e, c, SNI_ST_RESOLVE);
-	rc = resolver_submit(e->sink, c->index, c->generation, host, port,
+	/* SNI matches on generation only. */
+	rc = resolver_submit(e->sink, 0, c->generation, host, port,
 			AF_INET, c->resolve_deadline, &slot, &req);
 	if (rc != RESOLVER_SUBMIT_OK) {
 		log_trace("resolve_overflow");
@@ -283,8 +284,6 @@ static sni_conn *find_pending(sni_engine *e, const resolve_slot *slot)
 		if (c->dead || c->pending_req_id == 0)
 			continue;
 		if (c->pending_req_id != slot->req_id)
-			continue;
-		if (c->index != slot->connection_index)
 			continue;
 		if (c->generation != slot->connection_generation)
 			continue;

@@ -56,52 +56,40 @@
  * object. Word-sized and updated with relaxed atomics: 64-bit atomics are not
  * lock-free on every target.
  */
-static struct {
-	uint32_t relayed;
-	uint32_t refused;
-	uint32_t no_hostname;
-	uint32_t blocked;
-	uint32_t unsafe;
-	uint32_t resolve;
-	uint32_t socks;
-	uint32_t connect;
-	uint32_t handshake_timeout;
-	uint32_t idle_timeout;
-	uint32_t stall_timeout;
-	uint32_t evicted;
-	uint32_t acl_denied;
-} g_sni_close;
+static uint32_t g_sni_close[SNI_CLOSE_COUNT];
+static uint32_t g_sni_relayed;
+
+static const char *const g_sni_close_keys[SNI_CLOSE_COUNT] = {
+	[SNI_CLOSE_REFUSED] = "Refused",
+	[SNI_CLOSE_NO_HOSTNAME] = "NoHostname",
+	[SNI_CLOSE_BLOCKED] = "Blocked",
+	[SNI_CLOSE_UNSAFE] = "UnsafeDestination",
+	[SNI_CLOSE_RESOLVE] = "ResolveFailures",
+	[SNI_CLOSE_SOCKS] = "SocksFailures",
+	[SNI_CLOSE_CONNECT] = "ConnectFailures",
+	[SNI_CLOSE_HANDSHAKE_TIMEOUT] = "HandshakeTimeouts",
+	[SNI_CLOSE_IDLE_TIMEOUT] = "IdleTimeouts",
+	[SNI_CLOSE_STALL_TIMEOUT] = "StallTimeouts",
+	[SNI_CLOSE_EVICTED] = "Evicted",
+	[SNI_CLOSE_ACL_DENIED] = "AclDenied"
+};
 
 void sni_count_relayed(void)
 {
-	(void)__atomic_fetch_add(&g_sni_close.relayed, 1u, __ATOMIC_RELAXED);
+	(void)__atomic_fetch_add(&g_sni_relayed, 1u, __ATOMIC_RELAXED);
 }
 
 static void count_close(int reason)
 {
-	uint32_t *counter = NULL;
-
-	switch (reason) {
-	case SNI_CLOSE_REFUSED: counter = &g_sni_close.refused; break;
-	case SNI_CLOSE_NO_HOSTNAME: counter = &g_sni_close.no_hostname; break;
-	case SNI_CLOSE_BLOCKED: counter = &g_sni_close.blocked; break;
-	case SNI_CLOSE_UNSAFE: counter = &g_sni_close.unsafe; break;
-	case SNI_CLOSE_RESOLVE: counter = &g_sni_close.resolve; break;
-	case SNI_CLOSE_SOCKS: counter = &g_sni_close.socks; break;
-	case SNI_CLOSE_CONNECT: counter = &g_sni_close.connect; break;
-	case SNI_CLOSE_HANDSHAKE_TIMEOUT: counter = &g_sni_close.handshake_timeout; break;
-	case SNI_CLOSE_IDLE_TIMEOUT: counter = &g_sni_close.idle_timeout; break;
-	case SNI_CLOSE_STALL_TIMEOUT: counter = &g_sni_close.stall_timeout; break;
-	case SNI_CLOSE_EVICTED: counter = &g_sni_close.evicted; break;
-	case SNI_CLOSE_ACL_DENIED: counter = &g_sni_close.acl_denied; break;
-	default: return;
-	}
-	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
+	if (reason <= SNI_CLOSE_NONE || reason >= SNI_CLOSE_COUNT)
+		return;
+	(void)__atomic_fetch_add(&g_sni_close[reason], 1u, __ATOMIC_RELAXED);
 }
 
 bool sni_stats_json(void *ctx, char **ptr, char *end)
 {
 	int n;
+	int reason;
 	size_t left;
 
 	(void)ctx;
@@ -109,36 +97,20 @@ bool sni_stats_json(void *ctx, char **ptr, char *end)
 		return false;
 	left = (size_t)(end - *ptr);
 	n = snprintf(*ptr, left, ",\n\"ConnectionLimit\" : %d,\n"
-		"\"Relayed\" : %" PRIu32 ",\n"
-		"\"Refused\" : %" PRIu32 ",\n"
-		"\"NoHostname\" : %" PRIu32 ",\n"
-		"\"Blocked\" : %" PRIu32 ",\n"
-		"\"UnsafeDestination\" : %" PRIu32 ",\n"
-		"\"ResolveFailures\" : %" PRIu32 ",\n"
-		"\"SocksFailures\" : %" PRIu32 ",\n"
-		"\"ConnectFailures\" : %" PRIu32 ",\n"
-		"\"HandshakeTimeouts\" : %" PRIu32 ",\n"
-		"\"IdleTimeouts\" : %" PRIu32 ",\n"
-		"\"StallTimeouts\" : %" PRIu32 ",\n"
-		"\"Evicted\" : %" PRIu32 ",\n"
-		"\"AclDenied\" : %" PRIu32,
-		sni_conn_limit(),
-		__atomic_load_n(&g_sni_close.relayed, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.refused, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.no_hostname, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.blocked, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.unsafe, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.resolve, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.socks, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.connect, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.handshake_timeout, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.idle_timeout, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.stall_timeout, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.evicted, __ATOMIC_RELAXED),
-		__atomic_load_n(&g_sni_close.acl_denied, __ATOMIC_RELAXED));
+		"\"Relayed\" : %" PRIu32,
+		sni_conn_limit(), __atomic_load_n(&g_sni_relayed, __ATOMIC_RELAXED));
 	if (n < 0 || (size_t)n >= left)
 		return false;
 	*ptr += n;
+	for (reason = SNI_CLOSE_REFUSED; reason < SNI_CLOSE_COUNT; reason++) {
+		left = (size_t)(end - *ptr);
+		n = snprintf(*ptr, left, ",\n\"%s\" : %" PRIu32,
+			g_sni_close_keys[reason],
+			__atomic_load_n(&g_sni_close[reason], __ATOMIC_RELAXED));
+		if (n < 0 || (size_t)n >= left)
+			return false;
+		*ptr += n;
+	}
 	return true;
 }
 
@@ -293,14 +265,7 @@ static sni_conn *conn_new(sni_engine *e, int client_fd)
 	c->io_ms = net_timeout_ms(e->cfg.snitimeout);
 	c->idle_ms = e->cfg.sniidletimeout > 0 ? net_timeout_ms(e->cfg.sniidletimeout) : c->io_ms;
 	c->resolve_slot = -1;
-	e->next_generation++;
-	if (e->next_generation == 0)
-		e->next_generation = 1;
-	e->next_index++;
-	if (e->next_index == 0)
-		e->next_index = 1;
-	c->generation = e->next_generation;
-	c->index = e->next_index;
+	c->generation = ++e->next_generation;
 	c->hello_abs = now + (int64_t)c->io_ms;
 	c->last_hello = now;
 	c->state = SNI_ST_HELLO;
