@@ -827,11 +827,14 @@ class FakeSocks5Server:
             sock.settimeout(0.5)
         idle_deadline = time.monotonic() + 5.0
         while not self._stop.is_set() and time.monotonic() < idle_deadline:
-            for src in (left, right):
+            timeout = min(0.2, max(0.0, idle_deadline - time.monotonic()))
+            try:
+                readable, _, _ = select.select((left, right), (), (), timeout)
+            except OSError:
+                return
+            for src in readable:
                 try:
                     chunk = src.recv(65536)
-                except socket.timeout:
-                    continue
                 except OSError:
                     return
                 if not chunk:
