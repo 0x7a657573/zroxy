@@ -596,6 +596,19 @@ static void consider(int64_t value, int64_t *best, int *have)
 	*have = 1;
 }
 
+static int64_t handshake_due(const sni_conn *c)
+{
+	if (c->state == SNI_ST_HELLO) {
+		int64_t idle = c->last_hello + (int64_t)hello_idle_ms();
+		return c->hello_abs < idle ? c->hello_abs : idle;
+	}
+	if (c->state == SNI_ST_RESOLVE)
+		return c->resolve_deadline;
+	if (c->state == SNI_ST_CONNECT)
+		return c->connect_deadline;
+	return c->deadline;
+}
+
 static int engine_timeout(sni_engine *e)
 {
 	sni_conn *c;
@@ -614,15 +627,8 @@ static int engine_timeout(sni_engine *e)
 				consider(c->u2c_by > 0 ? c->u2c_by : now, &best, &have);
 			if (c->c2u_off == c->c2u_len && c->u2c_off == c->u2c_len)
 				consider(c->idle_at, &best, &have);
-		} else if (c->state == SNI_ST_HELLO) {
-			int64_t idle = c->last_hello + (int64_t)hello_idle_ms();
-			consider(c->hello_abs < idle ? c->hello_abs : idle, &best, &have);
-		} else if (c->state == SNI_ST_RESOLVE) {
-			consider(c->resolve_deadline, &best, &have);
-		} else if (c->state == SNI_ST_CONNECT) {
-			consider(c->connect_deadline, &best, &have);
 		} else {
-			consider(c->deadline, &best, &have);
+			consider(handshake_due(c), &best, &have);
 		}
 	}
 	if (e->accept_paused)
@@ -664,16 +670,7 @@ static void expire_conns(sni_engine *e)
 				conn_timeout(e, c, SNI_CLOSE_IDLE_TIMEOUT);
 			continue;
 		}
-		if (c->state == SNI_ST_HELLO) {
-			int64_t idle = c->last_hello + (int64_t)hello_idle_ms();
-			due = c->hello_abs < idle ? c->hello_abs : idle;
-		} else if (c->state == SNI_ST_RESOLVE) {
-			due = c->resolve_deadline;
-		} else if (c->state == SNI_ST_CONNECT) {
-			due = c->connect_deadline;
-		} else {
-			due = c->deadline;
-		}
+		due = handshake_due(c);
 		if (now >= due)
 			conn_timeout(e, c, SNI_CLOSE_HANDSHAKE_TIMEOUT);
 	}
@@ -693,22 +690,18 @@ static void sni_engine_run(sni_engine *e)
 			break;
 		n = sni_react_wait(e, ready, 64, engine_timeout(e));
 		if (n < 0) {
-			if (errno == EINTR) {
-				accept_resume(e);
-				expire_conns(e);
-				reap(e);
-				continue;
+			if (errno == EINTR)
+				n = 0;
+			else {
+				log_error("sni event wait failed: %s", strerror(errno));
+				break;
 			}
-			log_error("sni event wait failed: %s", strerror(errno));
-			break;
 		}
 		for (i = 0; i < n; i++)
 			dispatch_one(e, &ready[i]);
 		accept_resume(e);
 		expire_conns(e);
 		reap(e);
-		if (e->listen_fd < 0 && e->head == NULL)
-			break;
 	}
 	if (e->sink)
 		resolver_sink_mark_closed(e->sink);
@@ -884,50 +877,43 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 		close(fd);
 		return false;
 	}
-	if (pthread_mutex_init(&ls->mu, NULL) != 0) {
-		close(fd);
-		free(ls);
-		return false;
-	}
-	if (pthread_cond_init(&ls->cv, NULL) != 0) {
-		pthread_mutex_destroy(&ls->mu);
-		close(fd);
-		free(ls);
-		return false;
-	}
+	if (pthread_mutex_init(&ls->mu, NULL) != 0)
+		goto fail_ls;
+	if (pthread_cond_init(&ls->cv, NULL) != 0)
+		goto fail_mu;
 	boot = (sni_boot *)calloc(1, sizeof(*boot));
-	if (!boot) {
-		pthread_cond_destroy(&ls->cv);
-		pthread_mutex_destroy(&ls->mu);
-		close(fd);
-		free(ls);
-		return false;
-	}
+	if (!boot)
+		goto fail_cv;
 	boot->listen_fd = fd;
 	boot->cfg = *cfg;
 	boot->joinable = ls;
 	if (pthread_create(&ls->thread, NULL, engine_thread, boot) != 0) {
 		log_error("sni listener thread create failed");
-		free(boot);
-		pthread_cond_destroy(&ls->cv);
-		pthread_mutex_destroy(&ls->mu);
-		close(fd);
-		free(ls);
-		return false;
+		goto fail_boot;
 	}
+	fd = -1;
 	pthread_mutex_lock(&ls->mu);
 	while (!ls->ready)
 		pthread_cond_wait(&ls->cv, &ls->mu);
 	pthread_mutex_unlock(&ls->mu);
 	if (!ls->ok) {
 		pthread_join(ls->thread, NULL);
-		pthread_cond_destroy(&ls->cv);
-		pthread_mutex_destroy(&ls->mu);
-		free(ls);
-		return false;
+		goto fail_cv;
 	}
 	*out = ls;
 	return true;
+
+fail_boot:
+	free(boot);
+fail_cv:
+	pthread_cond_destroy(&ls->cv);
+fail_mu:
+	pthread_mutex_destroy(&ls->mu);
+fail_ls:
+	if (fd >= 0)
+		close(fd);
+	free(ls);
+	return false;
 }
 
 void sni_listener_close(sni_listener *ls)
