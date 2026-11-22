@@ -36,8 +36,6 @@ void args_free(zroxy_t *ptr)
 	args_free_monitor_token(ptr);
 	free(ptr->WhitePath);
 	ptr->WhitePath = NULL;
-	free(ptr->monitorPort);
-	ptr->monitorPort = NULL;
 	free(ptr->monitor_token_file);
 	ptr->monitor_token_file = NULL;
 	free(ptr->socks_pass_file);
@@ -197,7 +195,7 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 	pgp->dsocks_pass_file = NULL;
 	pgp->ports = NULL;
 	pgp->socks = NULL;
-	pgp->monitorPort = NULL;
+	pgp->monitor_port = 0;
 	pgp->WhitePath = NULL;
 	pgp->dnsserver = NULL;
 	/*ran without parameter*/

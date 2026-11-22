@@ -84,7 +84,6 @@ static void free_settings(zroxy_t *cfg)
 	args_free_dns(cfg);
 	args_free_socks(cfg);
 	args_free_monitor_token(cfg);
-	free(cfg->monitorPort);
 	free(cfg->run_user);
 	free(cfg->run_group);
 	free(cfg->WhitePath);

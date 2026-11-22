@@ -12,28 +12,7 @@
 #include <zroxy/acl.h>
 #include "args_internal.h"
 
-static bool parse_u16(const char *str, uint16_t *out, uint16_t minv, uint16_t maxv)
-{
-	unsigned long value = 0;
-	const char *s = str;
-	if (!s || *s == '\0')
-		return false;
-	while (*s)
-	{
-		if (!isdigit((unsigned char)*s))
-			return false;
-		value = value * 10ul + (unsigned long)(*s - '0');
-		if (value > 65535ul)
-			return false;
-		s++;
-	}
-	if (value < minv || value > maxv)
-		return false;
-	*out = (uint16_t)value;
-	return true;
-}
-
-static bool parse_i32_range(const char *str, int *out, int minv, int maxv)
+static bool parse_uint(const char *str, unsigned long maxv, unsigned long *out)
 {
 	unsigned long value = 0;
 	const char *s = str;
@@ -43,14 +22,31 @@ static bool parse_i32_range(const char *str, int *out, int minv, int maxv)
 	{
 		if (!isdigit((unsigned char)*s))
 			return false;
-		value = value * 10ul + (unsigned long)(*s - '0');
-		if (value > (unsigned long)INT_MAX)
+		if (value > maxv / 10ul ||
+		    (value == maxv / 10ul && (unsigned long)(*s - '0') > maxv % 10ul))
 			return false;
+		value = value * 10ul + (unsigned long)(*s - '0');
 		s++;
 	}
-	if ((int)value < minv || (int)value > maxv)
+	*out = value;
+	return true;
+}
+
+static bool parse_u16(const char *str, uint16_t *out, uint16_t minv, uint16_t maxv)
+{
+	unsigned long value;
+	if (!parse_uint(str, maxv, &value) || value < minv)
 		return false;
-	*out = (int)value;
+	*out = (uint16_t)value;
+	return true;
+}
+
+static bool parse_u32_in(const char *str, int minv, int maxv, uint32_t *out)
+{
+	unsigned long value;
+	if (!parse_uint(str, (unsigned long)maxv, &value) || value < (unsigned long)minv)
+		return false;
+	*out = (uint32_t)value;
 	return true;
 }
 
@@ -217,7 +213,6 @@ int args_apply_option(int key, char *arg, void *userprm)
 static bool parse_whitelist(zroxy_t *ptr,char *str)
 {
 	char *path;
-	while(*str==' ') str++; /*remove space before path*/
 	path = dup_bounded(str, ZROXY_MAX_CONFIG_VALUE);
 	if (!path)
 		return false;
@@ -232,7 +227,6 @@ static bool parse_monitor(zroxy_t *ptr,char *str)
 	char *port_str = str;
 	char bind[ZROXY_MAX_IP_TEXT];
 	uint16_t port;
-	uint16_t *slot;
 
 	if (!copy_bounded(bind, sizeof(bind), "127.0.0.1"))
 		return false;
@@ -249,12 +243,7 @@ static bool parse_monitor(zroxy_t *ptr,char *str)
 	}
 	if (!parse_u16(port_str, &port, 1, 65535))
 		return false;
-	slot = (uint16_t*)malloc(sizeof(uint16_t));
-	if (!slot)
-		return false;
-	*slot = port;
-	free(ptr->monitorPort);
-	ptr->monitorPort = slot;
+	ptr->monitor_port = port;
 	memcpy(ptr->monitor_bind, bind, sizeof(bind));
 	return true;
 }
@@ -281,43 +270,29 @@ static bool parse_secret_path(char **slot,char *str)
 
 static bool parse_monitor_timeout(zroxy_t *ptr,char *str)
 {
-	int timeout;
-	if (!parse_i32_range(str, &timeout, 1, 60))
+	uint32_t timeout;
+	if (!parse_u32_in(str, 1, 60, &timeout))
 		return false;
-	ptr->monitor_header_timeout = timeout;
+	ptr->monitor_header_timeout = (int)timeout;
 	return true;
 }
 
 static bool parse_dns_timeout(zroxy_t *ptr,char *str)
 {
-	int timeout;
 	dnshost_t *dns = dns_config(ptr);
-	if (!dns)
-		return false;
-	if (!parse_i32_range(str, &timeout, 0, 86400))
-		return false;
-	dns->timeout = (uint32_t)timeout;
-	return true;
+	return dns && parse_u32_in(str, 0, 86400, &dns->timeout);
 }
 
 static bool parse_dns_cache(zroxy_t *ptr,char *str)
 {
-	int entries;
 	dnshost_t *dns = dns_config(ptr);
-	if (!dns || !parse_i32_range(str, &entries, 0, 65536))
-		return false;
-	dns->cache_entries = (uint32_t)entries;
-	return true;
+	return dns && parse_u32_in(str, 0, 65536, &dns->cache_entries);
 }
 
 static bool parse_dns_ttl(zroxy_t *ptr,char *str)
 {
-	int ttl;
 	dnshost_t *dns = dns_config(ptr);
-	if (!dns || !parse_i32_range(str, &ttl, 1, 86400))
-		return false;
-	dns->local_ttl = (uint32_t)ttl;
-	return true;
+	return dns && parse_u32_in(str, 1, 86400, &dns->local_ttl);
 }
 
 static bool parse_dns_acl(zroxy_t *ptr,char *str)
@@ -341,19 +316,15 @@ static bool parse_dns_acl(zroxy_t *ptr,char *str)
 
 static bool parse_dns_rate(zroxy_t *ptr,char *str)
 {
-	int qps;
 	dnshost_t *dns = dns_config(ptr);
-	if (!dns || !parse_i32_range(str, &qps, 0, 100000))
-		return false;
-	dns->rate_qps = (uint32_t)qps;
-	return true;
+	return dns && parse_u32_in(str, 0, 100000, &dns->rate_qps);
 }
 
 static bool parse_dns_connections(zroxy_t *ptr,char *str)
 {
-	int count;
+	uint32_t count;
 	dnshost_t *dns = dns_config(ptr);
-	if (!dns || !parse_i32_range(str, &count, 1, DNS_UPSTREAM_CONNECTIONS_DEFAULT))
+	if (!dns || !parse_u32_in(str, 1, DNS_UPSTREAM_CONNECTIONS_DEFAULT, &count))
 		return false;
 	dns->upstream_connections = (uint16_t)count;
 	return true;
@@ -392,9 +363,6 @@ static bool parse_sni_ip(zroxy_t *ptr,char *str)
 	char tail = '\0';
 	uint8_t *sni_ip;
 	dnshost_t *dns;
-
-	while(*str==' ')
-		str++;
 
 	dns = dns_config(ptr);
 	if (!dns)
@@ -670,9 +638,10 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 	lport_t *head = NULL;
 	lport_t *tail = NULL;
 	lport_t *last;
+	lport_t *port = NULL;
 
 	do{
-		lport_t *port = (lport_t*)calloc(1, sizeof(lport_t));
+		port = (lport_t*)calloc(1, sizeof(lport_t));
 		char *xptr = str;
 		char *Iptr;
 		char *Pptr;
@@ -692,20 +661,16 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 		if(Iptr)
 		{
 			*Iptr++=0;
-			if (strlen(xptr) >= sizeof(port->bindip) || !validate_ip(xptr) ||
+			if (!validate_ip(xptr) ||
 			    !copy_bounded(port->bindip, sizeof(port->bindip), xptr))
 			{
 				log_error("invalid listener address");
-				free(port);
 				goto fail;
 			}
 			xptr = Iptr;
 		}
 		else if (!copy_bounded(port->bindip, sizeof(port->bindip), "0.0.0.0"))
-		{
-			free(port);
 			goto fail;
-		}
 
 		Pptr = strchr(xptr,'@');
 		if(Pptr)
@@ -713,18 +678,12 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 			*Pptr++=0;
 			if (!parse_u16(xptr, &local_port, 0, 65535) ||
 			    !parse_u16(Pptr, &remote_port, 0, 65535))
-			{
-				free(port);
 				goto fail;
-			}
 		}
 		else
 		{
 			if (!parse_u16(xptr, &local_port, 0, 65535))
-			{
-				free(port);
 				goto fail;
-			}
 			remote_port = local_port;
 		}
 
@@ -742,7 +701,6 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 		{
 			log_error("listener %s:%u is already defined", port->bindip,
 			    (unsigned)port->local_port);
-			free(port);
 			goto fail;
 		}
 
@@ -765,19 +723,14 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 	return true;
 
 fail:
+	free(port);
 	free_port_list(head);
 	return false;
 }
 
 void args_free_ports(zroxy_t *ptr)
 {
-	lport_t *p=ptr->ports;
-	while(p)
-	{
-		lport_t *next = p->next;
-		free(p);
-		p=next;
-	}
+	free_port_list(ptr->ports);
 	ptr->ports = NULL;
 }
 
@@ -837,29 +790,29 @@ static bool parse_dns_socks(zroxy_t *ptr,char *str)
 
 static bool parse_log_level(zroxy_t *ptr,char *str)
 {
-	int log_level;
+	uint32_t log_level;
 	(void)ptr;
-	if (!parse_i32_range(str, &log_level, 0, 5))
+	if (!parse_u32_in(str, 0, 5, &log_level))
 		return false;
-	log_set_level(log_level);
+	log_set_level((int)log_level);
 	return true;
 }
 
 static bool parse_sni_timeout(zroxy_t *ptr,char *str)
 {
-	int timeout;
-	if (!parse_i32_range(str, &timeout, 0, 86400))
+	uint32_t timeout;
+	if (!parse_u32_in(str, 0, 86400, &timeout))
 		return false;
-	ptr->snitimeout = timeout;
+	ptr->snitimeout = (int)timeout;
 	return true;
 }
 
 static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str)
 {
-	int timeout;
-	if (!parse_i32_range(str, &timeout, 1, 86400))
+	uint32_t timeout;
+	if (!parse_u32_in(str, 1, 86400, &timeout))
 		return false;
-	ptr->sniidletimeout = timeout;
+	ptr->sniidletimeout = (int)timeout;
 	return true;
 }
 
@@ -882,10 +835,10 @@ static bool parse_sni_acl(zroxy_t *ptr,char *str)
 
 static bool parse_sni_max_conn(zroxy_t *ptr,char *str)
 {
-	int count;
-	if (!parse_i32_range(str, &count, 1, SNI_CONN_LIMIT_MAX))
+	uint32_t count;
+	if (!parse_u32_in(str, 1, SNI_CONN_LIMIT_MAX, &count))
 		return false;
-	ptr->snimaxconn = count;
+	ptr->snimaxconn = (int)count;
 	return true;
 }
 

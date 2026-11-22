@@ -140,7 +140,7 @@ int main(int argc, const char **argv)
 			.sni_listeners = (int)listener_count,
 			.dns_enabled = prg_setting.dnsserver != NULL,
 			.dns_upstreams = prg_setting.dnsserver ? prg_setting.dnsserver->upstream_connections : 0,
-			.monitor_enabled = prg_setting.monitorPort != NULL
+			.monitor_enabled = prg_setting.monitor_port != 0
 		};
 		int cap = prg_setting.snimaxconn;
 		unsigned long soft = fdlimit_apply(&plan, &cap);
@@ -174,11 +174,11 @@ int main(int argc, const char **argv)
 	}
 
 	/*check Monitor*/
-	if(prg_setting.monitorPort)
+	if(prg_setting.monitor_port)
 	{
 		const char *bind_ip = prg_setting.monitor_bind[0] ? prg_setting.monitor_bind : "127.0.0.1";
-		log_info("enable monitor on %s:%i", bind_ip, *prg_setting.monitorPort);
-		monitor = monitor_init(*prg_setting.monitorPort, bind_ip, prg_setting.monitor_token, prg_setting.monitor_header_timeout);
+		log_info("enable monitor on %s:%i", bind_ip, prg_setting.monitor_port);
+		monitor = monitor_init(prg_setting.monitor_port, bind_ip, prg_setting.monitor_token, prg_setting.monitor_header_timeout);
 		args_free_monitor_token(&prg_setting); /*monitor keeps its own copy*/
 		if (!monitor)
 		{

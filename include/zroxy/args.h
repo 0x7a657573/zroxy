@@ -18,7 +18,7 @@ typedef struct
 {
 	lport_t 	*ports;
 	sockshost_t *socks;
-	uint16_t	*monitorPort;
+	uint16_t	monitor_port;
 	char		monitor_bind[ZROXY_MAX_IP_TEXT];
 	char		*monitor_token;
 	char		*monitor_token_file;

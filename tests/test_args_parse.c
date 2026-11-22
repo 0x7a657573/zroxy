@@ -68,7 +68,6 @@ static void free_settings(zroxy_t *cfg)
         free(cfg->socks->pass);
         free(cfg->socks);
     }
-    free(cfg->monitorPort);
     free(cfg->monitor_token);
     free(cfg->run_user);
     free(cfg->run_group);
@@ -160,11 +159,8 @@ static void test_cli_monitor_and_sni_timeout(void)
 
     reset_getopt();
     expect_true(args_init(&cfg, 5, argv), "args_init monitor + snitimeout");
-    expect_true(cfg.monitorPort != NULL, "monitor port parsed");
-    if (cfg.monitorPort)
-    {
-        expect_u16(*cfg.monitorPort, 8123, "monitor port value");
-    }
+    expect_true(cfg.monitor_port != 0, "monitor port parsed");
+    expect_u16(cfg.monitor_port, 8123, "monitor port value");
     expect_string(cfg.monitor_bind, "127.0.0.1", "bare monitor port binds localhost");
     expect_int(cfg.monitor_header_timeout, 5, "default monitor header timeout");
     expect_int(cfg.snitimeout, 45, "sni timeout value");
@@ -191,9 +187,8 @@ static void test_cli_monitor_bind_and_token(void)
 
     reset_getopt();
     expect_true(args_init(&cfg, 7, argv), "args_init monitor bind token timeout");
-    expect_true(cfg.monitorPort != NULL, "explicit monitor port parsed");
-    if (cfg.monitorPort)
-        expect_u16(*cfg.monitorPort, 8123, "explicit monitor port");
+    expect_true(cfg.monitor_port != 0, "explicit monitor port parsed");
+    expect_u16(cfg.monitor_port, 8123, "explicit monitor port");
     expect_string(cfg.monitor_bind, "10.1.2.3", "explicit monitor bind");
     expect_string(cfg.monitor_token, "secret", "monitor token");
     expect_int(cfg.monitor_header_timeout, 7, "monitor header timeout");
@@ -1101,7 +1096,7 @@ static void test_config_minimal_cleanup_safe(void)
     expect_true(cfg.socks == NULL, "minimal socks is NULL");
     expect_true(cfg.dnsserver == NULL, "minimal dnsserver is NULL");
     expect_true(cfg.WhitePath == NULL, "minimal WhitePath is NULL");
-    expect_true(cfg.monitorPort == NULL, "minimal monitorPort is NULL");
+    expect_true(cfg.monitor_port == 0, "minimal monitor port is disabled");
 
     unlink(template_path);
     free_settings(&cfg);
