@@ -594,6 +594,12 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Hardening is enabled by default with compiler stack protection and, on ELF
+systems, RELRO and immediate symbol binding. `_FORTIFY_SOURCE=3` is enabled
+for optimized builds such as `-DCMAKE_BUILD_TYPE=RelWithDebInfo`. Flags already
+provided by the packager take precedence. Disable it with
+`-DZROXY_HARDENING=OFF`.
+
 To install the binary under a chosen prefix:
 
 ```sh

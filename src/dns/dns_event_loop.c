@@ -645,8 +645,11 @@ void dns_event_loop_stop(dnsserver_t *dns)
 {
 	dns_event_t *event;
 	char byte = 1;
+	ssize_t n;
 	if (!dns || !(event = dns->event_loop)) return;
-	(void)write(dns->wake[1], &byte, 1);
+	do {
+		n = write(dns->wake[1], &byte, 1);
+	} while (n < 0 && errno == EINTR);
 	if (event->started) pthread_join(event->thread, NULL);
 	dns->rx_started = false; dns->event_loop = NULL;
 	event_destroy(event);

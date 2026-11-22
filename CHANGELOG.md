@@ -2,6 +2,16 @@
 
 These notes describe the `2.2.0` release. Nothing here says the result is production-ready.
 
+## Unreleased
+
+### Build
+
+- Added `ZROXY_HARDENING` (default ON): `-fstack-protector-strong`,
+  `-fstack-clash-protection`, `-fcf-protection`, `-Wl,-z,relro`,
+  `-Wl,-z,now`, and `_FORTIFY_SOURCE=3` in optimized builds. Each is added
+  only when accepted by the toolchain and not already set by the packager;
+  `ctest` checks the result with readelf on ELF systems.
+
 ## 2.2.0 - 2026-11-18
 
 Existing configurations keep working unchanged. No option was removed and
