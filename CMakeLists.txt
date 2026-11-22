@@ -3,6 +3,16 @@ cmake_minimum_required(VERSION 3.10...3.31)
 project(zroxy LANGUAGES C)
 include(CTest)
 
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    string(REGEX MATCH "(^|[ \t])-O(0|1|2|3|s|z|fast|g)?([ \t]|$)" ZROXY_HAS_C_FLAGS_OPTIMIZATION
+        "${CMAKE_C_FLAGS}")
+    if(NOT ZROXY_HAS_C_FLAGS_OPTIMIZATION)
+        set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+        set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+        message(STATUS "zroxy: no CMAKE_BUILD_TYPE given, using RelWithDebInfo")
+    endif()
+endif()
+
 find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------

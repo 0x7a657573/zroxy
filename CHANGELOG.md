@@ -6,6 +6,8 @@ These notes describe the `2.2.0` release. Nothing here says the result is produc
 
 ### Build
 
+- Default single-config builds now use `RelWithDebInfo` when no build type or
+  optimization flag is supplied.
 - Added `ZROXY_HARDENING` (default ON): `-fstack-protector-strong`,
   `-fstack-clash-protection`, `-fcf-protection`, `-Wl,-z,relro`,
   `-Wl,-z,now`, and `_FORTIFY_SOURCE=3` in optimized builds. Each is added

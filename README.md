@@ -594,10 +594,14 @@ cmake -S . -B build
 cmake --build build
 ```
 
+With no build type specified, this uses `RelWithDebInfo`: an optimized build
+with debug information. For an unoptimized debug build, use
+`-DCMAKE_BUILD_TYPE=Debug` when configuring.
+
 Hardening is enabled by default with compiler stack protection and, on ELF
 systems, RELRO and immediate symbol binding. `_FORTIFY_SOURCE=3` is enabled
-for optimized builds such as `-DCMAKE_BUILD_TYPE=RelWithDebInfo`. Flags already
-provided by the packager take precedence. Disable it with
+for the default optimized build and other optimized build types, but not for
+`Debug`. Flags already provided by the packager take precedence. Disable it with
 `-DZROXY_HARDENING=OFF`.
 
 To install the binary under a chosen prefix:
