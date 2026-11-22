@@ -9,7 +9,7 @@
 
 #include <zroxy/net_io.h>
 
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 void resolver_test_set_hook(resolver_hook hook, void *cookie)
 {
 	if (!resolver_start())

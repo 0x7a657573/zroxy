@@ -164,7 +164,7 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 	hints.ai_protocol = IPPROTO_TCP;
 	do {
 		res = NULL;
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 		if (g_resolver_pool->hook) {
 			st = g_resolver_pool->hook(host, family, out, RESOLVER_ADDR_MAX, count,
 					g_resolver_pool->hook_cookie);
@@ -180,7 +180,7 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 		}
 	} while (st == EAI_SYSTEM && errno == EINTR && attempts < RESOLVER_GAI_ATTEMPTS);
 	__atomic_fetch_add(&g_resolver_pool->calls, (uint32_t)attempts, __ATOMIC_RELAXED);
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 	if (g_resolver_pool->hook)
 		return st;
 #endif
@@ -194,7 +194,7 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 		resolver_addr *dst;
 		if (!ai->ai_addr || ai->ai_addrlen <= 0)
 			continue;
-		if (ai->ai_family != AF_INET && ai->ai_family != AF_INET6)
+		if (ai->ai_family != AF_INET)
 			continue;
 		if ((size_t)ai->ai_addrlen > sizeof(out[0].address))
 			continue;
@@ -210,7 +210,7 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 	return 0;
 }
 
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 static void wait_if_held(void)
 {
 	pthread_mutex_lock(&g_resolver_pool->test_mu);
@@ -262,7 +262,7 @@ static void resolve_and_finish(resolve_slot *slot, const char *host, int family)
 	resolver_addr addrs[RESOLVER_ADDR_MAX];
 	size_t count = 0;
 	int gai_error;
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 	wait_if_held();
 #endif
 	if (g_resolver_pool->stopping) {
@@ -372,7 +372,7 @@ static int pool_create(void)
 		free(pool);
 		return -1;
 	}
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 	if (pthread_mutex_init(&pool->test_mu, NULL) != 0) {
 		pthread_cond_destroy(&pool->work_cv);
 		pthread_cond_destroy(&pool->infra_cv);
@@ -417,7 +417,7 @@ static int pool_create(void)
 			pthread_cond_destroy(&pool->work_cv);
 			pthread_cond_destroy(&pool->infra_cv);
 			pthread_mutex_destroy(&pool->mu);
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 			pthread_cond_destroy(&pool->test_cv);
 			pthread_mutex_destroy(&pool->test_mu);
 #endif
@@ -539,7 +539,7 @@ int resolver_shutdown(int timeout_ms)
 	pthread_cond_destroy(&pool->work_cv);
 	pthread_cond_destroy(&pool->infra_cv);
 	pthread_mutex_destroy(&pool->mu);
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 	pthread_cond_destroy(&pool->test_cv);
 	pthread_mutex_destroy(&pool->test_mu);
 #endif

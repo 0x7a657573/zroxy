@@ -278,11 +278,11 @@ if(BUILD_TESTING)
     zroxy_add_module(zroxy_sni_hooks
         SOURCES ${ZROXY_SNI_SOURCES} ${ZROXY_RESOLVER_SOURCES}
         DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal zroxy_resolver_internal
-        DEFINES SNI_TEST_HOOKS)
+        DEFINES SNI_TEST_HOOKS RESOLVER_TEST_HOOKS)
     zroxy_add_module(zroxy_sni_hooks_poll
         SOURCES ${ZROXY_SNI_SOURCES} ${ZROXY_RESOLVER_SOURCES}
         DEPS zroxy_core zroxy_net zroxy_filter zroxy_stats zroxy_sni_internal zroxy_resolver_internal
-        DEFINES SNI_TEST_HOOKS SNI_FORCE_POLL)
+        DEFINES SNI_TEST_HOOKS RESOLVER_TEST_HOOKS SNI_FORCE_POLL)
 
     # Blocking helpers (dial, exact read, SOCKS5 client) only tests use.
     add_library(zroxy_test_support STATIC

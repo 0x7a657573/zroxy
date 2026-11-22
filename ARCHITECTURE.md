@@ -309,7 +309,7 @@ path, then returns `1`.
 | `src/resolver/resolver_policy.c` | Hostname normalization and numeric/address destination policy | Pure address handling plus listener self-connect checks |
 | `src/resolver/resolver_infra.c` | SOCKS upstream cache and listener-bind tracking | Infrastructure lookups and bind records |
 | `src/resolver/resolver_sink.c` | Completion pipes, rings, sink lifecycle, and sink quotas | Delivers worker completions to event loops |
-| `src/resolver/resolver_test_hooks.c` | Test-only resolver hooks, counters, and accounting helpers | Compiled under `SNI_TEST_HOOKS` only |
+| `src/resolver/resolver_test_hooks.c` | Test-only resolver hooks, counters, and accounting helpers | Compiled under `RESOLVER_TEST_HOOKS` only |
 | `src/resolver/resolver.h` | Resolver states, quotas, address policy (private) | Defines resolver ownership protocol |
 | `src/sni/sni_conn_limit.c` | Process-wide SNI connection cap | `SNIMAXCONN` live-connection slots (default 1024) |
 | `src/filter/filter.c` | Whitelist load, match, reload watcher | Publishes an immutable hash-set snapshot |

@@ -66,7 +66,7 @@ typedef struct resolver_pool {
 	uint32_t closed_drops;
 	uint32_t ring_full;
 	uint32_t lookup_failures;
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 	resolver_hook hook;
 	void *hook_cookie;
 	int hold_running;

@@ -208,7 +208,7 @@ bool resolver_prime_socks(const char *host, uint16_t port, int wait_ms);
 int resolver_copy_upstream(const char *host, uint16_t port,
 		resolver_addr *out, size_t *count);
 
-#ifdef SNI_TEST_HOOKS
+#ifdef RESOLVER_TEST_HOOKS
 typedef int (*resolver_hook)(const char *hostname, int family,
 		resolver_addr *out, size_t max_out, size_t *count, void *cookie);
 
