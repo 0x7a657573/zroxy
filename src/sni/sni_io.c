@@ -19,7 +19,8 @@ ssize_t sni_io_read(int fd, void *buf, size_t len)
 {
 #ifdef SNI_TEST_HOOKS
 	int limit;
-	if (sni_take_fault(SNI_FAULT_EINTR_READ)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_READ))
+	{
 		errno = EINTR;
 		return -1;
 	}
@@ -34,11 +35,13 @@ ssize_t sni_io_write(int fd, const void *buf, size_t len)
 {
 #ifdef SNI_TEST_HOOKS
 	int limit;
-	if (sni_take_fault(SNI_FAULT_EAGAIN_WRITE)) {
+	if (sni_take_fault(SNI_FAULT_EAGAIN_WRITE))
+	{
 		errno = EAGAIN;
 		return -1;
 	}
-	if (sni_take_fault(SNI_FAULT_EINTR_WRITE)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_WRITE))
+	{
 		errno = EINTR;
 		return -1;
 	}
@@ -58,7 +61,8 @@ int sni_io_accept(int fd, struct sockaddr_storage *peer)
 	socklen_t len = (socklen_t)sizeof(*peer);
 
 #ifdef SNI_TEST_HOOKS
-	if (sni_take_fault(SNI_FAULT_FAIL_ACCEPT)) {
+	if (sni_take_fault(SNI_FAULT_FAIL_ACCEPT))
+	{
 		errno = EMFILE;
 		return -1;
 	}
@@ -69,7 +73,8 @@ int sni_io_accept(int fd, struct sockaddr_storage *peer)
 int sni_io_connect(int fd, const struct sockaddr *sa, socklen_t len)
 {
 #ifdef SNI_TEST_HOOKS
-	if (sni_take_fault(SNI_FAULT_EINTR_CONNECT)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_CONNECT))
+	{
 		errno = EINTR;
 		return -1;
 	}
@@ -101,11 +106,13 @@ int sni_react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 		max = 64;
 	sni_note_wait();
 #ifdef SNI_TEST_HOOKS
-	if (sni_take_fault(SNI_FAULT_EINTR_WAIT)) {
+	if (sni_take_fault(SNI_FAULT_EINTR_WAIT))
+	{
 		errno = EINTR;
 		return -1;
 	}
-	if (sni_take_fault(SNI_FAULT_FAIL_WAIT)) {
+	if (sni_take_fault(SNI_FAULT_FAIL_WAIT))
+	{
 		errno = EBADF;
 		return -1;
 	}
@@ -113,7 +120,8 @@ int sni_react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 	n = reactor_wait(&e->re, evs, max, timeout_ms);
 	if (n < 0)
 		return -1;
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < n; i++)
+	{
 		sni_tag *tag = (sni_tag *)evs[i].tag;
 		out[i].tag = tag;
 		/* epoll reports no fd; the tag holds the fd it is armed with. */
@@ -125,7 +133,8 @@ int sni_react_wait(sni_engine *e, sni_ready *out, int max, int timeout_ms)
 
 bool sni_watch(sni_engine *e, int fd, uint32_t ev, uint32_t *slot, sni_tag *tag)
 {
-	if (fd < 0) {
+	if (fd < 0)
+	{
 		*slot = 0;
 		return true;
 	}
@@ -133,15 +142,19 @@ bool sni_watch(sni_engine *e, int fd, uint32_t ev, uint32_t *slot, sni_tag *tag)
 		return true;
 	if (tag)
 		tag->fd = fd;
-	if (ev == 0) {
+	if (ev == 0)
+	{
 		sni_react_del(e, fd);
 		*slot = 0;
 		return true;
 	}
-	if (*slot == 0) {
+	if (*slot == 0)
+	{
 		if (!sni_react_add(e, fd, ev, tag))
 			return false;
-	} else if (!sni_react_mod(e, fd, ev, tag)) {
+	}
+	else if (!sni_react_mod(e, fd, ev, tag))
+	{
 		return false;
 	}
 	*slot = ev;
@@ -150,12 +163,14 @@ bool sni_watch(sni_engine *e, int fd, uint32_t ev, uint32_t *slot, sni_tag *tag)
 
 void sni_drop_watched(sni_engine *e, int *fd, uint32_t *slot, sni_tag *tag)
 {
-	if (*fd < 0) {
+	if (*fd < 0)
+	{
 		if (tag)
 			tag->fd = -1;
 		return;
 	}
-	if (*slot != 0) {
+	if (*slot != 0)
+	{
 		sni_react_del(e, *fd);
 		*slot = 0;
 	}
@@ -172,11 +187,14 @@ int sni_read_some(int fd, uint8_t *buf, uint32_t cap, uint32_t *len)
 	if (*len >= cap)
 		return 0;
 	space = (size_t)(cap - *len);
-	do {
+	do
+	{
 		n = sni_io_read(fd, buf + *len, space);
 	} while (n < 0 && errno == EINTR);
-	if (n < 0) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+	if (n < 0)
+	{
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
+		{
 			return 0;
 		}
 		return -1;
@@ -191,14 +209,18 @@ int sni_read_some(int fd, uint8_t *buf, uint32_t cap, uint32_t *len)
 
 int sni_write_some(int fd, const uint8_t *buf, uint32_t len, uint32_t *off, uint32_t *counter)
 {
-	while (*off < len) {
+	while (*off < len)
+	{
 		size_t space = (size_t)(len - *off);
 		ssize_t n;
-		do {
+		do
+		{
 			n = sni_io_write(fd, buf + *off, space);
 		} while (n < 0 && errno == EINTR);
-		if (n < 0) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+		if (n < 0)
+		{
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
 				sni_note_eagain();
 				return 0;
 			}
@@ -216,7 +238,8 @@ int sni_write_some(int fd, const uint8_t *buf, uint32_t len, uint32_t *off, uint
 int sni_shut_write(int fd)
 {
 	int rc;
-	do {
+	do
+	{
 		rc = shutdown(fd, SHUT_WR);
 	} while (rc < 0 && errno == EINTR);
 	return rc;

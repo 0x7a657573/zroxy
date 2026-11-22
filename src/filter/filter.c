@@ -28,15 +28,15 @@
 /* Open-addressing string set. cap is a power of two, at most half full. */
 typedef struct
 {
-	char   **slot;
+	char **slot;
 	size_t cap;
-}strset_t;
+} strset_t;
 
 struct filter_set
 {
-	strset_t exact;		/* "example.com" */
-	strset_t suffix;	/* ".example.com" from "*.example.com" */
-	char   **pattern;	/* everything else with '*' or '?' */
+	strset_t exact;  /* "example.com" */
+	strset_t suffix; /* ".example.com" from "*.example.com" */
+	char **pattern;  /* everything else with '*' or '?' */
 	size_t pattern_count;
 	size_t total;
 };
@@ -170,7 +170,7 @@ static filter_set_t *set_build(char **entries, size_t count)
 			nexact++;
 	}
 	if (!strset_init(&set->exact, nexact) || !strset_init(&set->suffix, nsuffix) ||
-		(npattern && !(set->pattern = calloc(npattern, sizeof(*set->pattern)))))
+	        (npattern && !(set->pattern = calloc(npattern, sizeof(*set->pattern)))))
 	{
 		set_free(set);
 		return NULL;
@@ -195,10 +195,10 @@ static filter_set_t *set_build(char **entries, size_t count)
 
 typedef struct
 {
-	char   **item;
+	char **item;
 	size_t count;
 	size_t cap;
-}entry_list_t;
+} entry_list_t;
 
 static void entry_list_free(entry_list_t *l)
 {
@@ -298,7 +298,7 @@ void filter_reload(filter_t *self)
 	filter_set_t *fresh;
 	filter_set_t *old;
 
-	if(!self || !self->filepath)
+	if (!self || !self->filepath)
 		return;
 
 	log_info("reloading whitelist %s", self->filepath);
@@ -358,7 +358,7 @@ static void *filter_watch_thread(void *vargp)
 	}
 
 	fd = inotify_init1(IN_CLOEXEC);
-	if ( fd < 0 )
+	if (fd < 0)
 	{
 		log_error("Couldn't initialize inotify");
 		return NULL;
@@ -367,21 +367,20 @@ static void *filter_watch_thread(void *vargp)
 	wd = inotify_add_watch(fd, dir, IN_CLOSE_WRITE | IN_MOVED_TO);
 	if (wd == -1)
 	{
-		log_error("Couldn't add watch to %s",dir);
+		log_error("Couldn't add watch to %s", dir);
 		close(fd);
 		return NULL;
 	}
-	log_info("watching %s for changes",self->filepath);
+	log_info("watching %s for changes", self->filepath);
 
 	char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
 	const struct inotify_event *event;
 	ssize_t len;
-	while(1)
+	while (1)
 	{
 		struct pollfd pfd[2] = {
-			{ .fd = fd, .events = POLLIN },
-			{ .fd = self->wake[0], .events = POLLIN }
-		};
+		        {.fd = fd, .events = POLLIN},
+		        {.fd = self->wake[0], .events = POLLIN}};
 		int pr = poll(pfd, 2, -1);
 		if (pr < 0)
 		{
@@ -411,12 +410,12 @@ static void *filter_watch_thread(void *vargp)
 		while (ptr + sizeof(struct inotify_event) <= buf_end)
 		{
 			size_t evsz;
-			event = (const struct inotify_event *) ptr;
+			event = (const struct inotify_event *)ptr;
 			if ((size_t)event->len > (size_t)(buf_end - ptr) - sizeof(*event))
 				break;
 			evsz = sizeof(*event) + (size_t)event->len;
 			if (event->len > 0 && strcmp(event->name, base) == 0 &&
-				(event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)))
+			        (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)))
 				changed = true;
 			if (event->mask & IN_IGNORED)
 			{
@@ -428,7 +427,7 @@ static void *filter_watch_thread(void *vargp)
 		}
 		if (changed)
 		{
-			log_info( "file %s was modified", self->filepath);
+			log_info("file %s was modified", self->filepath);
 			filter_reload(self);
 		}
 	}
@@ -438,15 +437,15 @@ static void *filter_watch_thread(void *vargp)
 }
 #elif defined(__FreeBSD__) || defined(__OpenBSD__)
 #ifdef NOTE_CLOSE_WRITE
-#define FILTER_NOTE_CHANGE	(NOTE_CLOSE_WRITE | NOTE_ATTRIB)
+#define FILTER_NOTE_CHANGE (NOTE_CLOSE_WRITE | NOTE_ATTRIB)
 #else
-#define FILTER_NOTE_CHANGE	(NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB)
+#define FILTER_NOTE_CHANGE (NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB)
 #endif
 
 /* true when the watcher was told to stop (or the wake pipe broke) */
 static bool watch_stop_requested(const filter_t *self, int timeout_ms)
 {
-	struct pollfd p = { .fd = self->wake[0], .events = POLLIN };
+	struct pollfd p = {.fd = self->wake[0], .events = POLLIN};
 	int r;
 
 	do
@@ -463,7 +462,7 @@ static int filter_watch_open(int kq, const char *filename)
 	if (fd == -1)
 		return -1;
 	EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
-		FILTER_NOTE_CHANGE | NOTE_DELETE | NOTE_RENAME, 0, NULL);
+	        FILTER_NOTE_CHANGE | NOTE_DELETE | NOTE_RENAME, 0, NULL);
 	if (kevent(kq, &change, 1, NULL, 0, NULL) == -1)
 	{
 		close(fd);
@@ -531,7 +530,7 @@ static void *filter_watch_thread(void *vargp)
 {
 	filter_t *self = (filter_t *)vargp;
 	const char *filename = self->filepath; // The file to monitor
-	int kq = kqueue(); // Create a new kernel event queue
+	int kq = kqueue();                     // Create a new kernel event queue
 
 	if (kq == -1)
 	{
@@ -542,7 +541,7 @@ static void *filter_watch_thread(void *vargp)
 	int fd = filter_watch_open(kq, filename);
 	if (fd == -1)
 	{
-		log_error("Couldn't add open %s",filename);
+		log_error("Couldn't add open %s", filename);
 		close(kq);
 		return NULL;
 	}
@@ -582,7 +581,7 @@ static void *filter_watch_thread(void *vargp)
 		fflags = (unsigned int)event.fflags;
 		/* Coalesce truncate/write notifications into one complete reload. */
 		if (!(fflags & (NOTE_DELETE | NOTE_RENAME)) && (fflags & FILTER_NOTE_CHANGE) &&
-		    filter_watch_coalesce(kq, &fflags))
+		        filter_watch_coalesce(kq, &fflags))
 			break;
 
 		if (fflags & (NOTE_DELETE | NOTE_RENAME))
@@ -604,13 +603,13 @@ static void *filter_watch_thread(void *vargp)
 				log_error("whitelist %s is gone; stop watching", filename);
 				break;
 			}
-			log_info( "file %s was replaced", self->filepath);
+			log_info("file %s was replaced", self->filepath);
 			filter_reload(self);
 			continue;
 		}
 		if (fflags & FILTER_NOTE_CHANGE)
 		{
-			log_info( "file %s was modified", self->filepath);
+			log_info("file %s was modified", self->filepath);
 			filter_reload(self);
 		}
 	}
@@ -645,7 +644,7 @@ filter_t *filter_init(char *filename)
 		self->wake[0] = self->wake[1] = -1;
 		log_error("whitelist watcher pipe failed");
 	}
-	else if (pthread_create(&self->watcher, NULL, filter_watch_thread, (void*)self) == 0)
+	else if (pthread_create(&self->watcher, NULL, filter_watch_thread, (void *)self) == 0)
 		self->watching = true;
 	else
 		log_error("whitelist watcher thread failed");
@@ -696,7 +695,7 @@ filter_t *filter_from_list(const char *const *entries, size_t count)
 
 void filter_free(filter_t *self)
 {
-	if(!self)
+	if (!self)
 		return;
 	if (self->watching)
 	{
@@ -725,40 +724,40 @@ str1 = apple, str2 = *plex -return-> false
 */
 static bool match(const char *str1, const char *str2)
 {
-   int i = 0;
-   int j = 0;
-   int star = -1;
-   int mark = 0;
+	int i = 0;
+	int j = 0;
+	int star = -1;
+	int mark = 0;
 
-   while (str1[i] != '\0')
-   {
-      if (str2[j] == '*')
-      {
-         star = j++;
-         mark = i;
-      }
-      else if (str2[j] != '\0' && (str1[i] == str2[j] || str2[j] == '?'))
-      {
-         i++;
-         j++;
-      }
-      else if (star != -1)
-      {
-         j = star + 1;
-         i = ++mark;
-      }
-      else
-      {
-         return false;
-      }
-   }
+	while (str1[i] != '\0')
+	{
+		if (str2[j] == '*')
+		{
+			star = j++;
+			mark = i;
+		}
+		else if (str2[j] != '\0' && (str1[i] == str2[j] || str2[j] == '?'))
+		{
+			i++;
+			j++;
+		}
+		else if (star != -1)
+		{
+			j = star + 1;
+			i = ++mark;
+		}
+		else
+		{
+			return false;
+		}
+	}
 
-   while (str2[j] == '*')
-   {
-      j++;
-   }
+	while (str2[j] == '*')
+	{
+		j++;
+	}
 
-   return str2[j] == '\0';
+	return str2[j] == '\0';
 }
 
 static bool set_match(const filter_set_t *set, const char *host)
@@ -781,7 +780,7 @@ static bool set_match(const filter_set_t *set, const char *host)
 	return false;
 }
 
-bool filter_match(filter_t *self,const char *host)
+bool filter_match(filter_t *self, const char *host)
 {
 	char norm[ZROXY_MAX_HOSTNAME];
 	size_t n;
@@ -826,13 +825,13 @@ bool filter_stats_json(void *ctx, char **ptr, char *end)
 		return false;
 	left = (size_t)(end - *ptr);
 	n = snprintf(*ptr, left, "\"Entries\" : %zu ,\n"
-		"\"Reloads\" : %" PRIu32 " ,\n"
-		"\"ReloadFailures\" : %" PRIu32 " ,\n"
-		"\"LastReload\" : %" PRIu32,
-		filter_count(self),
-		__atomic_load_n(&self->reloads, __ATOMIC_RELAXED),
-		__atomic_load_n(&self->reload_failures, __ATOMIC_RELAXED),
-		__atomic_load_n(&self->last_reload, __ATOMIC_RELAXED));
+	                         "\"Reloads\" : %" PRIu32 " ,\n"
+	                         "\"ReloadFailures\" : %" PRIu32 " ,\n"
+	                         "\"LastReload\" : %" PRIu32,
+	        filter_count(self),
+	        __atomic_load_n(&self->reloads, __ATOMIC_RELAXED),
+	        __atomic_load_n(&self->reload_failures, __ATOMIC_RELAXED),
+	        __atomic_load_n(&self->last_reload, __ATOMIC_RELAXED));
 	if (n < 0 || (size_t)n >= left)
 		return false;
 	*ptr += n;

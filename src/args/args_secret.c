@@ -12,7 +12,11 @@
 
 /* Secret option values on the command line, wiped by args_scrub_argv. */
 #define ARGS_MAX_ARGV_SECRETS 16
-static struct { char *ptr; size_t len; } argv_secrets[ARGS_MAX_ARGV_SECRETS];
+static struct
+{
+	char *ptr;
+	size_t len;
+} argv_secrets[ARGS_MAX_ARGV_SECRETS];
 static size_t argv_secret_count;
 
 void args_reset_secret_tracking(void)
@@ -55,8 +59,7 @@ void args_note_cli_secret(int key, char *arg)
 {
 	if (!arg || arg[0] == '\0')
 		return;
-	if (key == 'u' ? !args_dns_route_has_pass(arg) :
-	    (key != 'k' && !args_socks_spec_has_pass(arg)))
+	if (key == 'u' ? !args_dns_route_has_pass(arg) : (key != 'k' && !args_socks_spec_has_pass(arg)))
 		return;
 	if (key == 'k')
 		log_warn("monitor token on the command line is visible to other local users; use MONITORTOKENFILE (--monitortokenfile)");

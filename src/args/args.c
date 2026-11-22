@@ -48,16 +48,15 @@ void args_free(zroxy_t *ptr)
 	ptr->run_group = NULL;
 }
 
-
-typedef struct 
+typedef struct
 {
 	const char *name;
-	char 		key;
-	const char  *arg;
-	int			require;
+	char key;
+	const char *arg;
+	int require;
 	const char *doc;
-	int			section;
-}arg_option;
+	int section;
+} arg_option;
 
 enum
 {
@@ -67,54 +66,52 @@ enum
 	OPTION_SECTION_MONITOR
 };
 
-
 static arg_option options[] =
-{
-	{ "config", 'c', "PATH", required_argument, "load configuration from PATH", OPTION_SECTION_GENERAL },
-	{ "log", 'l', "0..5", required_argument, "set log level (0=trace, 5=fatal)", OPTION_SECTION_GENERAL },
-	{ "help", 'h', "", no_argument, "show this help and exit", OPTION_SECTION_GENERAL },
-	{ "user", 'U', "NAME", required_argument, "after binding the ports, run as NAME (needs root at start)", OPTION_SECTION_GENERAL },
-	{ "group", 'G', "NAME", required_argument, "group to run as with USER (default: the user's primary group)", OPTION_SECTION_GENERAL },
+        {
+                {"config", 'c', "PATH", required_argument, "load configuration from PATH", OPTION_SECTION_GENERAL},
+                {"log", 'l', "0..5", required_argument, "set log level (0=trace, 5=fatal)", OPTION_SECTION_GENERAL},
+                {"help", 'h', "", no_argument, "show this help and exit", OPTION_SECTION_GENERAL},
+                {"user", 'U', "NAME", required_argument, "after binding the ports, run as NAME (needs root at start)", OPTION_SECTION_GENERAL},
+                {"group", 'G', "NAME", required_argument, "group to run as with USER (default: the user's primary group)", OPTION_SECTION_GENERAL},
 
-	{ "port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]; repeat to add more", OPTION_SECTION_SNI },
-	{ "socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI },
-	{ "sockspassfile", 'S', "PATH", required_argument, "read the SOCKS5 password from the first line of PATH (spec: USER@HOST[:PORT])", OPTION_SECTION_SNI },
-	{ "snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI },
-	{ "sniidletimeout", 'I', "SECONDS", required_argument, "close a relay idle this long, 1..86400 (default: 300)", OPTION_SECTION_SNI },
-	{ "snimaxconn", 'n', "COUNT", required_argument, "maximum concurrent SNI connections, 1..65535 (default: 1024)", OPTION_SECTION_SNI },
-	{ "sacl", 'N', "CIDR[,CIDR...]", required_argument, "IPv4 networks allowed to use the SNI listeners (default: all)", OPTION_SECTION_SNI },
-	{ "allowloopback", 'L', "yes|no", required_argument, "let client-supplied names reach loopback upstreams (default: no)", OPTION_SECTION_SNI },
-	{ "denyprivate", 'P', "yes|no", required_argument, "refuse client-supplied names that resolve to private addresses (default: no)", OPTION_SECTION_SNI },
-	{ "white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI },
-	{ "openproxy", 'O', "yes|no", required_argument, "allow SNI listeners to forward every host name when no whitelist is set (default: no)", OPTION_SECTION_SNI },
+                {"port", 'p', "SPEC", required_argument, "SNI listener(s): [BIND-IP:]PORT[@REMOTE-PORT][,...]; repeat to add more", OPTION_SECTION_SNI},
+                {"socks", 's', "SPEC", required_argument, "SOCKS5 upstream: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_SNI},
+                {"sockspassfile", 'S', "PATH", required_argument, "read the SOCKS5 password from the first line of PATH (spec: USER@HOST[:PORT])", OPTION_SECTION_SNI},
+                {"snitimeout", 'o', "SECONDS", required_argument, "SNI socket timeout (default: 30)", OPTION_SECTION_SNI},
+                {"sniidletimeout", 'I', "SECONDS", required_argument, "close a relay idle this long, 1..86400 (default: 300)", OPTION_SECTION_SNI},
+                {"snimaxconn", 'n', "COUNT", required_argument, "maximum concurrent SNI connections, 1..65535 (default: 1024)", OPTION_SECTION_SNI},
+                {"sacl", 'N', "CIDR[,CIDR...]", required_argument, "IPv4 networks allowed to use the SNI listeners (default: all)", OPTION_SECTION_SNI},
+                {"allowloopback", 'L', "yes|no", required_argument, "let client-supplied names reach loopback upstreams (default: no)", OPTION_SECTION_SNI},
+                {"denyprivate", 'P', "yes|no", required_argument, "refuse client-supplied names that resolve to private addresses (default: no)", OPTION_SECTION_SNI},
+                {"white", 'w', "PATH", required_argument, "whitelist host names from PATH", OPTION_SECTION_SNI},
+                {"openproxy", 'O', "yes|no", required_argument, "allow SNI listeners to forward every host name when no whitelist is set (default: no)", OPTION_SECTION_SNI},
 
-	{ "ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS },
-	{ "dns", 'u', "SPEC", required_argument, "upstream DNS route: HOST[:PORT] [via SOCKS-SPEC|direct] (default port: 53); repeat for up to 4 routes", OPTION_SECTION_DNS },
-	{ "dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS routes without via/direct: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS },
-	{ "dsockspassfile", 'X', "PATH", required_argument, "read the DNS SOCKS5 password from the first line of PATH", OPTION_SECTION_DNS },
-	{ "dtimeout", 't', "SECONDS", required_argument, "DNS upstream timeout (default: 5)", OPTION_SECTION_DNS },
-	{ "snip", 'i', "IPv4", required_argument, "synthetic address for whitelisted DNS names", OPTION_SECTION_DNS },
-	{ "dcache", 'e', "ENTRIES", required_argument, "DNS answer cache size, 0 disables (default: 2048)", OPTION_SECTION_DNS },
-	{ "dttl", 'r', "SECONDS", required_argument, "TTL of synthetic DNS answers (default: 300)", OPTION_SECTION_DNS },
-	{ "dacl", 'A', "CIDR[,CIDR...]", required_argument, "IPv4 networks allowed to query DNS", OPTION_SECTION_DNS },
-	{ "drate", 'R', "QPS", required_argument, "per-source DNS query rate, 0 disables (default: 0)", OPTION_SECTION_DNS },
-	{ "dnsconnections", 'C', "COUNT", required_argument, "maximum concurrent DNS upstream TCP connections, 1..96 (default: 96)", OPTION_SECTION_DNS },
+                {"ldns", 'd', "BIND-IP[:PORT]", required_argument, "enable the local DNS listener (UDP and TCP)", OPTION_SECTION_DNS},
+                {"dns", 'u', "SPEC", required_argument, "upstream DNS route: HOST[:PORT] [via SOCKS-SPEC|direct] (default port: 53); repeat for up to 4 routes", OPTION_SECTION_DNS},
+                {"dsocks", 'x', "SPEC", required_argument, "SOCKS5 for DNS routes without via/direct: [USER:PASSWORD@]HOST[:PORT]", OPTION_SECTION_DNS},
+                {"dsockspassfile", 'X', "PATH", required_argument, "read the DNS SOCKS5 password from the first line of PATH", OPTION_SECTION_DNS},
+                {"dtimeout", 't', "SECONDS", required_argument, "DNS upstream timeout (default: 5)", OPTION_SECTION_DNS},
+                {"snip", 'i', "IPv4", required_argument, "synthetic address for whitelisted DNS names", OPTION_SECTION_DNS},
+                {"dcache", 'e', "ENTRIES", required_argument, "DNS answer cache size, 0 disables (default: 2048)", OPTION_SECTION_DNS},
+                {"dttl", 'r', "SECONDS", required_argument, "TTL of synthetic DNS answers (default: 300)", OPTION_SECTION_DNS},
+                {"dacl", 'A', "CIDR[,CIDR...]", required_argument, "IPv4 networks allowed to query DNS", OPTION_SECTION_DNS},
+                {"drate", 'R', "QPS", required_argument, "per-source DNS query rate, 0 disables (default: 0)", OPTION_SECTION_DNS},
+                {"dnsconnections", 'C', "COUNT", required_argument, "maximum concurrent DNS upstream TCP connections, 1..96 (default: 96)", OPTION_SECTION_DNS},
 
-	{ "monitor", 'm', "[BIND-IP:]PORT", required_argument, "enable the HTTP monitor (default bind: 127.0.0.1)", OPTION_SECTION_MONITOR },
-	{ "monitortoken", 'k', "TOKEN", required_argument, "require Bearer TOKEN for the monitor", OPTION_SECTION_MONITOR },
-	{ "monitortokenfile", 'K', "PATH", required_argument, "read the monitor Bearer token from the first line of PATH", OPTION_SECTION_MONITOR },
-	{ "monitortimeout", 'a', "SECONDS", required_argument, "incomplete-header timeout, 1..60 (default: 5)", OPTION_SECTION_MONITOR },
+                {"monitor", 'm', "[BIND-IP:]PORT", required_argument, "enable the HTTP monitor (default bind: 127.0.0.1)", OPTION_SECTION_MONITOR},
+                {"monitortoken", 'k', "TOKEN", required_argument, "require Bearer TOKEN for the monitor", OPTION_SECTION_MONITOR},
+                {"monitortokenfile", 'K', "PATH", required_argument, "read the monitor Bearer token from the first line of PATH", OPTION_SECTION_MONITOR},
+                {"monitortimeout", 'a', "SECONDS", required_argument, "incomplete-header timeout, 1..60 (default: 5)", OPTION_SECTION_MONITOR},
 
-	{ 0 }
-};
+                {0}};
 
 static void print_option(const arg_option *option)
 {
 	printf("  -%c, --%-16s %-16s %s\n",
-		option->key,
-		option->name,
-		option->arg,
-		option->doc);
+	        option->key,
+	        option->name,
+	        option->arg,
+	        option->doc);
 }
 
 static void print_option_section(int section, const char *title)
@@ -170,7 +167,7 @@ static struct
 } config_chain[ARGS_MAX_CONFIG_DEPTH];
 static unsigned config_depth;
 
-bool args_init(zroxy_t *pgp,int argc, const char **argv)
+bool args_init(zroxy_t *pgp, int argc, const char **argv)
 {
 	pgp->snitimeout = 30;
 	pgp->sniidletimeout = 300;
@@ -199,56 +196,56 @@ bool args_init(zroxy_t *pgp,int argc, const char **argv)
 	pgp->WhitePath = NULL;
 	pgp->dnsserver = NULL;
 	/*ran without parameter*/
-	if(argc==1) 
+	if (argc == 1)
 	{
-		return args_parse_config(pgp,DEF_CONFIG_PATH);
+		return args_parse_config(pgp, DEF_CONFIG_PATH);
 	}
 
 	/*map arg_option to option*/
-	int arg_number = sizeof(options)/sizeof(arg_option);
+	int arg_number = sizeof(options) / sizeof(arg_option);
 	struct option x_options[arg_number];
-	bzero(x_options,sizeof(x_options));
-	for(int i=0;i<arg_number;i++)
+	bzero(x_options, sizeof(x_options));
+	for (int i = 0; i < arg_number; i++)
 	{
 		x_options[i].name = options[i].name;
 		x_options[i].val = options[i].key;
 		x_options[i].has_arg = options[i].require;
 		x_options[i].flag = NULL;
-	}	
+	}
 
 	//make opt string
 	char optstring[128] = {0};
 	uint32_t index = 0;
-	for(struct option *op=x_options;op->name!=NULL;op++)
+	for (struct option *op = x_options; op->name != NULL; op++)
 	{
-		optstring[index++]=(char)op->val;
-		if(op->has_arg==required_argument)
-			optstring[index++]=':';
-		else if(op->has_arg==optional_argument)
-			optstring[index++]=';';
+		optstring[index++] = (char)op->val;
+		if (op->has_arg == required_argument)
+			optstring[index++] = ':';
+		else if (op->has_arg == optional_argument)
+			optstring[index++] = ';';
 
 		/*check Overflow*/
-		if(index>=sizeof(optstring)-1)
+		if (index >= sizeof(optstring) - 1)
 			break;
-	}	
+	}
 
 	int option_index = 0;
-	while(1)
+	while (1)
 	{
 		int key = getopt_long(argc, (char **)argv, optstring, x_options, &option_index);
 		if (key == -1)
-            break;
+			break;
 
 		if (key == 's' || key == 'x' || key == 'k' || key == 'u')
 			args_note_cli_secret(key, optarg);
-		if(args_apply_option(key, optarg, pgp)!=0)
+		if (args_apply_option(key, optarg, pgp) != 0)
 		{
 			log_error("error invalid option or value");
 			return false;
 		}
 	}
 
-    return true;
+	return true;
 }
 
 /*
@@ -308,7 +305,7 @@ static bool resolve_run_identity(zroxy_t *ptr)
 		if (uid != geteuid() || (ptr->run_group && gid != getegid()))
 		{
 			log_error("USER %s needs zroxy to start as root, but it runs as uid %lu",
-				ptr->run_user, (unsigned long)geteuid());
+			        ptr->run_user, (unsigned long)geteuid());
 			return false;
 		}
 		return true;
@@ -356,47 +353,47 @@ bool args_validate(zroxy_t *ptr)
 		return false;
 	}
 	sni_ip_zero = ptr->dnsserver->sni_ip[0] == 0 &&
-		ptr->dnsserver->sni_ip[1] == 0 &&
-		ptr->dnsserver->sni_ip[2] == 0 &&
-		ptr->dnsserver->sni_ip[3] == 0;
+	              ptr->dnsserver->sni_ip[1] == 0 &&
+	              ptr->dnsserver->sni_ip[2] == 0 &&
+	              ptr->dnsserver->sni_ip[3] == 0;
 	if (ptr->WhitePath && sni_ip_zero)
 		log_warn("whitelisted names will resolve to 0.0.0.0");
 	return true;
 }
 
-
 char *args_ltrim(char *s)
 {
-    while(*s && isspace((unsigned char)*s)) s++;
-    return s;
+	while (*s && isspace((unsigned char)*s))
+		s++;
+	return s;
 }
 
 static char *rtrim(char *s)
 {
-    size_t n = strlen(s);
-    while(n > 0 && isspace((unsigned char)s[n - 1]))
-        n--;
-    s[n] = '\0';
-    return s;
+	size_t n = strlen(s);
+	while (n > 0 && isspace((unsigned char)s[n - 1]))
+		n--;
+	s[n] = '\0';
+	return s;
 }
 
 char *args_trim(char *s)
 {
-    return rtrim(args_ltrim(s));
+	return rtrim(args_ltrim(s));
 }
 
-static char* to_lower(char* s) 
+static char *to_lower(char *s)
 {
-  for(char *p=s; *p; p++) *p=(char)tolower((unsigned char)*p);
-  return s;
+	for (char *p = s; *p; p++)
+		*p = (char)tolower((unsigned char)*p);
+	return s;
 }
-
 
 static int config_find_key(char *key)
 {
-	for(arg_option *ptr=options;ptr->name!=NULL;ptr++)
+	for (arg_option *ptr = options; ptr->name != NULL; ptr++)
 	{
-		if(strcmp(ptr->name,key)==0)
+		if (strcmp(ptr->name, key) == 0)
 			return ptr->key;
 	}
 	return -1;
@@ -416,7 +413,7 @@ static bool config_key_chars(const char *key)
 	return true;
 }
 
-bool args_parse_config(zroxy_t *ptr,char *str)
+bool args_parse_config(zroxy_t *ptr, char *str)
 {
 	FILE *ConfigFile;
 	struct stat st;
@@ -430,12 +427,13 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 
 	if (!str)
 		return false;
-	while(*str==' ') str++; /*remove space*/
+	while (*str == ' ')
+		str++; /*remove space*/
 	if (*str == '\0')
 		return false;
 	cfd = open(str, O_RDONLY | O_CLOEXEC);
 	ConfigFile = cfd >= 0 ? fdopen(cfd, "r") : NULL;
-	if(ConfigFile==NULL)
+	if (ConfigFile == NULL)
 	{
 		if (cfd >= 0)
 			close(cfd);
@@ -498,23 +496,23 @@ bool args_parse_config(zroxy_t *ptr,char *str)
 		}
 
 		ckey = config_find_key(fix_key);
-		if(ckey<0)
+		if (ckey < 0)
 		{
-			log_error("error invalid key in config: %s",fix_key);
+			log_error("error invalid key in config: %s", fix_key);
 			ret_status = false;
 			break;
 		}
 
 		if (!secret_seen && (ckey == 'k' ||
-		    ((ckey == 's' || ckey == 'x') && args_socks_spec_has_pass(fix_val)) ||
-		    (ckey == 'u' && args_dns_route_has_pass(fix_val))))
+		                            ((ckey == 's' || ckey == 'x') && args_socks_spec_has_pass(fix_val)) ||
+		                            (ckey == 'u' && args_dns_route_has_pass(fix_val))))
 		{
 			secret_seen = true;
 			if (fstat(cfd, &st) == 0)
 				args_warn_secret_mode(&st, str, "config file with a secret:");
 		}
 
-		if(args_apply_option(ckey, fix_val, ptr)!=0)
+		if (args_apply_option(ckey, fix_val, ptr) != 0)
 		{
 			log_error("error invalid value in config for key %s", fix_key);
 			ret_status = false;

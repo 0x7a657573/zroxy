@@ -8,7 +8,7 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define version	 "2.2.0"
+#define version "2.2.0"
 /*
 * sni : make the connection cap configurable with SNIMAXCONN
 * sni : restrict clients by source network with SACL
@@ -180,6 +180,5 @@
 /*
  * Init Program version :)
  */
-
 
 #endif /* VERSION_H_ */

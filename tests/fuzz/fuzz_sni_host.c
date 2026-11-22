@@ -56,7 +56,9 @@ static void run_one(extract_fn fn, const uint8_t *data, size_t size, uint16_t ca
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
 	static const char *const entries[] = {
-		"example.com", "*.example.org", "api?.wild*.net",
+	        "example.com",
+	        "*.example.org",
+	        "api?.wild*.net",
 	};
 
 	fuzz_init_once();

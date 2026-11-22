@@ -1,0 +1,18 @@
+# zroxy Allman style: tabs for indentation, no line reflow.
+BasedOnStyle: LLVM
+BreakBeforeBraces: Allman
+UseTab: ForIndentation
+IndentWidth: 8
+TabWidth: 8
+ContinuationIndentWidth: 8
+ColumnLimit: 0
+SortIncludes: Never
+ReflowComments: false
+InsertBraces: false
+RemoveBracesLLVM: false
+AllowShortFunctionsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+PointerAlignment: Right
+IndentCaseLabels: false
+SpaceBeforeParens: ControlStatements
+AlignAfterOpenBracket: DontAlign

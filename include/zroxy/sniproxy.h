@@ -19,23 +19,21 @@
 
 typedef struct
 {
-	lport_t 	Port;
-	sockshost_t	 *Socks;
+	lport_t Port;
+	sockshost_t *Socks;
 	statistics_t *sta;
-	filter_t	 *wlist;
-	int			 snitimeout;
+	filter_t *wlist;
+	int snitimeout;
 	/* Relay idle limit in seconds; 0 falls back to snitimeout. */
-	int			 sniidletimeout;
+	int sniidletimeout;
 	/* Dial resolved loopback addresses (default off). */
-	bool		 allow_loopback;
+	bool allow_loopback;
 	/* Refuse resolved private addresses (default off). */
-	bool		 deny_private;
+	bool deny_private;
 	/* Client networks allowed to connect; owned by the caller. No list allows all. */
 	const zroxy_cidr_t *acl;
-	size_t		 acl_count;
-}SniServer_t;
-
-
+	size_t acl_count;
+} SniServer_t;
 
 typedef struct sni_listener sni_listener;
 
@@ -55,7 +53,5 @@ void sni_conn_set_limit(int limit);
  * limit and the counters that say how connections ended.
  */
 bool sni_stats_json(void *ctx, char **ptr, char *end);
-
-
 
 #endif /* SNIPROXY_H_ */

@@ -78,7 +78,8 @@ static uint32_t from_poll_ev(short rev)
 static int poll_index(const reactor *r, int fd)
 {
 	int i;
-	for (i = 0; i < r->n; i++) {
+	for (i = 0; i < r->n; i++)
+	{
 		if (r->pfds[i].fd == fd)
 			return i;
 	}
@@ -90,7 +91,8 @@ bool reactor_open(reactor *r, int capacity, bool force_poll)
 	memset(r, 0, sizeof(*r));
 	r->epfd = -1;
 #if defined(__linux__)
-	if (!force_poll) {
+	if (!force_poll)
+	{
 		r->epfd = epoll_create1(EPOLL_CLOEXEC);
 		return r->epfd >= 0;
 	}
@@ -102,7 +104,8 @@ bool reactor_open(reactor *r, int capacity, bool force_poll)
 	r->cap = capacity;
 	r->pfds = (struct pollfd *)calloc((size_t)capacity, sizeof(*r->pfds));
 	r->tags = (void **)calloc((size_t)capacity, sizeof(*r->tags));
-	if (!r->pfds || !r->tags) {
+	if (!r->pfds || !r->tags)
+	{
 		reactor_close(r);
 		return false;
 	}
@@ -126,7 +129,8 @@ void reactor_close(reactor *r)
 bool reactor_add(reactor *r, int fd, uint32_t ev, void *tag)
 {
 #if defined(__linux__)
-	if (r->epfd >= 0) {
+	if (r->epfd >= 0)
+	{
 		struct epoll_event ee;
 		memset(&ee, 0, sizeof(ee));
 		ee.events = to_epoll(ev);
@@ -148,7 +152,8 @@ bool reactor_mod(reactor *r, int fd, uint32_t ev, void *tag)
 {
 	int i;
 #if defined(__linux__)
-	if (r->epfd >= 0) {
+	if (r->epfd >= 0)
+	{
 		struct epoll_event ee;
 		memset(&ee, 0, sizeof(ee));
 		ee.events = to_epoll(ev);
@@ -168,7 +173,8 @@ void reactor_del(reactor *r, int fd)
 {
 	int i;
 #if defined(__linux__)
-	if (r->epfd >= 0) {
+	if (r->epfd >= 0)
+	{
 		struct epoll_event ee;
 		memset(&ee, 0, sizeof(ee));
 		epoll_ctl(r->epfd, EPOLL_CTL_DEL, fd, &ee);
@@ -179,7 +185,8 @@ void reactor_del(reactor *r, int fd)
 	if (i < 0)
 		return;
 	r->n--;
-	if (i != r->n) {
+	if (i != r->n)
+	{
 		r->pfds[i] = r->pfds[r->n];
 		r->tags[i] = r->tags[r->n];
 	}
@@ -192,7 +199,8 @@ int reactor_wait(reactor *r, reactor_event *out, int max, int timeout_ms)
 	int produced = 0;
 	int start;
 #if defined(__linux__)
-	if (r->epfd >= 0) {
+	if (r->epfd >= 0)
+	{
 		struct epoll_event evs[REACTOR_BATCH];
 		int cap = max;
 		int i;
@@ -201,7 +209,8 @@ int reactor_wait(reactor *r, reactor_event *out, int max, int timeout_ms)
 		n = epoll_wait(r->epfd, evs, cap, timeout_ms);
 		if (n < 0)
 			return -1;
-		for (i = 0; i < n; i++) {
+		for (i = 0; i < n; i++)
+		{
 			out[i].tag = evs[i].data.ptr;
 			out[i].fd = -1;
 			out[i].ev = from_epoll(evs[i].events);
@@ -221,11 +230,13 @@ int reactor_wait(reactor *r, reactor_event *out, int max, int timeout_ms)
 	start = r->cursor;
 	if (start >= r->n)
 		start = 0;
-	while (seen < r->n && produced < max) {
+	while (seen < r->n && produced < max)
+	{
 		int i = start + seen;
 		if (i >= r->n)
 			i -= r->n;
-		if (r->pfds[i].revents != 0) {
+		if (r->pfds[i].revents != 0)
+		{
 			out[produced].tag = r->tags[i];
 			out[produced].fd = r->pfds[i].fd;
 			out[produced].ev = from_poll_ev(r->pfds[i].revents);

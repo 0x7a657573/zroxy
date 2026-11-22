@@ -81,7 +81,8 @@ int resolver_test_wait_running(int want, int timeout_ms)
 	if (resolver_mono_deadline(timeout_ms, &ts) != 0)
 		return 0;
 	pthread_mutex_lock(&g_resolver_pool->test_mu);
-	while (g_resolver_pool->running_entered < want) {
+	while (g_resolver_pool->running_entered < want)
+	{
 		int wr = pthread_cond_timedwait(&g_resolver_pool->test_cv, &g_resolver_pool->test_mu, &ts);
 		if (wr == ETIMEDOUT)
 			break;
@@ -100,7 +101,8 @@ bool resolver_test_accounting(resolver_accounting *out)
 	if (!g_resolver_pool)
 		return false;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	for (i = 0; i < RESOLVER_SLOTS; i++) {
+	for (i = 0; i < RESOLVER_SLOTS; i++)
+	{
 		resolve_slot *slot = &g_resolver_pool->slots[i];
 		if (slot->state == RESOLVE_FREE)
 			out->free_n++;
@@ -140,7 +142,7 @@ int resolver_test_mutex_ok(void)
 }
 
 void resolver_test_age_cache(int64_t last_success_ms, int64_t refresh_after_ms,
-		int64_t max_stale_ms)
+        int64_t max_stale_ms)
 {
 	if (!g_resolver_pool)
 		return;
@@ -164,7 +166,8 @@ int resolver_test_fill_infra(void)
 	if (!g_resolver_pool)
 		return 0;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	while (g_resolver_pool->infra_used < RESOLVER_INFRA_RESERVE && g_resolver_pool->free_head != NULL) {
+	while (g_resolver_pool->infra_used < RESOLVER_INFRA_RESERVE && g_resolver_pool->free_head != NULL)
+	{
 		resolve_slot *slot = g_resolver_pool->free_head;
 		int64_t now;
 		g_resolver_pool->free_head = slot->qnext;
@@ -201,7 +204,8 @@ void resolver_test_reap(void)
 	if (!g_resolver_pool)
 		return;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	for (i = 0; i < RESOLVER_SLOTS; i++) {
+	for (i = 0; i < RESOLVER_SLOTS; i++)
+	{
 		resolve_slot *slot = &g_resolver_pool->slots[i];
 		if (slot->state == RESOLVE_QUEUED)
 			slot->state = RESOLVE_CANCELLED;
@@ -217,14 +221,15 @@ int resolver_test_wait_idle(int timeout_ms)
 	if (deadline < 0)
 		return 0;
 	deadline += timeout_ms;
-	for (;;) {
+	for (;;)
+	{
 		resolver_accounting a;
 		int64_t now;
 		if (!resolver_test_accounting(&a))
 			return 0;
 		if (a.free_n == RESOLVER_SLOTS && a.queued == 0 && a.running == 0 &&
-				a.done == 0 && a.cancelled == 0 && a.in_ring == 0 &&
-				a.quota_used == 0)
+		        a.done == 0 && a.cancelled == 0 && a.in_ring == 0 &&
+		        a.quota_used == 0)
 			return 1;
 		now = net_mono_ms();
 		if (now < 0 || now >= deadline)
@@ -233,4 +238,3 @@ int resolver_test_wait_idle(int timeout_ms)
 	}
 }
 #endif
-

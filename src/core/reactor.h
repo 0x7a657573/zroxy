@@ -14,21 +14,24 @@
 
 #include <poll.h>
 
-enum {
+enum
+{
 	RE_IN = 1,
 	RE_OUT = 2,
 	RE_ERR = 4,
 	RE_HUP = 8
 };
 
-typedef struct reactor_event {
+typedef struct reactor_event
+{
 	void *tag;
 	/* The registered fd with the poll backend, -1 with epoll. */
 	int fd;
 	uint32_t ev;
 } reactor_event;
 
-typedef struct reactor {
+typedef struct reactor
+{
 	int epfd;
 	struct pollfd *pfds;
 	void **tags;

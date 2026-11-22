@@ -16,361 +16,363 @@ static int failures = 0;
 
 static void expect_true(bool value, const char *name)
 {
-    if (!value)
-    {
-        fprintf(stderr, "FAIL: %s expected true\n", name);
-        failures++;
-    }
+	if (!value)
+	{
+		fprintf(stderr, "FAIL: %s expected true\n", name);
+		failures++;
+	}
 }
 
 static void expect_false(bool value, const char *name)
 {
-    if (value)
-    {
-        fprintf(stderr, "FAIL: %s expected false\n", name);
-        failures++;
-    }
+	if (value)
+	{
+		fprintf(stderr, "FAIL: %s expected false\n", name);
+		failures++;
+	}
 }
 
 static void expect_string(const char *actual, const char *expected, const char *name)
 {
-    if (strcmp(actual, expected) != 0)
-    {
-        fprintf(stderr, "FAIL: %s expected '%s', got '%s'\n", name, expected, actual);
-        failures++;
-    }
+	if (strcmp(actual, expected) != 0)
+	{
+		fprintf(stderr, "FAIL: %s expected '%s', got '%s'\n", name, expected, actual);
+		failures++;
+	}
 }
 
 static void test_http_host_valid(void)
 {
-    uint8_t request[] =
-        "GET / HTTP/1.1\r\n"
-        "Host: example.com\r\n"
-        "Connection: close\r\n"
-        "\r\n";
-    char host[ZROXY_MAX_HOSTNAME] = {0};
+	uint8_t request[] =
+	        "GET / HTTP/1.1\r\n"
+	        "Host: example.com\r\n"
+	        "Connection: close\r\n"
+	        "\r\n";
+	char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
-                "valid HTTP Host");
-    expect_string(host, "example.com", "valid HTTP Host value");
+	expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+	        "valid HTTP Host");
+	expect_string(host, "example.com", "valid HTTP Host value");
 }
 
 static void test_http_without_host(void)
 {
-    uint8_t request[] =
-        "GET / HTTP/1.1\r\n"
-        "Connection: close\r\n"
-        "\r\n";
-    char host[ZROXY_MAX_HOSTNAME] = "unchanged";
+	uint8_t request[] =
+	        "GET / HTTP/1.1\r\n"
+	        "Connection: close\r\n"
+	        "\r\n";
+	char host[ZROXY_MAX_HOSTNAME] = "unchanged";
 
-    expect_false(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
-                 "HTTP without Host");
-    expect_string(host, "", "HTTP without Host clears output");
+	expect_false(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+	        "HTTP without Host");
+	expect_string(host, "", "HTTP without Host clears output");
 }
 
 static void test_http_host_with_port(void)
 {
-    uint8_t request[] =
-        "GET / HTTP/1.1\r\n"
-        "Host: example.com:443\r\n"
-        "Connection: close\r\n"
-        "\r\n";
-    char host[ZROXY_MAX_HOSTNAME] = {0};
+	uint8_t request[] =
+	        "GET / HTTP/1.1\r\n"
+	        "Host: example.com:443\r\n"
+	        "Connection: close\r\n"
+	        "\r\n";
+	char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
-                "HTTP Host with port");
-    expect_string(host, "example.com", "HTTP Host with port value");
+	expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+	        "HTTP Host with port");
+	expect_string(host, "example.com", "HTTP Host with port value");
 }
 
 static void test_http_host_lowercase_name(void)
 {
-    uint8_t request[] =
-        "GET / HTTP/1.1\r\n"
-        "host: example.com\r\n"
-        "\r\n";
-    char host[ZROXY_MAX_HOSTNAME] = {0};
+	uint8_t request[] =
+	        "GET / HTTP/1.1\r\n"
+	        "host: example.com\r\n"
+	        "\r\n";
+	char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
-                "HTTP lowercase host");
-    expect_string(host, "example.com", "HTTP lowercase host value");
+	expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+	        "HTTP lowercase host");
+	expect_string(host, "example.com", "HTTP lowercase host value");
 }
 
 static void test_http_host_trailing_space(void)
 {
-    uint8_t request[] =
-        "GET / HTTP/1.1\r\n"
-        "HOST:\texample.com:8080 \t\r\n"
-        "\r\n";
-    char host[ZROXY_MAX_HOSTNAME] = {0};
+	uint8_t request[] =
+	        "GET / HTTP/1.1\r\n"
+	        "HOST:\texample.com:8080 \t\r\n"
+	        "\r\n";
+	char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
-                "HTTP Host with whitespace");
-    expect_string(host, "example.com", "HTTP Host with whitespace value");
+	expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+	        "HTTP Host with whitespace");
+	expect_string(host, "example.com", "HTTP Host with whitespace value");
 }
 
 static void test_http_host_only_port(void)
 {
-    uint8_t request[] =
-        "GET / HTTP/1.1\r\n"
-        "Host: :443\r\n"
-        "\r\n";
-    char host[ZROXY_MAX_HOSTNAME] = {0};
+	uint8_t request[] =
+	        "GET / HTTP/1.1\r\n"
+	        "Host: :443\r\n"
+	        "\r\n";
+	char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
-                "HTTP Host only port");
-    expect_string(host, ":443", "HTTP Host only port is not stripped to empty");
+	expect_true(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+	        "HTTP Host only port");
+	expect_string(host, ":443", "HTTP Host only port is not stripped to empty");
 }
 
 static void test_tls_sni_valid(void)
 {
-    static const uint8_t client_hello[] = {
-        0x16, 0x03, 0x03, 0x00, 0x43,
-        0x01, 0x00, 0x00, 0x3f,
-        0x03, 0x03,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00,
-        0x00, 0x02, 0x13, 0x01,
-        0x01, 0x00,
-        0x00, 0x14,
-        0x00, 0x00, 0x00, 0x10,
-        0x00, 0x0e,
-        0x00,
-        0x00, 0x0b,
-        'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'
-    };
-    char host[ZROXY_MAX_HOSTNAME] = {0};
+	static const uint8_t client_hello[] = {
+	        0x16, 0x03, 0x03, 0x00, 0x43,
+	        0x01, 0x00, 0x00, 0x3f,
+	        0x03, 0x03,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00,
+	        0x00, 0x02, 0x13, 0x01,
+	        0x01, 0x00,
+	        0x00, 0x14,
+	        0x00, 0x00, 0x00, 0x10,
+	        0x00, 0x0e,
+	        0x00,
+	        0x00, 0x0b,
+	        'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'};
+	char host[ZROXY_MAX_HOSTNAME] = {0};
 
-    expect_true(net_get_https_host((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
-                "valid TLS SNI");
-    expect_string(host, "example.com", "valid TLS SNI value");
+	expect_true(net_get_https_host((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
+	        "valid TLS SNI");
+	expect_string(host, "example.com", "valid TLS SNI value");
 }
 
 static void test_http_host_without_terminator(void)
 {
-    uint8_t request[] = "GET / HTTP/1.1\r\nHost: ";
-    char host[ZROXY_MAX_HOSTNAME];
-    memset(host, 'x', sizeof(host));
-    host[sizeof(host) - 1] = '\0';
+	uint8_t request[] = "GET / HTTP/1.1\r\nHost: ";
+	char host[ZROXY_MAX_HOSTNAME];
+	memset(host, 'x', sizeof(host));
+	host[sizeof(host) - 1] = '\0';
 
-    expect_false(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
-                 "HTTP Host without CRLF");
-    expect_string(host, "", "HTTP Host without CRLF clears output");
+	expect_false(net_get_http_host(request, (uint32_t)strlen((char *)request), host, sizeof(host)),
+	        "HTTP Host without CRLF");
+	expect_string(host, "", "HTTP Host without CRLF clears output");
 }
 
 static void test_tls_sni_truncated_record(void)
 {
-    static const uint8_t client_hello[] = {
-        0x16, 0x03, 0x03, 0x00, 0x43,
-        0x01, 0x00, 0x00, 0x3f,
-        0x03, 0x03
-    };
-    char host[ZROXY_MAX_HOSTNAME];
-    memset(host, 'x', sizeof(host));
-    host[sizeof(host) - 1] = '\0';
+	static const uint8_t client_hello[] = {
+	        0x16, 0x03, 0x03, 0x00, 0x43,
+	        0x01, 0x00, 0x00, 0x3f,
+	        0x03, 0x03};
+	char host[ZROXY_MAX_HOSTNAME];
+	memset(host, 'x', sizeof(host));
+	host[sizeof(host) - 1] = '\0';
 
-    expect_false(net_get_https_host((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
-                 "truncated TLS record");
-    expect_string(host, "", "truncated TLS record clears output");
+	expect_false(net_get_https_host((uint8_t *)client_hello, sizeof(client_hello), host, sizeof(host)),
+	        "truncated TLS record");
+	expect_string(host, "", "truncated TLS record clears output");
 }
 
 static void copy_valid_hello(uint8_t *dst)
 {
-    static const uint8_t client_hello[] = {
-        0x16, 0x03, 0x03, 0x00, 0x43,
-        0x01, 0x00, 0x00, 0x3f,
-        0x03, 0x03,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00,
-        0x00, 0x02, 0x13, 0x01,
-        0x01, 0x00,
-        0x00, 0x14,
-        0x00, 0x00, 0x00, 0x10,
-        0x00, 0x0e,
-        0x00,
-        0x00, 0x0b,
-        'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'
-    };
-    memcpy(dst, client_hello, sizeof(client_hello));
+	static const uint8_t client_hello[] = {
+	        0x16, 0x03, 0x03, 0x00, 0x43,
+	        0x01, 0x00, 0x00, 0x3f,
+	        0x03, 0x03,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00,
+	        0x00,
+	        0x00, 0x02, 0x13, 0x01,
+	        0x01, 0x00,
+	        0x00, 0x14,
+	        0x00, 0x00, 0x00, 0x10,
+	        0x00, 0x0e,
+	        0x00,
+	        0x00, 0x0b,
+	        'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'};
+	memcpy(dst, client_hello, sizeof(client_hello));
 }
 
 static void test_tls_sni_malformed_extensions(void)
 {
-    uint8_t hello[72];
-    char host[ZROXY_MAX_HOSTNAME];
+	uint8_t hello[72];
+	char host[ZROXY_MAX_HOSTNAME];
 
-    copy_valid_hello(hello);
-    hello[3] = 0x00;
-    hello[4] = 0x80;
-    memset(host, 'x', sizeof(host));
-    host[sizeof(host) - 1] = '\0';
-    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
-                 "TLS record longer than the buffer");
-    expect_string(host, "", "overlong TLS record clears output");
+	copy_valid_hello(hello);
+	hello[3] = 0x00;
+	hello[4] = 0x80;
+	memset(host, 'x', sizeof(host));
+	host[sizeof(host) - 1] = '\0';
+	expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
+	        "TLS record longer than the buffer");
+	expect_string(host, "", "overlong TLS record clears output");
 
-    copy_valid_hello(hello);
-    hello[50] = 0x00;
-    hello[51] = 0x30;
-    memset(host, 'x', sizeof(host));
-    host[sizeof(host) - 1] = '\0';
-    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
-                 "TLS extensions length past the record");
-    expect_string(host, "", "overlong extensions clear output");
+	copy_valid_hello(hello);
+	hello[50] = 0x00;
+	hello[51] = 0x30;
+	memset(host, 'x', sizeof(host));
+	host[sizeof(host) - 1] = '\0';
+	expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
+	        "TLS extensions length past the record");
+	expect_string(host, "", "overlong extensions clear output");
 
-    copy_valid_hello(hello);
-    hello[59] = 0x00;
-    hello[60] = 0x14;
-    memset(host, 'x', sizeof(host));
-    host[sizeof(host) - 1] = '\0';
-    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
-                 "SNI name longer than the server-name list");
-    expect_string(host, "", "overlong SNI name clears output");
+	copy_valid_hello(hello);
+	hello[59] = 0x00;
+	hello[60] = 0x14;
+	memset(host, 'x', sizeof(host));
+	host[sizeof(host) - 1] = '\0';
+	expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
+	        "SNI name longer than the server-name list");
+	expect_string(host, "", "overlong SNI name clears output");
 
-    copy_valid_hello(hello);
-    hello[3] = 0x00;
-    hello[4] = 0x38;
-    memset(host, 'x', sizeof(host));
-    host[sizeof(host) - 1] = '\0';
-    expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
-                 "SNI name sitting past the TLS record");
-    expect_string(host, "", "name past the record is not accepted");
+	copy_valid_hello(hello);
+	hello[3] = 0x00;
+	hello[4] = 0x38;
+	memset(host, 'x', sizeof(host));
+	host[sizeof(host) - 1] = '\0';
+	expect_false(net_get_https_host(hello, sizeof(hello), host, sizeof(host)),
+	        "SNI name sitting past the TLS record");
+	expect_string(host, "", "name past the record is not accepted");
 
-    copy_valid_hello(hello);
-    memset(host, 'x', sizeof(host));
-    host[sizeof(host) - 1] = '\0';
-    expect_false(net_get_https_host(hello, 61, host, sizeof(host)),
-                 "ClientHello cut off inside the SNI name");
-    expect_string(host, "", "cut-off SNI name clears output");
+	copy_valid_hello(hello);
+	memset(host, 'x', sizeof(host));
+	host[sizeof(host) - 1] = '\0';
+	expect_false(net_get_https_host(hello, 61, host, sizeof(host)),
+	        "ClientHello cut off inside the SNI name");
+	expect_string(host, "", "cut-off SNI name clears output");
 }
 
 static void test_net_connect_failure_sets_invalid_fd(void)
 {
-    int fd = 12345;
-    expect_false(net_connect(&fd, "127.0.0.1", 1, 2), "connect to closed port fails");
-    if (fd != -1)
-    {
-        fprintf(stderr, "FAIL: failed connect should set fd=-1, got %d\n", fd);
-        failures++;
-    }
+	int fd = 12345;
+	expect_false(net_connect(&fd, "127.0.0.1", 1, 2), "connect to closed port fails");
+	if (fd != -1)
+	{
+		fprintf(stderr, "FAIL: failed connect should set fd=-1, got %d\n", fd);
+		failures++;
+	}
 }
 
 static void test_net_connect_success_loopback(void)
 {
-    int listen_fd = -1;
-    int client_fd = -1;
-    int accepted_fd = -1;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
+	int listen_fd = -1;
+	int client_fd = -1;
+	int accepted_fd = -1;
+	struct sockaddr_in addr;
+	socklen_t addr_len = sizeof(addr);
 
-    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_fd < 0)
-    {
-        return;
-    }
+	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (listen_fd < 0)
+	{
+		return;
+	}
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(0);
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = htons(0);
 
-    expect_true(bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0, "bind loopback listener");
-    expect_true(listen(listen_fd, 1) == 0, "listen loopback");
-    expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "getsockname loopback");
-    if (failures != 0)
-    {
-        close(listen_fd);
-        return;
-    }
+	expect_true(bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0, "bind loopback listener");
+	expect_true(listen(listen_fd, 1) == 0, "listen loopback");
+	expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "getsockname loopback");
+	if (failures != 0)
+	{
+		close(listen_fd);
+		return;
+	}
 
-    expect_true(net_connect(&client_fd, "127.0.0.1", ntohs(addr.sin_port), 2), "connect to loopback listener");
-    expect_true(client_fd >= 0, "successful connect returns valid fd");
-    if (client_fd >= 0)
-    {
-        accepted_fd = accept(listen_fd, NULL, NULL);
-        expect_true(accepted_fd >= 0, "accept loopback client");
-    }
+	expect_true(net_connect(&client_fd, "127.0.0.1", ntohs(addr.sin_port), 2), "connect to loopback listener");
+	expect_true(client_fd >= 0, "successful connect returns valid fd");
+	if (client_fd >= 0)
+	{
+		accepted_fd = accept(listen_fd, NULL, NULL);
+		expect_true(accepted_fd >= 0, "accept loopback client");
+	}
 
-    if (accepted_fd >= 0) close(accepted_fd);
-    if (client_fd >= 0) close(client_fd);
-    close(listen_fd);
+	if (accepted_fd >= 0)
+		close(accepted_fd);
+	if (client_fd >= 0)
+		close(client_fd);
+	close(listen_fd);
 }
 
 /* Connections that arrive before accept() runs must wait in the queue. */
 static void test_listen_backlog_absorbs_burst(void)
 {
-    enum { BURST = 64 };
-    int listen_fd = -1;
-    int clients[BURST];
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
-    int connected = 0;
-    int i;
+	enum
+	{
+		BURST = 64
+	};
+	int listen_fd = -1;
+	int clients[BURST];
+	struct sockaddr_in addr;
+	socklen_t addr_len = sizeof(addr);
+	int connected = 0;
+	int i;
 
-    expect_true(net_listen_ipv4(htonl(INADDR_LOOPBACK), 0, &listen_fd), "listen for burst");
-    if (listen_fd < 0)
-        return;
-    expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "burst getsockname");
+	expect_true(net_listen_ipv4(htonl(INADDR_LOOPBACK), 0, &listen_fd), "listen for burst");
+	if (listen_fd < 0)
+		return;
+	expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "burst getsockname");
 
-    for (i = 0; i < BURST; i++)
-    {
-        clients[i] = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-        if (clients[i] >= 0)
-            (void)connect(clients[i], (struct sockaddr *)&addr, sizeof(addr));
-    }
-    for (i = 0; i < BURST; i++)
-    {
-        struct pollfd pfd;
-        int err = 0;
-        socklen_t elen = sizeof(err);
-        if (clients[i] < 0)
-            continue;
-        pfd.fd = clients[i];
-        pfd.events = POLLOUT;
-        pfd.revents = 0;
-        if (poll(&pfd, 1, 300) == 1 &&
-            getsockopt(clients[i], SOL_SOCKET, SO_ERROR, &err, &elen) == 0 && err == 0)
-            connected++;
-    }
-    if (connected != BURST)
-        fprintf(stderr, "FAIL: burst connected %d of %d without accept\n", connected, BURST);
-    expect_true(connected == BURST, "listen backlog absorbs a burst");
+	for (i = 0; i < BURST; i++)
+	{
+		clients[i] = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+		if (clients[i] >= 0)
+			(void)connect(clients[i], (struct sockaddr *)&addr, sizeof(addr));
+	}
+	for (i = 0; i < BURST; i++)
+	{
+		struct pollfd pfd;
+		int err = 0;
+		socklen_t elen = sizeof(err);
+		if (clients[i] < 0)
+			continue;
+		pfd.fd = clients[i];
+		pfd.events = POLLOUT;
+		pfd.revents = 0;
+		if (poll(&pfd, 1, 300) == 1 &&
+		        getsockopt(clients[i], SOL_SOCKET, SO_ERROR, &err, &elen) == 0 && err == 0)
+			connected++;
+	}
+	if (connected != BURST)
+		fprintf(stderr, "FAIL: burst connected %d of %d without accept\n", connected, BURST);
+	expect_true(connected == BURST, "listen backlog absorbs a burst");
 
-    for (i = 0; i < BURST; i++)
-        if (clients[i] >= 0)
-            close(clients[i]);
-    close(listen_fd);
+	for (i = 0; i < BURST; i++)
+		if (clients[i] >= 0)
+			close(clients[i]);
+	close(listen_fd);
 }
 
 int main(void)
 {
-    log_set_quiet(1);
+	log_set_quiet(1);
 
-    test_http_host_valid();
-    test_http_without_host();
-    test_http_host_with_port();
-    test_http_host_lowercase_name();
-    test_http_host_trailing_space();
-    test_http_host_only_port();
-    test_http_host_without_terminator();
-    test_tls_sni_valid();
-    test_tls_sni_truncated_record();
-    test_tls_sni_malformed_extensions();
-    test_net_connect_failure_sets_invalid_fd();
-    test_net_connect_success_loopback();
-    test_listen_backlog_absorbs_burst();
+	test_http_host_valid();
+	test_http_without_host();
+	test_http_host_with_port();
+	test_http_host_lowercase_name();
+	test_http_host_trailing_space();
+	test_http_host_only_port();
+	test_http_host_without_terminator();
+	test_tls_sni_valid();
+	test_tls_sni_truncated_record();
+	test_tls_sni_malformed_extensions();
+	test_net_connect_failure_sets_invalid_fd();
+	test_net_connect_success_loopback();
+	test_listen_backlog_absorbs_burst();
 
-    return failures == 0 ? 0 : 1;
+	return failures == 0 ? 0 : 1;
 }

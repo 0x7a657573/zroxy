@@ -10,22 +10,27 @@
 #include <string.h>
 
 /* Wire name (255) + TYPE + CLASS + flag byte */
-#define DNSCACHE_KEY_MAX	264
+#define DNSCACHE_KEY_MAX 264
 
 typedef struct dnscache_entry
 {
-	struct dnscache_entry *hnext;	/* hash chain */
-	struct dnscache_entry *prev;	/* LRU, most recent at head */
+	struct dnscache_entry *hnext; /* hash chain */
+	struct dnscache_entry *prev;  /* LRU, most recent at head */
 	struct dnscache_entry *next;
 	uint32_t hash;
 	int64_t stored_ms;
 	int64_t expires_ms;
 	uint16_t key_len;
 	uint16_t len;
-	uint8_t data[];			/* key, then reply */
+	uint8_t data[]; /* key, then reply */
 } dnscache_entry;
 
-enum { FLIGHT_FREE = 0, FLIGHT_PENDING, FLIGHT_DONE };
+enum
+{
+	FLIGHT_FREE = 0,
+	FLIGHT_PENDING,
+	FLIGHT_DONE
+};
 
 struct dnscache_flight
 {
@@ -163,7 +168,7 @@ static dnscache_flight *flight_find_locked(dnscache_t *c, const uint8_t *key, si
 		dnscache_flight *f = &c->flights[i];
 		/* A finished flight stays allocated until its followers let go. */
 		if (f->state == FLIGHT_PENDING && f->hash == hash && f->key_len == key_len &&
-			memcmp(f->key, key, key_len) == 0)
+		        memcmp(f->key, key, key_len) == 0)
 			return f;
 	}
 	return NULL;
@@ -194,7 +199,7 @@ static void flight_release_locked(dnscache_flight *f)
 }
 
 dnscache_result dnscache_begin(dnscache_t *c, const uint8_t *query, size_t qlen, int64_t now_ms,
-		uint8_t *out, size_t cap, size_t *out_len, dnscache_flight **flight)
+        uint8_t *out, size_t cap, size_t *out_len, dnscache_flight **flight)
 {
 	uint8_t key[DNSCACHE_KEY_MAX];
 	size_t key_len;
@@ -261,7 +266,7 @@ dnscache_result dnscache_begin(dnscache_t *c, const uint8_t *query, size_t qlen,
 }
 
 static void store_locked(dnscache_t *c, const dnscache_flight *f, const uint8_t *resp, size_t len,
-		int64_t now_ms)
+        int64_t now_ms)
 {
 	uint32_t ttl;
 	uint32_t cap = DNSCACHE_MAX_TTL;
@@ -305,7 +310,7 @@ static void store_locked(dnscache_t *c, const dnscache_flight *f, const uint8_t 
 }
 
 void dnscache_finish(dnscache_t *c, dnscache_flight *f, const uint8_t *resp,
-		size_t stored, size_t full_len, int64_t now_ms)
+        size_t stored, size_t full_len, int64_t now_ms)
 {
 	if (!c || !f)
 		return;

@@ -42,8 +42,8 @@ static void greet(socks5_client *c, const uint8_t *method_reply, s5_step want, c
 static void test_greeting(void)
 {
 	socks5_client c;
-	static const uint8_t noauth[] = { 5, 1, 0 };
-	static const uint8_t withauth[] = { 5, 2, 0, 2 };
+	static const uint8_t noauth[] = {5, 1, 0};
+	static const uint8_t withauth[] = {5, 2, 0, 2};
 
 	expect(socks5_client_init(&c, NULL, NULL, "example.com", 443), "init");
 	expect_step(socks5_client_start(&c), S5_SEND, "greeting without auth");
@@ -67,10 +67,10 @@ static void test_greeting(void)
 static void test_greeting_errors(void)
 {
 	socks5_client c;
-	static const uint8_t bad_ver[] = { 4, 0 };
-	static const uint8_t none[] = { 5, 0xFF };
-	static const uint8_t gssapi[] = { 5, 1 };
-	static const uint8_t unoffered[] = { 5, 2 };
+	static const uint8_t bad_ver[] = {4, 0};
+	static const uint8_t none[] = {5, 0xFF};
+	static const uint8_t gssapi[] = {5, 1};
+	static const uint8_t unoffered[] = {5, 2};
 
 	socks5_client_init(&c, NULL, NULL, "example.com", 443);
 	greet(&c, bad_ver, S5_FAIL, "bad greeting version");
@@ -98,15 +98,15 @@ static void test_greeting_errors(void)
 static void test_auth(void)
 {
 	socks5_client c;
-	static const uint8_t method2[] = { 5, 2 };
-	static const uint8_t ok[] = { 1, 0 };
-	static const uint8_t bad[] = { 1, 1 };
-	static const uint8_t packet[] = { 1, 4, 'u', 's', 'e', 'r', 4, 'p', 'a', 's', 's' };
+	static const uint8_t method2[] = {5, 2};
+	static const uint8_t ok[] = {1, 0};
+	static const uint8_t bad[] = {1, 1};
+	static const uint8_t packet[] = {1, 4, 'u', 's', 'e', 'r', 4, 'p', 'a', 's', 's'};
 
 	socks5_client_init(&c, "user", "pass", "example.com", 443);
 	greet(&c, method2, S5_SEND, "auth sent");
 	expect(c.out_len == sizeof(packet) && memcmp(c.out, packet, sizeof(packet)) == 0,
-		"auth packet bytes");
+	        "auth packet bytes");
 	expect_step(socks5_client_sent(&c), S5_READ, "auth written");
 	expect(c.need == 2, "auth reply size");
 	expect_step(feed(&c, ok, 2), S5_SEND, "auth accepted queues request");
@@ -131,7 +131,7 @@ static void test_auth(void)
 static void test_long_credentials(void)
 {
 	socks5_client c;
-	static const uint8_t method2[] = { 5, 2 };
+	static const uint8_t method2[] = {5, 2};
 	char big[257];
 	char max[256];
 
@@ -154,21 +154,21 @@ static void test_long_credentials(void)
 static void test_request(void)
 {
 	socks5_client c;
-	static const uint8_t method0[] = { 5, 0 };
-	static const uint8_t domain[] = { 5, 1, 0, 3, 11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
-		0x01, 0xBB };
-	static const uint8_t ipv4[] = { 5, 1, 0, 1, 192, 0, 2, 1, 0x1F, 0x90 };
+	static const uint8_t method0[] = {5, 0};
+	static const uint8_t domain[] = {5, 1, 0, 3, 11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+	        0x01, 0xBB};
+	static const uint8_t ipv4[] = {5, 1, 0, 1, 192, 0, 2, 1, 0x1F, 0x90};
 	char host[300];
 
 	socks5_client_init(&c, NULL, NULL, "example.com", 443);
 	greet(&c, method0, S5_SEND, "domain request");
 	expect(c.out_len == sizeof(domain) && memcmp(c.out, domain, sizeof(domain)) == 0,
-		"domain request bytes");
+	        "domain request bytes");
 
 	socks5_client_init(&c, NULL, NULL, "192.0.2.1", 8080);
 	greet(&c, method0, S5_SEND, "ipv4 request");
 	expect(c.out_len == sizeof(ipv4) && memcmp(c.out, ipv4, sizeof(ipv4)) == 0,
-		"ipv4 request bytes");
+	        "ipv4 request bytes");
 
 	memset(host, 'h', 255);
 	host[255] = '\0';
@@ -190,7 +190,7 @@ static void test_request(void)
 /* Drive the codec to the connect-reply header with a no-auth server. */
 static void to_reply(socks5_client *c)
 {
-	static const uint8_t method0[] = { 5, 0 };
+	static const uint8_t method0[] = {5, 0};
 
 	socks5_client_init(c, NULL, NULL, "example.com", 443);
 	greet(c, method0, S5_SEND, "to reply");
@@ -201,14 +201,14 @@ static void to_reply(socks5_client *c)
 static void test_reply(void)
 {
 	socks5_client c;
-	static const uint8_t v4[] = { 5, 0, 0, 1 };
-	static const uint8_t v6[] = { 5, 0, 0, 4 };
-	static const uint8_t dom[] = { 5, 0, 0, 3 };
-	static const uint8_t refused[] = { 5, 5, 0, 1 };
-	static const uint8_t bad_ver[] = { 4, 0, 0, 1 };
-	static const uint8_t bad_atyp[] = { 5, 0, 0, 9 };
-	static const uint8_t zeros[32] = { 0 };
-	static const uint8_t len7[] = { 7 };
+	static const uint8_t v4[] = {5, 0, 0, 1};
+	static const uint8_t v6[] = {5, 0, 0, 4};
+	static const uint8_t dom[] = {5, 0, 0, 3};
+	static const uint8_t refused[] = {5, 5, 0, 1};
+	static const uint8_t bad_ver[] = {4, 0, 0, 1};
+	static const uint8_t bad_atyp[] = {5, 0, 0, 9};
+	static const uint8_t zeros[32] = {0};
+	static const uint8_t len7[] = {7};
 
 	to_reply(&c);
 	expect_step(feed(&c, v4, 4), S5_READ, "ipv4 reply header");
@@ -237,7 +237,7 @@ static void test_reply(void)
 	expect(c.error == S5_ERR_REFUSED && c.code == 5, "refused error");
 	expect(strstr(socks5_client_strerror(&c), "0x05") != NULL, "refused text has the code");
 	expect(strstr(socks5_client_strerror(&c), socks5_rep_name(5)) != NULL,
-		"refused text has the name");
+	        "refused text has the name");
 
 	to_reply(&c);
 	expect_step(feed(&c, bad_ver, 4), S5_FAIL, "bad reply version");
@@ -252,11 +252,11 @@ static void test_reply(void)
 static void test_misuse(void)
 {
 	socks5_client c;
-	static const uint8_t two[] = { 5, 0 };
+	static const uint8_t two[] = {5, 0};
 
 	to_reply(&c);
-	feed(&c, (const uint8_t[]){ 5, 0, 0, 1 }, 4);
-	feed(&c, (const uint8_t[6]){ 0 }, 6);
+	feed(&c, (const uint8_t[]){5, 0, 0, 1}, 4);
+	feed(&c, (const uint8_t[6]){0}, 6);
 	expect_step(socks5_client_sent(&c), S5_FAIL, "sent after done");
 
 	socks5_client_init(&c, NULL, NULL, "example.com", 443);
@@ -265,7 +265,7 @@ static void test_misuse(void)
 	expect_step(feed(&c, two, 1), S5_FAIL, "short feed");
 
 	expect(strlen(socks5_rep_name(0x00)) > 0 && strcmp(socks5_rep_name(0xEE), "unknown") == 0,
-		"rep names");
+	        "rep names");
 }
 
 int main(void)

@@ -31,51 +31,53 @@
 
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static struct {
-  int level;
-  int quiet;
+static struct
+{
+	int level;
+	int quiet;
 } L;
 
-
 static const char *level_names[] = {
-  "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"
-};
+        "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
 
-void log_set_level(int level) {
-  L.level = level;
+void log_set_level(int level)
+{
+	L.level = level;
 }
 
-
-void log_set_quiet(int enable) {
-  L.quiet = enable ? 1 : 0;
+void log_set_quiet(int enable)
+{
+	L.quiet = enable ? 1 : 0;
 }
 
+void log_log(int level, const char *file, int line, const char *fmt, ...)
+{
+	if (level < L.level)
+	{
+		return;
+	}
 
-void log_log(int level, const char *file, int line, const char *fmt, ...) {
-  if (level < L.level) {
-    return;
-  }
+	/* Acquire lock */
+	pthread_mutex_lock(&log_mutex);
 
-  /* Acquire lock */
-  pthread_mutex_lock(&log_mutex);
+	/* Get current time */
+	time_t t = time(NULL);
+	struct tm *lt = localtime(&t);
 
-  /* Get current time */
-  time_t t = time(NULL);
-  struct tm *lt = localtime(&t);
+	/* Log to stderr */
+	if (!L.quiet)
+	{
+		va_list args;
+		char buf[16];
+		buf[strftime(buf, sizeof(buf), "%H:%M:%S", lt)] = '\0';
+		fprintf(stderr, "%s %-5s %s:%d: ", buf, level_names[level], file, line);
+		va_start(args, fmt);
+		vfprintf(stderr, fmt, args);
+		va_end(args);
+		fprintf(stderr, "\n");
+		fflush(stderr);
+	}
 
-  /* Log to stderr */
-  if (!L.quiet) {
-    va_list args;
-    char buf[16];
-    buf[strftime(buf, sizeof(buf), "%H:%M:%S", lt)] = '\0';
-    fprintf(stderr, "%s %-5s %s:%d: ", buf, level_names[level], file, line);
-    va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
-    va_end(args);
-    fprintf(stderr, "\n");
-    fflush(stderr);
-  }
-
-  /* Release lock */
-  pthread_mutex_unlock(&log_mutex);
+	/* Release lock */
+	pthread_mutex_unlock(&log_mutex);
 }

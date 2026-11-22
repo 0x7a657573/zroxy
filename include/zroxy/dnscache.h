@@ -17,12 +17,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define DNSCACHE_ENTRIES	2048
-#define DNSCACHE_MAX_TTL	3600
+#define DNSCACHE_ENTRIES 2048
+#define DNSCACHE_MAX_TTL 3600
 /* NXDOMAIN and NODATA (RFC 2308) */
-#define DNSCACHE_NEG_TTL	300
+#define DNSCACHE_NEG_TTL 300
 /* Queries fetched at the same time; beyond this a query is forwarded alone. */
-#define DNSCACHE_FLIGHTS	64
+#define DNSCACHE_FLIGHTS 64
 
 typedef struct dnscache dnscache_t;
 typedef struct dnscache_flight dnscache_flight;
@@ -40,10 +40,10 @@ typedef struct
 
 typedef enum
 {
-	DNSCACHE_HIT = 0,	/* the reply is in out */
-	DNSCACHE_LEAD,		/* fetch it, then call dnscache_finish */
-	DNSCACHE_FOLLOW,	/* another request fetches it; attach to it, then dnscache_abandon_follower */
-	DNSCACHE_BYPASS		/* not cacheable or no flight slot: forward alone */
+	DNSCACHE_HIT = 0, /* the reply is in out */
+	DNSCACHE_LEAD,    /* fetch it, then call dnscache_finish */
+	DNSCACHE_FOLLOW,  /* another request fetches it; attach to it, then dnscache_abandon_follower */
+	DNSCACHE_BYPASS   /* not cacheable or no flight slot: forward alone */
 } dnscache_result;
 
 dnscache_t *dnscache_create(size_t max_entries);
@@ -54,7 +54,7 @@ void dnscache_free(dnscache_t *cache);
  * question and aged TTLs. LEAD and FOLLOW set *flight.
  */
 dnscache_result dnscache_begin(dnscache_t *cache, const uint8_t *query, size_t qlen, int64_t now_ms,
-		uint8_t *out, size_t cap, size_t *out_len, dnscache_flight **flight);
+        uint8_t *out, size_t cap, size_t *out_len, dnscache_flight **flight);
 
 /*
  * Leader: publish the reply (resp holds the first stored of full_len bytes;
@@ -62,7 +62,7 @@ dnscache_result dnscache_begin(dnscache_t *cache, const uint8_t *query, size_t q
  * are not given the reply; the caller hands it to them.
  */
 void dnscache_finish(dnscache_t *cache, dnscache_flight *flight, const uint8_t *resp,
-		size_t stored, size_t full_len, int64_t now_ms);
+        size_t stored, size_t full_len, int64_t now_ms);
 
 /* Release a follower once the caller has attached it to the leader. */
 void dnscache_abandon_follower(dnscache_t *cache, dnscache_flight *flight);

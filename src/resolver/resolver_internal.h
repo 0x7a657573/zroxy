@@ -13,7 +13,8 @@
 #define RESOLVER_BIND_MAX 32
 #define RESOLVER_GAI_ATTEMPTS 8
 
-typedef struct sni_bind_rec {
+typedef struct sni_bind_rec
+{
 	int used;
 	int wildcard;
 	uint32_t listener_id;
@@ -21,7 +22,8 @@ typedef struct sni_bind_rec {
 	struct in_addr ip;
 } sni_bind_rec;
 
-typedef struct resolver_pool {
+typedef struct resolver_pool
+{
 	pthread_mutex_t mu;
 	pthread_cond_t work_cv;
 	pthread_cond_t infra_cv;
@@ -79,7 +81,7 @@ typedef struct resolver_pool {
 extern resolver_pool *g_resolver_pool;
 
 int resolver_copy_numeric(const char *host, uint16_t port, resolver_addr *out,
-		size_t *count);
+        size_t *count);
 void resolver_apply_port_one(resolver_addr *addr, uint16_t port);
 void resolver_enqueue(resolve_slot **head, resolve_slot **tail, resolve_slot *slot);
 uint64_t resolver_alloc_req_id_locked(resolver_pool *pool);

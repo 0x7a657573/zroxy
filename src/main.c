@@ -34,8 +34,8 @@ typedef struct
 	const char *name;
 	void *handle;
 	void (*stop)(void *handle);
-	void (*reload)(void *handle);	/* NULL when SIGHUP means nothing to it */
-}service_t;
+	void (*reload)(void *handle); /* NULL when SIGHUP means nothing to it */
+} service_t;
 
 static void reload_whitelist(void *h) { filter_reload(h); }
 static void stop_monitor(void *h) { monitor_stop(h); }
@@ -114,9 +114,9 @@ int main(int argc, const char **argv)
 	sigaddset(&sigs, SIGHUP);
 	pthread_sigmask(SIG_BLOCK, &sigs, NULL);
 
-	bool args_ok = args_init(&prg_setting,argc,argv);
+	bool args_ok = args_init(&prg_setting, argc, argv);
 	args_scrub_argv();
-	if(args_ok==false)
+	if (args_ok == false)
 	{
 		args_print_usage();
 		return 1;
@@ -136,17 +136,16 @@ int main(int argc, const char **argv)
 	if (listener_count > 0)
 	{
 		fdlimit_plan plan = {
-			.sni_conns = prg_setting.snimaxconn,
-			.sni_listeners = (int)listener_count,
-			.dns_enabled = prg_setting.dnsserver != NULL,
-			.dns_upstreams = prg_setting.dnsserver ? prg_setting.dnsserver->upstream_connections : 0,
-			.monitor_enabled = prg_setting.monitor_port != 0
-		};
+		        .sni_conns = prg_setting.snimaxconn,
+		        .sni_listeners = (int)listener_count,
+		        .dns_enabled = prg_setting.dnsserver != NULL,
+		        .dns_upstreams = prg_setting.dnsserver ? prg_setting.dnsserver->upstream_connections : 0,
+		        .monitor_enabled = prg_setting.monitor_port != 0};
 		int cap = prg_setting.snimaxconn;
 		unsigned long soft = fdlimit_apply(&plan, &cap);
 		if (cap < prg_setting.snimaxconn)
 			log_warn("open-file limit %lu serves only %d SNI connections, not the configured %d; raise LimitNOFILE or ulimit -n",
-				soft, cap, prg_setting.snimaxconn);
+			        soft, cap, prg_setting.snimaxconn);
 		prg_setting.snimaxconn = cap;
 	}
 
@@ -159,9 +158,9 @@ int main(int argc, const char **argv)
 	}
 
 	/*check white list before listeners so a bad file does not become an open proxy*/
-	if(prg_setting.WhitePath)
+	if (prg_setting.WhitePath)
 	{
-		log_info("load white list from %s",prg_setting.WhitePath);
+		log_info("load white list from %s", prg_setting.WhitePath);
 		whitelist = filter_init(prg_setting.WhitePath);
 		free(prg_setting.WhitePath);
 		prg_setting.WhitePath = NULL;
@@ -170,11 +169,11 @@ int main(int argc, const char **argv)
 			log_error("whitelist load failed");
 			goto out;
 		}
-		service_add(services, &service_count, &(service_t){ "whitelist", whitelist, stop_whitelist, reload_whitelist });
+		service_add(services, &service_count, &(service_t){"whitelist", whitelist, stop_whitelist, reload_whitelist});
 	}
 
 	/*check Monitor*/
-	if(prg_setting.monitor_port)
+	if (prg_setting.monitor_port)
 	{
 		const char *bind_ip = prg_setting.monitor_bind[0] ? prg_setting.monitor_bind : "127.0.0.1";
 		log_info("enable monitor on %s:%i", bind_ip, prg_setting.monitor_port);
@@ -185,27 +184,27 @@ int main(int argc, const char **argv)
 			log_error("monitor failed to start");
 			goto out;
 		}
-		service_add(services, &service_count, &(service_t){ "monitor", monitor, stop_monitor, NULL });
+		service_add(services, &service_count, &(service_t){"monitor", monitor, stop_monitor, NULL});
 	}
 
-	if(monitor && whitelist)
+	if (monitor && whitelist)
 	{
 		if (!monitor_add_section(monitor, "Whitelist", filter_stats_json, whitelist))
 			log_error("monitor whitelist section failed");
 	}
 
-	if(monitor)
+	if (monitor)
 	{
 		if (!monitor_add_section(monitor, "Resolver", resolver_stats_json, NULL))
 			log_error("monitor resolver section failed");
 	}
 
 	/*check for dns server*/
-	if(prg_setting.dnsserver)
+	if (prg_setting.dnsserver)
 	{
-		stats_init(&DnsStat,"DNS_Server");
-		if(monitor)
-			monitor_attach_stat(monitor,DnsStat);
+		stats_init(&DnsStat, "DNS_Server");
+		if (monitor)
+			monitor_attach_stat(monitor, DnsStat);
 		prg_setting.dnsserver->Stat = DnsStat;
 
 		prg_setting.dnsserver->whitelist = whitelist;
@@ -217,15 +216,15 @@ int main(int argc, const char **argv)
 			log_error("dns server failed to start");
 			goto out;
 		}
-		service_add(services, &service_count, &(service_t){ "dns", dns, stop_dns, NULL });
+		service_add(services, &service_count, &(service_t){"dns", dns, stop_dns, NULL});
 	}
 
-	if(listener_count > 0 || monitor)
+	if (listener_count > 0 || monitor)
 	{
-		stats_init(&SniStat,"SNI_Server");
-		if(monitor)
+		stats_init(&SniStat, "SNI_Server");
+		if (monitor)
 		{
-			monitor_attach_stat(monitor,SniStat);
+			monitor_attach_stat(monitor, SniStat);
 			stats_set_extra(SniStat, sni_stats_json, NULL);
 		}
 	}
@@ -241,9 +240,9 @@ int main(int argc, const char **argv)
 	Xconf.acl = prg_setting.sacl;
 	Xconf.acl_count = prg_setting.sacl_count;
 	/*if Set Socks proxy*/
-	if(prg_setting.socks)
+	if (prg_setting.socks)
 	{
-		log_info("enable socks on %s:%i",prg_setting.socks->host,prg_setting.socks->port);
+		log_info("enable socks on %s:%i", prg_setting.socks->host, prg_setting.socks->port);
 		Xconf.Socks = prg_setting.socks;
 	}
 
@@ -257,7 +256,7 @@ int main(int argc, const char **argv)
 			log_error("sni listener failed on %s:%u", Xconf.Port.bindip, (unsigned)Xconf.Port.local_port);
 			goto out;
 		}
-		service_add(services, &service_count, &(service_t){ "sni", ls, stop_sni, NULL });
+		service_add(services, &service_count, &(service_t){"sni", ls, stop_sni, NULL});
 	}
 	args_free_ports(&prg_setting); /*free Port List*/
 

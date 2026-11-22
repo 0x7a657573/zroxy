@@ -60,19 +60,18 @@ static uint32_t g_sni_close[SNI_CLOSE_COUNT];
 static uint32_t g_sni_relayed;
 
 static const char *const g_sni_close_keys[SNI_CLOSE_COUNT] = {
-	[SNI_CLOSE_REFUSED] = "Refused",
-	[SNI_CLOSE_NO_HOSTNAME] = "NoHostname",
-	[SNI_CLOSE_BLOCKED] = "Blocked",
-	[SNI_CLOSE_UNSAFE] = "UnsafeDestination",
-	[SNI_CLOSE_RESOLVE] = "ResolveFailures",
-	[SNI_CLOSE_SOCKS] = "SocksFailures",
-	[SNI_CLOSE_CONNECT] = "ConnectFailures",
-	[SNI_CLOSE_HANDSHAKE_TIMEOUT] = "HandshakeTimeouts",
-	[SNI_CLOSE_IDLE_TIMEOUT] = "IdleTimeouts",
-	[SNI_CLOSE_STALL_TIMEOUT] = "StallTimeouts",
-	[SNI_CLOSE_EVICTED] = "Evicted",
-	[SNI_CLOSE_ACL_DENIED] = "AclDenied"
-};
+        [SNI_CLOSE_REFUSED] = "Refused",
+        [SNI_CLOSE_NO_HOSTNAME] = "NoHostname",
+        [SNI_CLOSE_BLOCKED] = "Blocked",
+        [SNI_CLOSE_UNSAFE] = "UnsafeDestination",
+        [SNI_CLOSE_RESOLVE] = "ResolveFailures",
+        [SNI_CLOSE_SOCKS] = "SocksFailures",
+        [SNI_CLOSE_CONNECT] = "ConnectFailures",
+        [SNI_CLOSE_HANDSHAKE_TIMEOUT] = "HandshakeTimeouts",
+        [SNI_CLOSE_IDLE_TIMEOUT] = "IdleTimeouts",
+        [SNI_CLOSE_STALL_TIMEOUT] = "StallTimeouts",
+        [SNI_CLOSE_EVICTED] = "Evicted",
+        [SNI_CLOSE_ACL_DENIED] = "AclDenied"};
 
 void sni_count_relayed(void)
 {
@@ -97,16 +96,17 @@ bool sni_stats_json(void *ctx, char **ptr, char *end)
 		return false;
 	left = (size_t)(end - *ptr);
 	n = snprintf(*ptr, left, ",\n\"ConnectionLimit\" : %d,\n"
-		"\"Relayed\" : %" PRIu32,
-		sni_conn_limit(), __atomic_load_n(&g_sni_relayed, __ATOMIC_RELAXED));
+	                         "\"Relayed\" : %" PRIu32,
+	        sni_conn_limit(), __atomic_load_n(&g_sni_relayed, __ATOMIC_RELAXED));
 	if (n < 0 || (size_t)n >= left)
 		return false;
 	*ptr += n;
-	for (reason = SNI_CLOSE_REFUSED; reason < SNI_CLOSE_COUNT; reason++) {
+	for (reason = SNI_CLOSE_REFUSED; reason < SNI_CLOSE_COUNT; reason++)
+	{
 		left = (size_t)(end - *ptr);
 		n = snprintf(*ptr, left, ",\n\"%s\" : %" PRIu32,
-			g_sni_close_keys[reason],
-			__atomic_load_n(&g_sni_close[reason], __ATOMIC_RELAXED));
+		        g_sni_close_keys[reason],
+		        __atomic_load_n(&g_sni_close[reason], __ATOMIC_RELAXED));
 		if (n < 0 || (size_t)n >= left)
 			return false;
 		*ptr += n;
@@ -159,7 +159,8 @@ void sni_conn_kill(sni_engine *e, sni_conn *c, int reason)
 		return;
 	c->dead = 1;
 	hello_unlink(e, c);
-	if (c->pending_req_id != 0) {
+	if (c->pending_req_id != 0)
+	{
 		resolver_cancel(c->resolve_slot, c->pending_req_id);
 		c->pending_req_id = 0;
 	}
@@ -171,7 +172,8 @@ void sni_conn_kill(sni_engine *e, sni_conn *c, int reason)
 	count_close(reason);
 	if (c->close_stats)
 		stats_close_connection(c->cfg.sta, c->rx, c->tx);
-	if (c->slot_held) {
+	if (c->slot_held)
+	{
 		sni_conn_release();
 		c->slot_held = 0;
 	}
@@ -192,20 +194,29 @@ bool sni_conn_arm(sni_engine *e, sni_conn *c)
 	uint32_t uin = 0;
 	if (c->dead)
 		return true;
-	if (c->state == SNI_ST_HELLO) {
+	if (c->state == SNI_ST_HELLO)
+	{
 		if (!c->client_eof && c->hello_len < SNI_HELLO_CAP)
 			cin |= SNI_EV_IN;
-	} else if (c->state == SNI_ST_RESOLVE) {
+	}
+	else if (c->state == SNI_ST_RESOLVE)
+	{
 		cin |= SNI_EV_ARMED;
-	} else if (c->state == SNI_ST_CONNECT) {
+	}
+	else if (c->state == SNI_ST_CONNECT)
+	{
 		cin |= SNI_EV_ARMED;
 		uin |= SNI_EV_OUT;
-	} else if (c->state == SNI_ST_SOCKS) {
+	}
+	else if (c->state == SNI_ST_SOCKS)
+	{
 		if (c->socks_step == S5_SEND)
 			uin |= SNI_EV_OUT;
 		else if (c->socks_step == S5_READ)
 			uin |= SNI_EV_IN;
-	} else if (c->state == SNI_ST_RELAY) {
+	}
+	else if (c->state == SNI_ST_RELAY)
+	{
 		if (!c->client_eof && c->c2u_off == c->c2u_len)
 			cin |= SNI_EV_IN;
 		if (!c->client_shut && c->u2c_off < c->u2c_len)
@@ -225,9 +236,11 @@ bool sni_conn_arm(sni_engine *e, sni_conn *c)
 static void reap(sni_engine *e)
 {
 	sni_conn **pp = &e->head;
-	while (*pp) {
+	while (*pp)
+	{
 		sni_conn *c = *pp;
-		if (!c->dead) {
+		if (!c->dead)
+		{
 			pp = &c->next;
 			continue;
 		}
@@ -287,16 +300,19 @@ static bool host_ready(sni_engine *e, sni_conn *c)
 	char norm[RESOLVER_HOST_MAX + 1];
 	if (!net_get_host(c->hello, c->hello_len, raw, (uint16_t)ZROXY_MAX_HOSTNAME))
 		return false;
-	if (!resolver_normalize(raw, norm, sizeof(norm)) || !copy_host(c->host, norm)) {
+	if (!resolver_normalize(raw, norm, sizeof(norm)) || !copy_host(c->host, norm))
+	{
 		sni_conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 		return true;
 	}
-	if (c->cfg.wlist && filter_match(c->cfg.wlist, c->host) == false) {
+	if (c->cfg.wlist && filter_match(c->cfg.wlist, c->host) == false)
+	{
 		log_trace("SNI filter Host { %s }", c->host);
 		sni_conn_kill(e, c, SNI_CLOSE_BLOCKED);
 		return true;
 	}
-	if (net_is_ip_literal(c->host)) {
+	if (net_is_ip_literal(c->host))
+	{
 		log_trace("SNI we can't support IP address");
 		sni_conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 		return true;
@@ -309,10 +325,12 @@ static bool host_ready(sni_engine *e, sni_conn *c)
 static void hello_pump(sni_engine *e, sni_conn *c)
 {
 	int guard = 0;
-	while (!c->dead && guard++ < 100000) {
+	while (!c->dead && guard++ < 100000)
+	{
 		uint32_t before;
 		int rr;
-		if (c->hello_len >= SNI_HELLO_CAP) {
+		if (c->hello_len >= SNI_HELLO_CAP)
+		{
 			log_error("Host Buffer OverFlow");
 			sni_conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 			return;
@@ -321,7 +339,8 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 		rr = sni_read_some(c->client_fd, c->hello, SNI_HELLO_CAP, &c->hello_len);
 		if (rr == 0)
 			break;
-		if (rr < 0) {
+		if (rr < 0)
+		{
 			sni_conn_kill(e, c, SNI_CLOSE_NO_HOSTNAME);
 			return;
 		}
@@ -336,22 +355,26 @@ static void hello_pump(sni_engine *e, sni_conn *c)
 
 static void pump(sni_engine *e, sni_conn *c, int fd, uint32_t ev)
 {
-	if (c->state == SNI_ST_HELLO) {
+	if (c->state == SNI_ST_HELLO)
+	{
 		if (fd == c->client_fd)
 			hello_pump(e, c);
 		return;
 	}
-	if (c->state == SNI_ST_RESOLVE || c->state == SNI_ST_CONNECT) {
-		if (fd == c->client_fd && (ev & (SNI_EV_ERR | SNI_EV_HUP)) != 0) {
+	if (c->state == SNI_ST_RESOLVE || c->state == SNI_ST_CONNECT)
+	{
+		if (fd == c->client_fd && (ev & (SNI_EV_ERR | SNI_EV_HUP)) != 0)
+		{
 			sni_conn_kill(e, c, SNI_CLOSE_NONE);
 			return;
 		}
 		if (c->state == SNI_ST_CONNECT && fd == c->up_fd &&
-				(ev & (SNI_EV_OUT | SNI_EV_ERR | SNI_EV_HUP)) != 0)
+		        (ev & (SNI_EV_OUT | SNI_EV_ERR | SNI_EV_HUP)) != 0)
 			sni_connect_pump(e, c, ev);
 		return;
 	}
-	if (c->state == SNI_ST_SOCKS) {
+	if (c->state == SNI_ST_SOCKS)
+	{
 		if (fd == c->up_fd)
 			sni_socks_pump(e, c);
 		return;
@@ -365,7 +388,8 @@ static bool conn_start(sni_engine *e, sni_conn *c)
 	c->next = e->head;
 	e->head = c;
 	hello_link(e, c);
-	if (!sni_conn_arm(e, c)) {
+	if (!sni_conn_arm(e, c))
+	{
 		sni_conn_kill(e, c, SNI_CLOSE_REFUSED);
 		return false;
 	}
@@ -382,9 +406,10 @@ static void accept_pause(sni_engine *e)
 
 	if (now < 0)
 		return;
-	if (now >= e->accept_log_at) {
+	if (now >= e->accept_log_at)
+	{
 		log_error("server accept() out of file descriptors, pausing accept for %d ms",
-			SNI_ACCEPT_PAUSE_MS);
+		        SNI_ACCEPT_PAUSE_MS);
 		e->accept_log_at = now + SNI_ACCEPT_LOG_MS;
 	}
 	(void)sni_watch(e, e->listen_fd, 0, &e->listen_interest, &e->listen_tag);
@@ -405,9 +430,11 @@ static void accept_resume(sni_engine *e)
 	e->accept_paused = 0;
 	if (e->listen_fd < 0)
 		return;
-	if (!sni_watch(e, e->listen_fd, SNI_EV_IN, &e->listen_interest, &e->listen_tag)) {
+	if (!sni_watch(e, e->listen_fd, SNI_EV_IN, &e->listen_interest, &e->listen_tag))
+	{
 		log_error("sni listener re-arm failed: %s", strerror(errno));
-		if (now >= 0) {
+		if (now >= 0)
+		{
 			e->accept_paused = 1;
 			e->accept_resume_at = now + SNI_ACCEPT_PAUSE_MS;
 		}
@@ -447,40 +474,46 @@ static bool peer_allowed(const sni_engine *e, const struct sockaddr_storage *pee
 	if (peer->ss_family != AF_INET)
 		return false;
 	return acl_allows(e->cfg.acl, e->cfg.acl_count,
-		ntohl(((const struct sockaddr_in *)peer)->sin_addr.s_addr));
+	        ntohl(((const struct sockaddr_in *)peer)->sin_addr.s_addr));
 }
 
 static void accept_clients(sni_engine *e)
 {
-	for (;;) {
+	for (;;)
+	{
 		struct sockaddr_storage peer;
 		int fd;
 		sni_conn *c;
 		memset(&peer, 0, sizeof(peer));
 		fd = sni_io_accept(e->listen_fd, &peer);
-		if (fd < 0) {
+		if (fd < 0)
+		{
 			if (errno == EINTR)
 				continue;
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
 				break;
-			if (errno == EMFILE || errno == ENFILE) {
+			if (errno == EMFILE || errno == ENFILE)
+			{
 				accept_pause(e);
 				break;
 			}
 			log_error("server accept() %i: %s", errno, strerror(errno));
 			break;
 		}
-		if (!peer_allowed(e, &peer)) {
+		if (!peer_allowed(e, &peer))
+		{
 			count_close(SNI_CLOSE_ACL_DENIED);
 			close(fd);
 			continue;
 		}
-		if (!sni_set_nb_cloexec(fd)) {
+		if (!sni_set_nb_cloexec(fd))
+		{
 			count_close(SNI_CLOSE_REFUSED);
 			close(fd);
 			continue;
 		}
-		if (!take_slot(e)) {
+		if (!take_slot(e))
+		{
 			log_error("refusing SNI connection");
 			count_close(SNI_CLOSE_REFUSED);
 			close(fd);
@@ -488,7 +521,8 @@ static void accept_clients(sni_engine *e)
 		}
 		(void)net_set_nodelay(fd);
 		c = conn_new(e, fd);
-		if (!c) {
+		if (!c)
+		{
 			log_error("malloc failed for sni connection");
 			count_close(SNI_CLOSE_REFUSED);
 			sni_conn_release();
@@ -498,7 +532,8 @@ static void accept_clients(sni_engine *e)
 		c->slot_held = 1;
 		if (!conn_start(e, c))
 			continue;
-		if (e->cfg.sta) {
+		if (e->cfg.sta)
+		{
 			stats_open_connection(e->cfg.sta);
 			c->close_stats = 1;
 		}
@@ -508,7 +543,8 @@ static void accept_clients(sni_engine *e)
 static void drain_wake(sni_engine *e)
 {
 	char buf[32];
-	for (;;) {
+	for (;;)
+	{
 		ssize_t n = read(e->wake_r, buf, sizeof(buf));
 		if (n < 0 && errno == EINTR)
 			continue;
@@ -523,16 +559,19 @@ static void dispatch_one(sni_engine *e, const sni_ready *ev)
 	sni_conn *c;
 	if (!tag)
 		return;
-	if (tag->kind == SNI_TAG_WAKE) {
+	if (tag->kind == SNI_TAG_WAKE)
+	{
 		drain_wake(e);
 		e->stop = 1;
 		return;
 	}
-	if (tag->kind == SNI_TAG_SINK) {
+	if (tag->kind == SNI_TAG_SINK)
+	{
 		sni_drain_resolve(e);
 		return;
 	}
-	if (tag->kind == SNI_TAG_LISTEN) {
+	if (tag->kind == SNI_TAG_LISTEN)
+	{
 		accept_clients(e);
 		return;
 	}
@@ -563,7 +602,8 @@ static void consider(int64_t value, int64_t *best, int *have)
 
 static int64_t handshake_due(const sni_conn *c)
 {
-	if (c->state == SNI_ST_HELLO) {
+	if (c->state == SNI_ST_HELLO)
+	{
 		int64_t idle = c->last_hello + (int64_t)hello_idle_ms();
 		return c->hello_abs < idle ? c->hello_abs : idle;
 	}
@@ -582,17 +622,21 @@ static int engine_timeout(sni_engine *e)
 	int have = 0;
 	if (now < 0)
 		return 1000;
-	for (c = e->head; c != NULL; c = c->next) {
+	for (c = e->head; c != NULL; c = c->next)
+	{
 		if (c->dead)
 			continue;
-		if (c->state == SNI_ST_RELAY) {
+		if (c->state == SNI_ST_RELAY)
+		{
 			if (c->c2u_off < c->c2u_len)
 				consider(c->c2u_by > 0 ? c->c2u_by : now, &best, &have);
 			if (c->u2c_off < c->u2c_len)
 				consider(c->u2c_by > 0 ? c->u2c_by : now, &best, &have);
 			if (c->c2u_off == c->c2u_len && c->u2c_off == c->u2c_len)
 				consider(c->idle_at, &best, &have);
-		} else {
+		}
+		else
+		{
 			consider(handshake_due(c), &best, &have);
 		}
 	}
@@ -613,25 +657,29 @@ static void expire_conns(sni_engine *e)
 	int64_t now = net_mono_ms();
 	if (now < 0)
 		return;
-	for (c = e->head; c != NULL; c = c->next) {
+	for (c = e->head; c != NULL; c = c->next)
+	{
 		int64_t due;
 		if (c->dead)
 			continue;
-		if (c->state == SNI_ST_RELAY) {
-			if (c->c2u_off < c->c2u_len) {
+		if (c->state == SNI_ST_RELAY)
+		{
+			if (c->c2u_off < c->c2u_len)
+			{
 				if (c->c2u_by == 0)
 					c->c2u_by = now + (int64_t)c->io_ms;
 				if (now >= c->c2u_by)
 					conn_timeout(e, c, SNI_CLOSE_STALL_TIMEOUT);
 			}
-			if (!c->dead && c->u2c_off < c->u2c_len) {
+			if (!c->dead && c->u2c_off < c->u2c_len)
+			{
 				if (c->u2c_by == 0)
 					c->u2c_by = now + (int64_t)c->io_ms;
 				if (now >= c->u2c_by)
 					conn_timeout(e, c, SNI_CLOSE_STALL_TIMEOUT);
 			}
 			if (!c->dead && c->c2u_off == c->c2u_len && c->u2c_off == c->u2c_len &&
-					!c->touched && now >= c->idle_at)
+			        !c->touched && now >= c->idle_at)
 				conn_timeout(e, c, SNI_CLOSE_IDLE_TIMEOUT);
 			continue;
 		}
@@ -644,7 +692,8 @@ static void expire_conns(sni_engine *e)
 static void sni_engine_run(sni_engine *e)
 {
 	sni_ready ready[64];
-	while (!e->stop) {
+	while (!e->stop)
+	{
 		sni_conn *c;
 		int n;
 		int i;
@@ -654,10 +703,12 @@ static void sni_engine_run(sni_engine *e)
 		if (e->listen_fd < 0 && e->head == NULL)
 			break;
 		n = sni_react_wait(e, ready, 64, engine_timeout(e));
-		if (n < 0) {
+		if (n < 0)
+		{
 			if (errno == EINTR)
 				n = 0;
-			else {
+			else
+			{
 				log_error("sni event wait failed: %s", strerror(errno));
 				break;
 			}
@@ -676,7 +727,8 @@ static void sni_engine_run(sni_engine *e)
 			sni_conn_kill(e, c, SNI_CLOSE_NONE);
 	}
 	reap(e);
-	if (e->sink && e->sink_interest != 0) {
+	if (e->sink && e->sink_interest != 0)
+	{
 		sni_react_del(e, e->sink->pipe_read);
 		e->sink_interest = 0;
 	}
@@ -686,8 +738,10 @@ static void sni_engine_run(sni_engine *e)
 static void sni_engine_deinit(sni_engine *e)
 {
 	sni_conn *c = e->head;
-	if (e->sink) {
-		if (e->sink_interest != 0) {
+	if (e->sink)
+	{
+		if (e->sink_interest != 0)
+		{
 			sni_react_del(e, e->sink->pipe_read);
 			e->sink_interest = 0;
 		}
@@ -696,7 +750,8 @@ static void sni_engine_deinit(sni_engine *e)
 		resolver_sink_release(e->sink);
 		e->sink = NULL;
 	}
-	while (c) {
+	while (c)
+	{
 		sni_conn *next = c->next;
 		if (!c->dead)
 			sni_conn_kill(e, c, SNI_CLOSE_NONE);
@@ -704,15 +759,18 @@ static void sni_engine_deinit(sni_engine *e)
 		c = next;
 	}
 	e->head = NULL;
-	if (e->wake_r >= 0) {
+	if (e->wake_r >= 0)
+	{
 		close(e->wake_r);
 		e->wake_r = -1;
 	}
-	if (e->wake_w >= 0) {
+	if (e->wake_w >= 0)
+	{
 		close(e->wake_w);
 		e->wake_w = -1;
 	}
-	if (e->listen_fd >= 0) {
+	if (e->listen_fd >= 0)
+	{
 		close(e->listen_fd);
 		e->listen_fd = -1;
 	}
@@ -740,7 +798,7 @@ static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg
 	e->sink_tag.eng = e;
 	e->sink_tag.fd = -1;
 	if (!resolver_sink_open(listen_fd >= 0 ? RESOLVER_SINK_LISTENER : RESOLVER_SINK_DIRECT,
-			&e->sink))
+	            &e->sink))
 		goto fail;
 	resolver_watch_bind(e->sink->listener_id, e->cfg.Port.bindip, e->cfg.Port.local_port);
 	if (!reactor_open(&e->re, SNI_POLL_MAX, SNI_USE_POLL))
@@ -757,7 +815,8 @@ static bool sni_engine_init(sni_engine *e, int listen_fd, const SniServer_t *cfg
 	e->sink_tag.fd = e->sink->pipe_read;
 	if (!sni_watch(e, e->sink->pipe_read, SNI_EV_IN, &e->sink_interest, &e->sink_tag))
 		goto fail;
-	if (listen_fd >= 0) {
+	if (listen_fd >= 0)
+	{
 		e->listen_fd = listen_fd;
 		listen_fd = -1;
 		if (!sni_set_nb_cloexec(e->listen_fd))
@@ -794,13 +853,15 @@ static void *engine_thread(void *arg)
 	SniServer_t cfg = boot->cfg;
 	sni_engine eng;
 	free(boot);
-	if (!sni_engine_init(&eng, fd, &cfg)) {
+	if (!sni_engine_init(&eng, fd, &cfg))
+	{
 		publish_listener(ls, NULL, 0);
 		return NULL;
 	}
 	publish_listener(ls, &eng, 1);
 	sni_engine_run(&eng);
-	if (ls) {
+	if (ls)
+	{
 		pthread_mutex_lock(&ls->mu);
 		ls->sink = eng.sink;
 		eng.sink = NULL;
@@ -817,7 +878,8 @@ static void request_stop(sni_engine *e)
 	ssize_t n;
 	if (!e || e->wake_w < 0)
 		return;
-	do {
+	do
+	{
 		n = write(e->wake_w, &byte, 1);
 	} while (n < 0 && errno == EINTR);
 }
@@ -832,13 +894,15 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 		return false;
 	*out = NULL;
 	ip = inet_addr(cfg->Port.bindip);
-	if (!net_listen_ipv4(ip, cfg->Port.local_port, &fd)) {
+	if (!net_listen_ipv4(ip, cfg->Port.local_port, &fd))
+	{
 		log_error("can not listen on Port %s:%i", cfg->Port.bindip, cfg->Port.local_port);
 		return false;
 	}
 	log_info("socket listen on %s:%d", cfg->Port.bindip, cfg->Port.local_port);
 	ls = (sni_listener *)calloc(1, sizeof(*ls));
-	if (!ls) {
+	if (!ls)
+	{
 		close(fd);
 		return false;
 	}
@@ -852,7 +916,8 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 	boot->listen_fd = fd;
 	boot->cfg = *cfg;
 	boot->joinable = ls;
-	if (pthread_create(&ls->thread, NULL, engine_thread, boot) != 0) {
+	if (pthread_create(&ls->thread, NULL, engine_thread, boot) != 0)
+	{
 		log_error("sni listener thread create failed");
 		goto fail_boot;
 	}
@@ -861,7 +926,8 @@ bool sni_listener_open(const SniServer_t *cfg, sni_listener **out)
 	while (!ls->ready)
 		pthread_cond_wait(&ls->cv, &ls->mu);
 	pthread_mutex_unlock(&ls->mu);
-	if (!ls->ok) {
+	if (!ls->ok)
+	{
 		pthread_join(ls->thread, NULL);
 		goto fail_cv;
 	}
@@ -894,7 +960,8 @@ void sni_listener_close(sni_listener *ls)
 		request_stop(ls->eng);
 	pthread_mutex_unlock(&ls->mu);
 	pthread_join(ls->thread, NULL);
-	if (ls->sink) {
+	if (ls->sink)
+	{
 		resolver_sink_release(ls->sink);
 		ls->sink = NULL;
 	}
@@ -913,25 +980,29 @@ void sni_connection_run(sniclient_t *client)
 		return;
 	fd = client->connid;
 	client->connid = -1;
-	if (fd < 0 || !sni_set_nb_cloexec(fd)) {
+	if (fd < 0 || !sni_set_nb_cloexec(fd))
+	{
 		if (fd >= 0)
 			close(fd);
 		stats_close_connection(client->SniConfig.sta, 0, 0);
 		return;
 	}
-	if (!sni_engine_init(&eng, -1, &client->SniConfig)) {
+	if (!sni_engine_init(&eng, -1, &client->SniConfig))
+	{
 		close(fd);
 		stats_close_connection(client->SniConfig.sta, 0, 0);
 		return;
 	}
 	c = conn_new(&eng, fd);
-	if (!c) {
+	if (!c)
+	{
 		close(fd);
 		stats_close_connection(client->SniConfig.sta, 0, 0);
 		sni_engine_deinit(&eng);
 		return;
 	}
-	if (!conn_start(&eng, c)) {
+	if (!conn_start(&eng, c))
+	{
 		stats_close_connection(client->SniConfig.sta, 0, 0);
 		sni_engine_run(&eng);
 		sni_engine_deinit(&eng);
@@ -954,4 +1025,3 @@ void *sni_client_handler(void *arg)
 	return NULL;
 }
 #endif /* SNI_TEST_HOOKS */
-

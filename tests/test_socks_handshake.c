@@ -20,683 +20,680 @@ static int failures = 0;
 
 static void expect_true(bool value, const char *name)
 {
-    if (!value)
-    {
-        fprintf(stderr, "FAIL: %s expected true\n", name);
-        failures++;
-    }
+	if (!value)
+	{
+		fprintf(stderr, "FAIL: %s expected true\n", name);
+		failures++;
+	}
 }
 
 static void expect_false(bool value, const char *name)
 {
-    if (value)
-    {
-        fprintf(stderr, "FAIL: %s expected false\n", name);
-        failures++;
-    }
+	if (value)
+	{
+		fprintf(stderr, "FAIL: %s expected false\n", name);
+		failures++;
+	}
 }
 
 static bool read_exact_fd(int fd, void *buf, size_t len)
 {
-    uint8_t *p = (uint8_t *)buf;
-    size_t off = 0;
-    while (off < len)
-    {
-        ssize_t n = read(fd, p + off, len - off);
-        if (n < 0)
-        {
-            if (errno == EINTR)
-            {
-                continue;
-            }
-            return false;
-        }
-        if (n == 0)
-        {
-            return false;
-        }
-        off += (size_t)n;
-    }
-    return true;
+	uint8_t *p = (uint8_t *)buf;
+	size_t off = 0;
+	while (off < len)
+	{
+		ssize_t n = read(fd, p + off, len - off);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+		if (n == 0)
+		{
+			return false;
+		}
+		off += (size_t)n;
+	}
+	return true;
 }
 
 static bool write_all_fd(int fd, const void *buf, size_t len)
 {
-    const uint8_t *p = (const uint8_t *)buf;
-    size_t off = 0;
-    while (off < len)
-    {
-        ssize_t n = write(fd, p + off, len - off);
-        if (n < 0)
-        {
-            if (errno == EINTR)
-            {
-                continue;
-            }
-            return false;
-        }
-        if (n == 0)
-        {
-            return false;
-        }
-        off += (size_t)n;
-    }
-    return true;
+	const uint8_t *p = (const uint8_t *)buf;
+	size_t off = 0;
+	while (off < len)
+	{
+		ssize_t n = write(fd, p + off, len - off);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+		if (n == 0)
+		{
+			return false;
+		}
+		off += (size_t)n;
+	}
+	return true;
 }
 
 static bool write_split_bytes(int fd, const uint8_t *buf, size_t len)
 {
-    for (size_t i = 0; i < len; i++)
-    {
-        if (!write_all_fd(fd, buf + i, 1))
-        {
-            return false;
-        }
-    }
-    return true;
+	for (size_t i = 0; i < len; i++)
+	{
+		if (!write_all_fd(fd, buf + i, 1))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 enum scenario_mode
 {
-    SCENARIO_NO_AUTH = 1,
-    SCENARIO_USERPASS = 2,
-    SCENARIO_CLOSE_MID_REPLY = 3,
-    SCENARIO_AUTH_WITHOUT_PASSWORD = 4,
-    SCENARIO_BAD_VERSION = 5,
-    SCENARIO_BAD_METHOD = 6,
-    SCENARIO_TRUNCATED_METHOD = 7,
-    SCENARIO_BAD_ATYP = 8,
-    SCENARIO_AUTH_REJECTED = 9,
-    SCENARIO_TOR_LIKE = 10
+	SCENARIO_NO_AUTH = 1,
+	SCENARIO_USERPASS = 2,
+	SCENARIO_CLOSE_MID_REPLY = 3,
+	SCENARIO_AUTH_WITHOUT_PASSWORD = 4,
+	SCENARIO_BAD_VERSION = 5,
+	SCENARIO_BAD_METHOD = 6,
+	SCENARIO_TRUNCATED_METHOD = 7,
+	SCENARIO_BAD_ATYP = 8,
+	SCENARIO_AUTH_REJECTED = 9,
+	SCENARIO_TOR_LIKE = 10
 };
 
 typedef struct
 {
-    int listen_fd;
-    enum scenario_mode mode;
-    bool server_ok;
-    bool creds;
-    bool offered_auth;
-    int stage;
+	int listen_fd;
+	enum scenario_mode mode;
+	bool server_ok;
+	bool creds;
+	bool offered_auth;
+	int stage;
 } scenario_t;
 
 static bool expect_connect_request_ipv4(int fd, const char *ip, uint16_t port)
 {
-    uint8_t req[10];
-    uint8_t expected[10] = {0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0};
-    in_addr_t host_ip = inet_addr(ip);
-    memcpy(expected + 4, &host_ip, 4);
-    expected[8] = (uint8_t)((port >> 8) & 0xff);
-    expected[9] = (uint8_t)(port & 0xff);
+	uint8_t req[10];
+	uint8_t expected[10] = {0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0};
+	in_addr_t host_ip = inet_addr(ip);
+	memcpy(expected + 4, &host_ip, 4);
+	expected[8] = (uint8_t)((port >> 8) & 0xff);
+	expected[9] = (uint8_t)(port & 0xff);
 
-    if (!read_exact_fd(fd, req, sizeof(req)))
-    {
-        return false;
-    }
-    return memcmp(req, expected, sizeof(req)) == 0;
+	if (!read_exact_fd(fd, req, sizeof(req)))
+	{
+		return false;
+	}
+	return memcmp(req, expected, sizeof(req)) == 0;
 }
 
 static void *server_thread(void *arg)
 {
-    scenario_t *sc = (scenario_t *)arg;
-    sc->server_ok = false;
-    sc->stage = 0;
+	scenario_t *sc = (scenario_t *)arg;
+	sc->server_ok = false;
+	sc->stage = 0;
 
-    int client_fd = accept(sc->listen_fd, NULL, NULL);
-    if (client_fd < 0)
-    {
-        sc->stage = -1;
-        return NULL;
-    }
-    sc->stage = 1;
+	int client_fd = accept(sc->listen_fd, NULL, NULL);
+	if (client_fd < 0)
+	{
+		sc->stage = -1;
+		return NULL;
+	}
+	sc->stage = 1;
 
-    /* The client offers user/pass (0x02) only when credentials are configured. */
-    uint8_t hello[4];
-    const uint8_t expected_hello_auth[4] = {0x05, 0x02, 0x00, 0x02};
-    const uint8_t expected_hello_noauth[3] = {0x05, 0x01, 0x00};
-    size_t hello_len = sc->creds ? sizeof(expected_hello_auth) : sizeof(expected_hello_noauth);
-    const uint8_t *expected_hello = sc->creds ? expected_hello_auth : expected_hello_noauth;
-    if (!read_exact_fd(client_fd, hello, hello_len))
-    {
-        sc->stage = -2;
-        close(client_fd);
-        return NULL;
-    }
-    sc->offered_auth = hello_len == 4;
-    if (memcmp(hello, expected_hello, hello_len) != 0)
-    {
-        sc->stage = -3;
-        close(client_fd);
-        return NULL;
-    }
-    sc->stage = 2;
+	/* The client offers user/pass (0x02) only when credentials are configured. */
+	uint8_t hello[4];
+	const uint8_t expected_hello_auth[4] = {0x05, 0x02, 0x00, 0x02};
+	const uint8_t expected_hello_noauth[3] = {0x05, 0x01, 0x00};
+	size_t hello_len = sc->creds ? sizeof(expected_hello_auth) : sizeof(expected_hello_noauth);
+	const uint8_t *expected_hello = sc->creds ? expected_hello_auth : expected_hello_noauth;
+	if (!read_exact_fd(client_fd, hello, hello_len))
+	{
+		sc->stage = -2;
+		close(client_fd);
+		return NULL;
+	}
+	sc->offered_auth = hello_len == 4;
+	if (memcmp(hello, expected_hello, hello_len) != 0)
+	{
+		sc->stage = -3;
+		close(client_fd);
+		return NULL;
+	}
+	sc->stage = 2;
 
-    if (sc->mode == SCENARIO_NO_AUTH)
-    {
-        const uint8_t method_reply[2] = {0x05, 0x00};
-        const uint8_t connect_reply[] = {0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0x1f, 0x90};
-        if (!write_split_bytes(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -4;
-            close(client_fd);
-            return NULL;
-        }
-        if (!expect_connect_request_ipv4(client_fd, "1.2.3.4", 443))
-        {
-            sc->stage = -5;
-            close(client_fd);
-            return NULL;
-        }
-        if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
-        {
-            sc->stage = -6;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_USERPASS)
-    {
-        const uint8_t method_reply[2] = {0x05, 0x02};
-        const uint8_t expected_auth[] = {
-            0x01, 0x08, 'U', 's', 'e', 'r', 'N', 'a', 'm', 'e',
-            0x08, 'P', 'a', 's', 's', 'W', 'o', 'r', 'd'
-        };
-        const uint8_t auth_reply[2] = {0x01, 0x00};
-        const uint8_t connect_reply[] = {0x05, 0x00, 0x00, 0x01, 10, 0, 0, 1, 0x04, 0x38};
-        uint8_t auth_buf[sizeof(expected_auth)];
-        if (!write_split_bytes(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -7;
-            close(client_fd);
-            return NULL;
-        }
-        if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)))
-        {
-            sc->stage = -8;
-            close(client_fd);
-            return NULL;
-        }
-        if (memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
-        {
-            sc->stage = -9;
-            close(client_fd);
-            return NULL;
-        }
-        if (!write_split_bytes(client_fd, auth_reply, sizeof(auth_reply)))
-        {
-            sc->stage = -10;
-            close(client_fd);
-            return NULL;
-        }
-        if (!expect_connect_request_ipv4(client_fd, "8.8.8.8", 53))
-        {
-            sc->stage = -11;
-            close(client_fd);
-            return NULL;
-        }
-        if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
-        {
-            sc->stage = -12;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_TOR_LIKE)
-    {
-        /* Like Tor: pick user/pass whenever it was offered, else no auth. */
-        const uint8_t method_reply[2] = {0x05, 0x02};
-        const uint8_t method_reply_none[2] = {0x05, 0x00};
-        const uint8_t expected_auth[] = {
-            0x01, 0x04, 'u', 's', 'e', 'r',
-            0x04, 'p', 'a', 's', 's'
-        };
-        const uint8_t auth_reply[2] = {0x01, 0x00};
-        const uint8_t connect_reply[] = {0x05, 0x00, 0x00, 0x01, 10, 0, 0, 1, 0x04, 0x38};
-        uint8_t auth_buf[sizeof(expected_auth)];
-        if (!write_split_bytes(client_fd, sc->offered_auth ? method_reply : method_reply_none, 2))
-        {
-            sc->stage = -26;
-            close(client_fd);
-            return NULL;
-        }
-        if (sc->offered_auth)
-        {
-            if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)) ||
-                memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
-            {
-                sc->stage = -27;
-                close(client_fd);
-                return NULL;
-            }
-            if (!write_split_bytes(client_fd, auth_reply, sizeof(auth_reply)))
-            {
-                sc->stage = -28;
-                close(client_fd);
-                return NULL;
-            }
-        }
-        if (!expect_connect_request_ipv4(client_fd, "5.6.7.8", 443))
-        {
-            sc->stage = -29;
-            close(client_fd);
-            return NULL;
-        }
-        if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
-        {
-            sc->stage = -30;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_CLOSE_MID_REPLY)
-    {
-        const uint8_t method_reply[2] = {0x05, 0x00};
-        const uint8_t partial_reply[2] = {0x05, 0x00};
-        if (!write_split_bytes(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -13;
-            close(client_fd);
-            return NULL;
-        }
-        if (!expect_connect_request_ipv4(client_fd, "9.9.9.9", 443))
-        {
-            sc->stage = -14;
-            close(client_fd);
-            return NULL;
-        }
-        if (!write_split_bytes(client_fd, partial_reply, sizeof(partial_reply)))
-        {
-            sc->stage = -15;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_AUTH_WITHOUT_PASSWORD)
-    {
-        const uint8_t method_reply[2] = {0x05, 0x02};
-        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -16;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_BAD_VERSION)
-    {
-        const uint8_t method_reply[2] = {0x04, 0x00};
-        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -17;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_BAD_METHOD)
-    {
-        const uint8_t method_reply[2] = {0x05, 0xFF};
-        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -18;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_TRUNCATED_METHOD)
-    {
-        const uint8_t method_reply[1] = {0x05};
-        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -19;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_BAD_ATYP)
-    {
-        const uint8_t method_reply[2] = {0x05, 0x00};
-        const uint8_t bad_reply[4] = {0x05, 0x00, 0x00, 0x02};
-        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -20;
-            close(client_fd);
-            return NULL;
-        }
-        if (!write_all_fd(client_fd, bad_reply, sizeof(bad_reply)))
-        {
-            sc->stage = -21;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
-    else if (sc->mode == SCENARIO_AUTH_REJECTED)
-    {
-        const uint8_t method_reply[2] = {0x05, 0x02};
-        const uint8_t expected_auth[] = {
-            0x01, 0x04, 'u', 's', 'e', 'r',
-            0x04, 'p', 'a', 's', 's'
-        };
-        const uint8_t auth_reply[2] = {0x01, 0x01};
-        uint8_t auth_buf[sizeof(expected_auth)];
-        if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
-        {
-            sc->stage = -22;
-            close(client_fd);
-            return NULL;
-        }
-        if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)))
-        {
-            sc->stage = -23;
-            close(client_fd);
-            return NULL;
-        }
-        if (memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
-        {
-            sc->stage = -24;
-            close(client_fd);
-            return NULL;
-        }
-        if (!write_all_fd(client_fd, auth_reply, sizeof(auth_reply)))
-        {
-            sc->stage = -25;
-            close(client_fd);
-            return NULL;
-        }
-        sc->server_ok = true;
-    }
+	if (sc->mode == SCENARIO_NO_AUTH)
+	{
+		const uint8_t method_reply[2] = {0x05, 0x00};
+		const uint8_t connect_reply[] = {0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0x1f, 0x90};
+		if (!write_split_bytes(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -4;
+			close(client_fd);
+			return NULL;
+		}
+		if (!expect_connect_request_ipv4(client_fd, "1.2.3.4", 443))
+		{
+			sc->stage = -5;
+			close(client_fd);
+			return NULL;
+		}
+		if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
+		{
+			sc->stage = -6;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_USERPASS)
+	{
+		const uint8_t method_reply[2] = {0x05, 0x02};
+		const uint8_t expected_auth[] = {
+		        0x01, 0x08, 'U', 's', 'e', 'r', 'N', 'a', 'm', 'e',
+		        0x08, 'P', 'a', 's', 's', 'W', 'o', 'r', 'd'};
+		const uint8_t auth_reply[2] = {0x01, 0x00};
+		const uint8_t connect_reply[] = {0x05, 0x00, 0x00, 0x01, 10, 0, 0, 1, 0x04, 0x38};
+		uint8_t auth_buf[sizeof(expected_auth)];
+		if (!write_split_bytes(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -7;
+			close(client_fd);
+			return NULL;
+		}
+		if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)))
+		{
+			sc->stage = -8;
+			close(client_fd);
+			return NULL;
+		}
+		if (memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
+		{
+			sc->stage = -9;
+			close(client_fd);
+			return NULL;
+		}
+		if (!write_split_bytes(client_fd, auth_reply, sizeof(auth_reply)))
+		{
+			sc->stage = -10;
+			close(client_fd);
+			return NULL;
+		}
+		if (!expect_connect_request_ipv4(client_fd, "8.8.8.8", 53))
+		{
+			sc->stage = -11;
+			close(client_fd);
+			return NULL;
+		}
+		if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
+		{
+			sc->stage = -12;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_TOR_LIKE)
+	{
+		/* Like Tor: pick user/pass whenever it was offered, else no auth. */
+		const uint8_t method_reply[2] = {0x05, 0x02};
+		const uint8_t method_reply_none[2] = {0x05, 0x00};
+		const uint8_t expected_auth[] = {
+		        0x01, 0x04, 'u', 's', 'e', 'r',
+		        0x04, 'p', 'a', 's', 's'};
+		const uint8_t auth_reply[2] = {0x01, 0x00};
+		const uint8_t connect_reply[] = {0x05, 0x00, 0x00, 0x01, 10, 0, 0, 1, 0x04, 0x38};
+		uint8_t auth_buf[sizeof(expected_auth)];
+		if (!write_split_bytes(client_fd, sc->offered_auth ? method_reply : method_reply_none, 2))
+		{
+			sc->stage = -26;
+			close(client_fd);
+			return NULL;
+		}
+		if (sc->offered_auth)
+		{
+			if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)) ||
+			        memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
+			{
+				sc->stage = -27;
+				close(client_fd);
+				return NULL;
+			}
+			if (!write_split_bytes(client_fd, auth_reply, sizeof(auth_reply)))
+			{
+				sc->stage = -28;
+				close(client_fd);
+				return NULL;
+			}
+		}
+		if (!expect_connect_request_ipv4(client_fd, "5.6.7.8", 443))
+		{
+			sc->stage = -29;
+			close(client_fd);
+			return NULL;
+		}
+		if (!write_split_bytes(client_fd, connect_reply, sizeof(connect_reply)))
+		{
+			sc->stage = -30;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_CLOSE_MID_REPLY)
+	{
+		const uint8_t method_reply[2] = {0x05, 0x00};
+		const uint8_t partial_reply[2] = {0x05, 0x00};
+		if (!write_split_bytes(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -13;
+			close(client_fd);
+			return NULL;
+		}
+		if (!expect_connect_request_ipv4(client_fd, "9.9.9.9", 443))
+		{
+			sc->stage = -14;
+			close(client_fd);
+			return NULL;
+		}
+		if (!write_split_bytes(client_fd, partial_reply, sizeof(partial_reply)))
+		{
+			sc->stage = -15;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_AUTH_WITHOUT_PASSWORD)
+	{
+		const uint8_t method_reply[2] = {0x05, 0x02};
+		if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -16;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_BAD_VERSION)
+	{
+		const uint8_t method_reply[2] = {0x04, 0x00};
+		if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -17;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_BAD_METHOD)
+	{
+		const uint8_t method_reply[2] = {0x05, 0xFF};
+		if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -18;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_TRUNCATED_METHOD)
+	{
+		const uint8_t method_reply[1] = {0x05};
+		if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -19;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_BAD_ATYP)
+	{
+		const uint8_t method_reply[2] = {0x05, 0x00};
+		const uint8_t bad_reply[4] = {0x05, 0x00, 0x00, 0x02};
+		if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -20;
+			close(client_fd);
+			return NULL;
+		}
+		if (!write_all_fd(client_fd, bad_reply, sizeof(bad_reply)))
+		{
+			sc->stage = -21;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
+	else if (sc->mode == SCENARIO_AUTH_REJECTED)
+	{
+		const uint8_t method_reply[2] = {0x05, 0x02};
+		const uint8_t expected_auth[] = {
+		        0x01, 0x04, 'u', 's', 'e', 'r',
+		        0x04, 'p', 'a', 's', 's'};
+		const uint8_t auth_reply[2] = {0x01, 0x01};
+		uint8_t auth_buf[sizeof(expected_auth)];
+		if (!write_all_fd(client_fd, method_reply, sizeof(method_reply)))
+		{
+			sc->stage = -22;
+			close(client_fd);
+			return NULL;
+		}
+		if (!read_exact_fd(client_fd, auth_buf, sizeof(auth_buf)))
+		{
+			sc->stage = -23;
+			close(client_fd);
+			return NULL;
+		}
+		if (memcmp(auth_buf, expected_auth, sizeof(expected_auth)) != 0)
+		{
+			sc->stage = -24;
+			close(client_fd);
+			return NULL;
+		}
+		if (!write_all_fd(client_fd, auth_reply, sizeof(auth_reply)))
+		{
+			sc->stage = -25;
+			close(client_fd);
+			return NULL;
+		}
+		sc->server_ok = true;
+	}
 
-    close(client_fd);
-    return NULL;
+	close(client_fd);
+	return NULL;
 }
 
 static bool run_scenario(enum scenario_mode mode, sockshost_t *socks, const char *dst_host, int dst_port, bool *server_ok, int *stage)
 {
-    int listen_fd = -1;
-    int client_fd = -1;
-    pthread_t tid;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
-    scenario_t sc = {0};
+	int listen_fd = -1;
+	int client_fd = -1;
+	pthread_t tid;
+	struct sockaddr_in addr;
+	socklen_t addr_len = sizeof(addr);
+	scenario_t sc = {0};
 
-    *server_ok = false;
-    *stage = 0;
+	*server_ok = false;
+	*stage = 0;
 
-    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_fd < 0)
-    {
-        *stage = -1;
-        return false;
-    }
+	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (listen_fd < 0)
+	{
+		*stage = -1;
+		return false;
+	}
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(0);
-    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
-    {
-        *stage = -2;
-        close(listen_fd);
-        return false;
-    }
-    if (listen(listen_fd, 1) != 0)
-    {
-        *stage = -3;
-        close(listen_fd);
-        return false;
-    }
-    if (getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) != 0)
-    {
-        *stage = -4;
-        close(listen_fd);
-        return false;
-    }
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = htons(0);
+	if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
+	{
+		*stage = -2;
+		close(listen_fd);
+		return false;
+	}
+	if (listen(listen_fd, 1) != 0)
+	{
+		*stage = -3;
+		close(listen_fd);
+		return false;
+	}
+	if (getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) != 0)
+	{
+		*stage = -4;
+		close(listen_fd);
+		return false;
+	}
 
-    sc.listen_fd = listen_fd;
-    sc.mode = mode;
-    sc.creds = socks->user && socks->pass;
-    sc.server_ok = false;
-    if (pthread_create(&tid, NULL, server_thread, &sc) != 0)
-    {
-        *stage = -5;
-        close(listen_fd);
-        return false;
-    }
+	sc.listen_fd = listen_fd;
+	sc.mode = mode;
+	sc.creds = socks->user && socks->pass;
+	sc.server_ok = false;
+	if (pthread_create(&tid, NULL, server_thread, &sc) != 0)
+	{
+		*stage = -5;
+		close(listen_fd);
+		return false;
+	}
 
-    socks->host = "127.0.0.1";
-    socks->port = ntohs(addr.sin_port);
+	socks->host = "127.0.0.1";
+	socks->port = ntohs(addr.sin_port);
 
-    bool ok = socks5_connect(&client_fd, socks, dst_host, dst_port, 5);
-    if (ok)
-    {
-        close(client_fd);
-    }
+	bool ok = socks5_connect(&client_fd, socks, dst_host, dst_port, 5);
+	if (ok)
+	{
+		close(client_fd);
+	}
 
-    pthread_join(tid, NULL);
-    close(listen_fd);
+	pthread_join(tid, NULL);
+	close(listen_fd);
 
-    *server_ok = sc.server_ok;
-    *stage = sc.stage;
-    return ok;
+	*server_ok = sc.server_ok;
+	*stage = sc.stage;
+	return ok;
 }
 
 static void test_no_auth_split_reply_success(void)
 {
-    sockshost_t socks = {0};
-    bool server_ok = false;
-    int stage = 0;
-    bool ok = run_scenario(SCENARIO_NO_AUTH, &socks, "1.2.3.4", 443, &server_ok, &stage);
-    (void)stage;
-    expect_true(server_ok, "no-auth server observed expected bytes");
-    expect_true(ok, "no-auth split reply handshake success");
+	sockshost_t socks = {0};
+	bool server_ok = false;
+	int stage = 0;
+	bool ok = run_scenario(SCENARIO_NO_AUTH, &socks, "1.2.3.4", 443, &server_ok, &stage);
+	(void)stage;
+	expect_true(server_ok, "no-auth server observed expected bytes");
+	expect_true(ok, "no-auth split reply handshake success");
 }
 
 static void test_userpass_split_reply_success(void)
 {
-    sockshost_t socks = {0};
-    bool server_ok = false;
-    int stage = 0;
-    socks.user = "UserName";
-    socks.pass = "PassWord";
-    bool ok = run_scenario(SCENARIO_USERPASS, &socks, "8.8.8.8", 53, &server_ok, &stage);
-    (void)stage;
-    expect_true(server_ok, "user/pass server observed expected bytes");
-    expect_true(ok, "user/pass split reply handshake success");
+	sockshost_t socks = {0};
+	bool server_ok = false;
+	int stage = 0;
+	socks.user = "UserName";
+	socks.pass = "PassWord";
+	bool ok = run_scenario(SCENARIO_USERPASS, &socks, "8.8.8.8", 53, &server_ok, &stage);
+	(void)stage;
+	expect_true(server_ok, "user/pass server observed expected bytes");
+	expect_true(ok, "user/pass split reply handshake success");
 }
 
 static void test_tor_like_server(void)
 {
-    sockshost_t socks = {0};
-    bool server_ok = false;
-    int stage = 0;
-    bool ok = run_scenario(SCENARIO_TOR_LIKE, &socks, "5.6.7.8", 443, &server_ok, &stage);
-    expect_true(server_ok, "tor-like server saw only no-auth offered without credentials");
-    expect_true(ok, "tor-like server connect succeeds without credentials");
+	sockshost_t socks = {0};
+	bool server_ok = false;
+	int stage = 0;
+	bool ok = run_scenario(SCENARIO_TOR_LIKE, &socks, "5.6.7.8", 443, &server_ok, &stage);
+	expect_true(server_ok, "tor-like server saw only no-auth offered without credentials");
+	expect_true(ok, "tor-like server connect succeeds without credentials");
 
-    socks.user = "user";
-    socks.pass = "pass";
-    ok = run_scenario(SCENARIO_TOR_LIKE, &socks, "5.6.7.8", 443, &server_ok, &stage);
-    expect_true(server_ok, "tor-like server saw user/pass offered and authenticated");
-    expect_true(ok, "tor-like server connect succeeds with credentials");
+	socks.user = "user";
+	socks.pass = "pass";
+	ok = run_scenario(SCENARIO_TOR_LIKE, &socks, "5.6.7.8", 443, &server_ok, &stage);
+	expect_true(server_ok, "tor-like server saw user/pass offered and authenticated");
+	expect_true(ok, "tor-like server connect succeeds with credentials");
 }
 
 static void test_auth_without_password_fails(void)
 {
-    sockshost_t socks = {0};
-    bool server_ok = false;
-    int stage = 0;
-    socks.user = "only-user";
-    socks.pass = NULL;
-    bool ok = run_scenario(SCENARIO_AUTH_WITHOUT_PASSWORD, &socks, "1.2.3.4", 443, &server_ok, &stage);
-    (void)stage;
-    expect_true(server_ok, "missing password server saw the greeting");
-    expect_false(ok, "missing password is rejected");
+	sockshost_t socks = {0};
+	bool server_ok = false;
+	int stage = 0;
+	socks.user = "only-user";
+	socks.pass = NULL;
+	bool ok = run_scenario(SCENARIO_AUTH_WITHOUT_PASSWORD, &socks, "1.2.3.4", 443, &server_ok, &stage);
+	(void)stage;
+	expect_true(server_ok, "missing password server saw the greeting");
+	expect_false(ok, "missing password is rejected");
 }
 
 static void test_malformed_replies_fail(void)
 {
-    sockshost_t socks = {0};
-    bool server_ok = false;
-    int stage = 0;
-    bool ok;
+	sockshost_t socks = {0};
+	bool server_ok = false;
+	int stage = 0;
+	bool ok;
 
-    ok = run_scenario(SCENARIO_BAD_VERSION, &socks, "1.2.3.4", 443, &server_ok, &stage);
-    expect_true(server_ok, "bad version server wrote the reply");
-    expect_false(ok, "SOCKS version 4 is rejected");
+	ok = run_scenario(SCENARIO_BAD_VERSION, &socks, "1.2.3.4", 443, &server_ok, &stage);
+	expect_true(server_ok, "bad version server wrote the reply");
+	expect_false(ok, "SOCKS version 4 is rejected");
 
-    ok = run_scenario(SCENARIO_BAD_METHOD, &socks, "1.2.3.4", 443, &server_ok, &stage);
-    expect_true(server_ok, "bad method server wrote the reply");
-    expect_false(ok, "SOCKS method 0xFF is rejected");
+	ok = run_scenario(SCENARIO_BAD_METHOD, &socks, "1.2.3.4", 443, &server_ok, &stage);
+	expect_true(server_ok, "bad method server wrote the reply");
+	expect_false(ok, "SOCKS method 0xFF is rejected");
 
-    ok = run_scenario(SCENARIO_TRUNCATED_METHOD, &socks, "1.2.3.4", 443, &server_ok, &stage);
-    expect_true(server_ok, "truncated method server wrote the byte");
-    expect_false(ok, "truncated SOCKS method reply fails");
+	ok = run_scenario(SCENARIO_TRUNCATED_METHOD, &socks, "1.2.3.4", 443, &server_ok, &stage);
+	expect_true(server_ok, "truncated method server wrote the byte");
+	expect_false(ok, "truncated SOCKS method reply fails");
 
-    ok = run_scenario(SCENARIO_BAD_ATYP, &socks, "1.2.3.4", 443, &server_ok, &stage);
-    expect_true(server_ok, "bad atyp server wrote the reply");
-    expect_false(ok, "SOCKS address type 0x02 is rejected");
+	ok = run_scenario(SCENARIO_BAD_ATYP, &socks, "1.2.3.4", 443, &server_ok, &stage);
+	expect_true(server_ok, "bad atyp server wrote the reply");
+	expect_false(ok, "SOCKS address type 0x02 is rejected");
 
-    socks.user = "user";
-    socks.pass = "pass";
-    ok = run_scenario(SCENARIO_AUTH_REJECTED, &socks, "1.2.3.4", 443, &server_ok, &stage);
-    expect_true(server_ok, "auth reject server saw the credentials");
-    expect_false(ok, "SOCKS authentication failure is rejected");
+	socks.user = "user";
+	socks.pass = "pass";
+	ok = run_scenario(SCENARIO_AUTH_REJECTED, &socks, "1.2.3.4", 443, &server_ok, &stage);
+	expect_true(server_ok, "auth reject server saw the credentials");
+	expect_false(ok, "SOCKS authentication failure is rejected");
 }
 
 static void test_close_mid_reply_fails(void)
 {
-    sockshost_t socks = {0};
-    bool server_ok = false;
-    int stage = 0;
-    bool ok = run_scenario(SCENARIO_CLOSE_MID_REPLY, &socks, "9.9.9.9", 443, &server_ok, &stage);
-    (void)stage;
-    expect_true(server_ok, "mid-reply-close server observed expected bytes");
-    expect_false(ok, "server close mid-reply should fail cleanly");
+	sockshost_t socks = {0};
+	bool server_ok = false;
+	int stage = 0;
+	bool ok = run_scenario(SCENARIO_CLOSE_MID_REPLY, &socks, "9.9.9.9", 443, &server_ok, &stage);
+	(void)stage;
+	expect_true(server_ok, "mid-reply-close server observed expected bytes");
+	expect_false(ok, "server close mid-reply should fail cleanly");
 }
 
 static void *stall_socks_server(void *arg)
 {
-    int listen_fd = *(int *)arg;
-    int fd = accept(listen_fd, NULL, NULL);
-    char buf[16];
+	int listen_fd = *(int *)arg;
+	int fd = accept(listen_fd, NULL, NULL);
+	char buf[16];
 
-    if (fd < 0)
-        return NULL;
-    while (read(fd, buf, sizeof(buf)) > 0)
-        ;
-    close(fd);
-    return NULL;
+	if (fd < 0)
+		return NULL;
+	while (read(fd, buf, sizeof(buf)) > 0)
+		;
+	close(fd);
+	return NULL;
 }
 
 static void test_stalled_socks_times_out(void)
 {
-    int listen_fd = -1;
-    int client_fd = 99;
-    pthread_t tid;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
-    sockshost_t socks = {0};
-    struct timespec start;
-    struct timespec end;
-    int64_t elapsed_ms;
-    bool ok;
+	int listen_fd = -1;
+	int client_fd = 99;
+	pthread_t tid;
+	struct sockaddr_in addr;
+	socklen_t addr_len = sizeof(addr);
+	sockshost_t socks = {0};
+	struct timespec start;
+	struct timespec end;
+	int64_t elapsed_ms;
+	bool ok;
 
-    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    expect_true(listen_fd >= 0, "stalled socks listen socket");
-    if (listen_fd < 0)
-        return;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    expect_true(bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0, "bind stalled socks");
-    expect_true(listen(listen_fd, 1) == 0, "listen stalled socks");
-    expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "stalled socks port");
-    expect_true(pthread_create(&tid, NULL, stall_socks_server, &listen_fd) == 0, "start stalled socks server");
+	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+	expect_true(listen_fd >= 0, "stalled socks listen socket");
+	if (listen_fd < 0)
+		return;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	expect_true(bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0, "bind stalled socks");
+	expect_true(listen(listen_fd, 1) == 0, "listen stalled socks");
+	expect_true(getsockname(listen_fd, (struct sockaddr *)&addr, &addr_len) == 0, "stalled socks port");
+	expect_true(pthread_create(&tid, NULL, stall_socks_server, &listen_fd) == 0, "start stalled socks server");
 
-    socks.host = "127.0.0.1";
-    socks.port = ntohs(addr.sin_port);
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    ok = socks5_connect(&client_fd, &socks, "1.2.3.4", 443, 1);
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    elapsed_ms = (int64_t)(end.tv_sec - start.tv_sec) * 1000 +
-                 (end.tv_nsec - start.tv_nsec) / 1000000;
-    expect_false(ok, "stalled SOCKS handshake fails");
-    expect_true(client_fd == -1, "stalled SOCKS handshake closes the socket");
-    expect_true(elapsed_ms < 3000, "stalled SOCKS handshake returns before 3s");
-    expect_true(elapsed_ms >= 200, "stalled SOCKS handshake waits for the deadline");
-    pthread_join(tid, NULL);
-    close(listen_fd);
+	socks.host = "127.0.0.1";
+	socks.port = ntohs(addr.sin_port);
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	ok = socks5_connect(&client_fd, &socks, "1.2.3.4", 443, 1);
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	elapsed_ms = (int64_t)(end.tv_sec - start.tv_sec) * 1000 +
+	             (end.tv_nsec - start.tv_nsec) / 1000000;
+	expect_false(ok, "stalled SOCKS handshake fails");
+	expect_true(client_fd == -1, "stalled SOCKS handshake closes the socket");
+	expect_true(elapsed_ms < 3000, "stalled SOCKS handshake returns before 3s");
+	expect_true(elapsed_ms >= 200, "stalled SOCKS handshake waits for the deadline");
+	pthread_join(tid, NULL);
+	close(listen_fd);
 }
 
 static bool can_run_loopback_socket_test(void)
 {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
-    {
-        return false;
-    }
-    close(fd);
-    return true;
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0)
+	{
+		return false;
+	}
+	close(fd);
+	return true;
 }
 
 static void expect_str(const char *got, const char *want, const char *name)
 {
-    if (strcmp(got, want) != 0)
-    {
-        fprintf(stderr, "FAIL: %s got \"%s\" want \"%s\"\n", name, got, want);
-        failures++;
-    }
+	if (strcmp(got, want) != 0)
+	{
+		fprintf(stderr, "FAIL: %s got \"%s\" want \"%s\"\n", name, got, want);
+		failures++;
+	}
 }
 
 static void test_rep_names(void)
 {
-    expect_str(socks5_rep_name(0x00), "succeeded", "rep 0x00");
-    expect_str(socks5_rep_name(0x01), "general SOCKS server failure", "rep 0x01");
-    expect_str(socks5_rep_name(0x02), "connection not allowed by ruleset", "rep 0x02");
-    expect_str(socks5_rep_name(0x03), "network unreachable", "rep 0x03");
-    expect_str(socks5_rep_name(0x04), "host unreachable", "rep 0x04");
-    expect_str(socks5_rep_name(0x05), "connection refused", "rep 0x05");
-    expect_str(socks5_rep_name(0x06), "TTL expired", "rep 0x06");
-    expect_str(socks5_rep_name(0x07), "command not supported", "rep 0x07");
-    expect_str(socks5_rep_name(0x08), "address type not supported", "rep 0x08");
-    expect_str(socks5_rep_name(0xF0), "onion service descriptor not found", "rep 0xF0");
-    expect_str(socks5_rep_name(0xF1), "onion service descriptor invalid", "rep 0xF1");
-    expect_str(socks5_rep_name(0xF2), "onion service introduction failed", "rep 0xF2");
-    expect_str(socks5_rep_name(0xF3), "onion service rendezvous failed", "rep 0xF3");
-    expect_str(socks5_rep_name(0xF4), "onion service missing client authorization", "rep 0xF4");
-    expect_str(socks5_rep_name(0xF5), "onion service wrong client authorization", "rep 0xF5");
-    expect_str(socks5_rep_name(0xF6), "invalid onion service address", "rep 0xF6");
-    expect_str(socks5_rep_name(0xF7), "onion service introduction timed out", "rep 0xF7");
-    expect_str(socks5_rep_name(0x09), "unknown", "rep 0x09");
-    expect_str(socks5_rep_name(0xFF), "unknown", "rep 0xFF");
+	expect_str(socks5_rep_name(0x00), "succeeded", "rep 0x00");
+	expect_str(socks5_rep_name(0x01), "general SOCKS server failure", "rep 0x01");
+	expect_str(socks5_rep_name(0x02), "connection not allowed by ruleset", "rep 0x02");
+	expect_str(socks5_rep_name(0x03), "network unreachable", "rep 0x03");
+	expect_str(socks5_rep_name(0x04), "host unreachable", "rep 0x04");
+	expect_str(socks5_rep_name(0x05), "connection refused", "rep 0x05");
+	expect_str(socks5_rep_name(0x06), "TTL expired", "rep 0x06");
+	expect_str(socks5_rep_name(0x07), "command not supported", "rep 0x07");
+	expect_str(socks5_rep_name(0x08), "address type not supported", "rep 0x08");
+	expect_str(socks5_rep_name(0xF0), "onion service descriptor not found", "rep 0xF0");
+	expect_str(socks5_rep_name(0xF1), "onion service descriptor invalid", "rep 0xF1");
+	expect_str(socks5_rep_name(0xF2), "onion service introduction failed", "rep 0xF2");
+	expect_str(socks5_rep_name(0xF3), "onion service rendezvous failed", "rep 0xF3");
+	expect_str(socks5_rep_name(0xF4), "onion service missing client authorization", "rep 0xF4");
+	expect_str(socks5_rep_name(0xF5), "onion service wrong client authorization", "rep 0xF5");
+	expect_str(socks5_rep_name(0xF6), "invalid onion service address", "rep 0xF6");
+	expect_str(socks5_rep_name(0xF7), "onion service introduction timed out", "rep 0xF7");
+	expect_str(socks5_rep_name(0x09), "unknown", "rep 0x09");
+	expect_str(socks5_rep_name(0xFF), "unknown", "rep 0xFF");
 }
 
 int main(void)
 {
-    log_set_quiet(1);
+	log_set_quiet(1);
 
-    /* Pure function: runs even where loopback sockets are unavailable. */
-    test_rep_names();
+	/* Pure function: runs even where loopback sockets are unavailable. */
+	test_rep_names();
 
-    if (!can_run_loopback_socket_test())
-    {
-        return 0;
-    }
+	if (!can_run_loopback_socket_test())
+	{
+		return 0;
+	}
 
-    test_no_auth_split_reply_success();
-    test_userpass_split_reply_success();
-    test_close_mid_reply_fails();
-    test_tor_like_server();
-    test_auth_without_password_fails();
-    test_malformed_replies_fail();
-    test_stalled_socks_times_out();
+	test_no_auth_split_reply_success();
+	test_userpass_split_reply_success();
+	test_close_mid_reply_fails();
+	test_tor_like_server();
+	test_auth_without_password_fails();
+	test_malformed_replies_fail();
+	test_stalled_socks_times_out();
 
-    return failures == 0 ? 0 : 1;
+	return failures == 0 ? 0 : 1;
 }

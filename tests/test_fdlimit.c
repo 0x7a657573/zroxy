@@ -17,7 +17,7 @@ static void expect_ul(unsigned long actual, unsigned long expected, const char *
 
 static void test_need(void)
 {
-	fdlimit_plan plan = { .sni_conns = 1024, .sni_listeners = 1 };
+	fdlimit_plan plan = {.sni_conns = 1024, .sni_listeners = 1};
 
 	expect_ul(fdlimit_other_need(&plan), FDLIMIT_MARGIN + FDLIMIT_PER_LISTENER, "SNI only: other need");
 	expect_ul(fdlimit_needed(&plan), 2048ul + 64ul + 8ul, "SNI only: total need");
@@ -35,7 +35,7 @@ static void test_need(void)
 
 static void test_cap(void)
 {
-	fdlimit_plan plan = { .sni_conns = 1024, .sni_listeners = 1 };
+	fdlimit_plan plan = {.sni_conns = 1024, .sni_listeners = 1};
 	unsigned long other = fdlimit_other_need(&plan);
 
 	expect_ul((unsigned long)fdlimit_sni_cap(&plan, 65536), 1024, "ample limit keeps the configured cap");
@@ -49,7 +49,7 @@ static void test_cap(void)
 
 static void test_apply(void)
 {
-	fdlimit_plan plan = { .sni_conns = 100, .sni_listeners = 1 };
+	fdlimit_plan plan = {.sni_conns = 100, .sni_listeners = 1};
 	struct rlimit before;
 	struct rlimit lim;
 	int cap = 0;

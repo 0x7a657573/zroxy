@@ -28,7 +28,7 @@ static int run_file(const char *path)
 	int fd = open(path, O_RDONLY | O_CLOEXEC);
 
 	if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
-	    st.st_size < 0 || (uint64_t)st.st_size > REPLAY_MAX_SIZE)
+	        st.st_size < 0 || (uint64_t)st.st_size > REPLAY_MAX_SIZE)
 	{
 		fprintf(stderr, "cannot use %s\n", path);
 		if (fd >= 0)

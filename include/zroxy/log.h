@@ -12,16 +12,24 @@
 #include <stdarg.h>
 #include <string.h>
 
-enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
+enum
+{
+	LOG_TRACE,
+	LOG_DEBUG,
+	LOG_INFO,
+	LOG_WARN,
+	LOG_ERROR,
+	LOG_FATAL
+};
 
 #define LOG_FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
-#define log_trace(...) log_log(LOG_TRACE, LOG_FILENAME , __LINE__, __VA_ARGS__)
-#define log_debug(...) log_log(LOG_DEBUG, LOG_FILENAME , __LINE__, __VA_ARGS__)
-#define log_info(...)  log_log(LOG_INFO,  LOG_FILENAME , __LINE__, __VA_ARGS__)
-#define log_warn(...)  log_log(LOG_WARN,  LOG_FILENAME , __LINE__, __VA_ARGS__)
-#define log_error(...) log_log(LOG_ERROR, LOG_FILENAME , __LINE__, __VA_ARGS__)
-#define log_fatal(...) log_log(LOG_FATAL, LOG_FILENAME , __LINE__, __VA_ARGS__)
+#define log_trace(...) log_log(LOG_TRACE, LOG_FILENAME, __LINE__, __VA_ARGS__)
+#define log_debug(...) log_log(LOG_DEBUG, LOG_FILENAME, __LINE__, __VA_ARGS__)
+#define log_info(...) log_log(LOG_INFO, LOG_FILENAME, __LINE__, __VA_ARGS__)
+#define log_warn(...) log_log(LOG_WARN, LOG_FILENAME, __LINE__, __VA_ARGS__)
+#define log_error(...) log_log(LOG_ERROR, LOG_FILENAME, __LINE__, __VA_ARGS__)
+#define log_fatal(...) log_log(LOG_FATAL, LOG_FILENAME, __LINE__, __VA_ARGS__)
 
 void log_set_level(int level);
 void log_set_quiet(int enable);

@@ -10,7 +10,8 @@
 #include <sys/socket.h>
 
 #ifdef SNI_TEST_HOOKS
-enum sni_fault {
+enum sni_fault
+{
 	SNI_FAULT_EINTR_READ,
 	SNI_FAULT_EAGAIN_WRITE,
 	SNI_FAULT_EINTR_WRITE,
@@ -35,10 +36,10 @@ void sni_note_accept_pause(void);
 #else
 static inline void sni_note_client_read(uint32_t n) { (void)n; }
 static inline void sni_note_pending(uint32_t n) { (void)n; }
-static inline void sni_note_eagain(void) { }
-static inline void sni_note_wait(void) { }
-static inline void sni_note_relay_yield(void) { }
-static inline void sni_note_accept_pause(void) { }
+static inline void sni_note_eagain(void) {}
+static inline void sni_note_wait(void) {}
+static inline void sni_note_relay_yield(void) {}
+static inline void sni_note_accept_pause(void) {}
 #endif
 
 #define SNI_SOCKS_CAP 600u
@@ -57,7 +58,8 @@ static inline void sni_note_accept_pause(void) { }
 #define SNI_USE_POLL false
 #endif
 
-enum {
+enum
+{
 	SNI_EV_IN = RE_IN,
 	SNI_EV_OUT = RE_OUT,
 	SNI_EV_ERR = RE_ERR,
@@ -66,14 +68,16 @@ enum {
 	SNI_EV_ARMED = 16
 };
 
-enum {
+enum
+{
 	SNI_TAG_CONN = 1,
 	SNI_TAG_LISTEN = 2,
 	SNI_TAG_WAKE = 3,
 	SNI_TAG_SINK = 4
 };
 
-enum {
+enum
+{
 	SNI_ST_HELLO = 0,
 	SNI_ST_RESOLVE,
 	SNI_ST_CONNECT,
@@ -86,7 +90,8 @@ enum {
  * conn_kill. NONE is a normal end (EOF or reset from either side of a relay,
  * listener shutdown) or an internal failure with no counter of its own.
  */
-enum {
+enum
+{
 	SNI_CLOSE_NONE = 0,
 	SNI_CLOSE_REFUSED,
 	SNI_CLOSE_NO_HOSTNAME,
@@ -106,19 +111,22 @@ enum {
 typedef struct sni_engine sni_engine;
 typedef struct sni_conn sni_conn;
 
-typedef struct sni_tag {
+typedef struct sni_tag
+{
 	int kind;
 	int fd;
 	sni_engine *eng;
 	sni_conn *conn;
 } sni_tag;
 
-typedef struct sni_addr {
+typedef struct sni_addr
+{
 	struct sockaddr_storage sa;
 	socklen_t len;
 } sni_addr;
 
-struct sni_conn {
+struct sni_conn
+{
 	sni_conn *next;
 	/* FIFO of connections still in HELLO, oldest first (see hello_link). */
 	sni_conn *hello_prev;
@@ -176,7 +184,8 @@ struct sni_conn {
 	SniServer_t cfg;
 };
 
-struct sni_engine {
+struct sni_engine
+{
 	reactor re;
 	int listen_fd;
 	int wake_r;
@@ -199,7 +208,8 @@ struct sni_engine {
 	uint64_t next_generation;
 };
 
-struct sni_listener {
+struct sni_listener
+{
 	pthread_t thread;
 	pthread_mutex_t mu;
 	pthread_cond_t cv;
@@ -209,13 +219,15 @@ struct sni_listener {
 	int ok;
 };
 
-typedef struct sni_boot {
+typedef struct sni_boot
+{
 	int listen_fd;
 	SniServer_t cfg;
 	sni_listener *joinable;
 } sni_boot;
 
-typedef struct sni_ready {
+typedef struct sni_ready
+{
 	sni_tag *tag;
 	int fd;
 	uint32_t ev;

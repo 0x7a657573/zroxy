@@ -61,7 +61,8 @@
 #define RESOLVER_UP_UNRESOLVED 1
 #define RESOLVER_UP_NEED_RESOLVE 2
 
-typedef enum {
+typedef enum
+{
 	RESOLVE_FREE = 0,
 	RESOLVE_QUEUED,
 	RESOLVE_RUNNING,
@@ -71,12 +72,14 @@ typedef enum {
 
 typedef struct resolver_sink resolver_sink;
 
-typedef struct resolver_addr {
+typedef struct resolver_addr
+{
 	struct sockaddr_storage address;
 	socklen_t length;
 } resolver_addr;
 
-typedef struct resolve_slot {
+typedef struct resolve_slot
+{
 	uint64_t req_id;
 	uint32_t listener_id;
 	uint32_t connection_index;
@@ -98,7 +101,8 @@ typedef struct resolve_slot {
 	struct resolve_slot *qnext;
 } resolve_slot;
 
-struct resolver_sink {
+struct resolver_sink
+{
 	pthread_mutex_t mutex;
 	int pipe_read;
 	int pipe_write;
@@ -115,7 +119,8 @@ struct resolver_sink {
 	int quota_used;
 };
 
-typedef struct resolver_accounting {
+typedef struct resolver_accounting
+{
 	int free_n;
 	int queued;
 	int running;
@@ -136,7 +141,8 @@ typedef struct resolver_accounting {
 
 bool resolver_start(void);
 
-typedef struct resolver_stats {
+typedef struct resolver_stats
+{
 	int threads;
 	int slots;
 	int slots_in_use;
@@ -169,8 +175,8 @@ void resolver_sink_release(resolver_sink *sink);
 size_t resolver_drain(resolver_sink *sink, resolve_slot **out, size_t max_out);
 
 int resolver_submit(resolver_sink *sink, uint32_t connection_index,
-		uint64_t connection_generation, const char *hostname, uint16_t port,
-		int family, int64_t deadline_ms, int *slot_index, uint64_t *req_id);
+        uint64_t connection_generation, const char *hostname, uint16_t port,
+        int family, int64_t deadline_ms, int *slot_index, uint64_t *req_id);
 
 void resolver_cancel(int slot_index, uint64_t req_id);
 void resolver_release(int slot_index, uint64_t req_id);
@@ -180,8 +186,8 @@ void resolver_watch_bind(uint32_t listener_id, const char *bindip, uint16_t port
 void resolver_unwatch_bind(uint32_t listener_id);
 
 /* Destination policy flags for resolver_policy_keep. */
-#define RESOLVER_POLICY_ALLOW_LOOPBACK 0x1u	/* dial 127.0.0.0/8 and ::1 */
-#define RESOLVER_POLICY_DENY_PRIVATE   0x2u	/* also refuse private ranges */
+#define RESOLVER_POLICY_ALLOW_LOOPBACK 0x1u /* dial 127.0.0.0/8 and ::1 */
+#define RESOLVER_POLICY_DENY_PRIVATE 0x2u   /* also refuse private ranges */
 
 /*
  * Rewrite IPv4-mapped IPv6 to IPv4, drop addresses the proxy must not dial,
@@ -206,13 +212,14 @@ bool resolver_prime_socks(const char *host, uint16_t port, int wait_ms);
 
 /* Numeric bypass, fresh or stale cache, or "still needs a client lookup". */
 int resolver_copy_upstream(const char *host, uint16_t port,
-		resolver_addr *out, size_t *count);
+        resolver_addr *out, size_t *count);
 
 #ifdef RESOLVER_TEST_HOOKS
 typedef int (*resolver_hook)(const char *hostname, int family,
-		resolver_addr *out, size_t max_out, size_t *count, void *cookie);
+        resolver_addr *out, size_t max_out, size_t *count, void *cookie);
 
-typedef struct resolver_counters {
+typedef struct resolver_counters
+{
 	uint32_t calls;
 	uint32_t skipped_expired;
 	uint32_t skipped_cancelled;
@@ -230,7 +237,7 @@ int resolver_test_wait_running(int want, int timeout_ms);
 bool resolver_test_accounting(resolver_accounting *out);
 int resolver_test_mutex_ok(void);
 void resolver_test_age_cache(int64_t last_success_ms, int64_t refresh_after_ms,
-		int64_t max_stale_ms);
+        int64_t max_stale_ms);
 int resolver_sink_quota(const resolver_sink *sink);
 /* Queue infrastructure slots until the reserve is full. Caller should pause dequeue. */
 int resolver_test_fill_infra(void);

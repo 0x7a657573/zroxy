@@ -30,7 +30,7 @@ static void test_parse(void)
 	size_t count = 0;
 
 	expect_true(acl_parse(" 0.0.0.0/0, 192.168.1.10/32 ", acl, 4, &count),
-			"parse /0 and /32 with spaces");
+	        "parse /0 and /32 with spaces");
 	expect_true(count == 2, "parse count");
 	expect_true(acl[0].mask == 0 && acl[0].net == 0, "parse /0 values");
 	expect_true(acl[1].mask == UINT32_MAX && acl[1].net == 0xc0a8010a, "parse /32 values");
@@ -38,7 +38,7 @@ static void test_parse(void)
 	expect_false(acl_parse("192.168.1.0", acl, 4, &count), "reject missing prefix");
 	expect_false(acl_parse("192.168.1.0/24,,10.0.0.0/8", acl, 4, &count), "reject empty entry");
 	expect_false(acl_parse("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", acl, 2, &count),
-			"reject more than capacity");
+	        "reject more than capacity");
 }
 
 static void test_boundaries(void)
@@ -47,7 +47,7 @@ static void test_boundaries(void)
 	size_t count = 0;
 
 	expect_true(acl_parse("172.16.0.0/12,192.168.0.0/16", acl, 2, &count),
-			"parse boundary networks");
+	        "parse boundary networks");
 	expect_false(acl_allows(acl, count, 0xac0fffff), "reject 172.15.255.255");
 	expect_true(acl_allows(acl, count, 0xac100000), "allow 172.16.0.0");
 	expect_true(acl_allows(acl, count, 0xc0a8ffff), "allow 192.168.255.255");

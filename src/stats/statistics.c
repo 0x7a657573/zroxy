@@ -9,8 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-
-void stats_init(statistics_t **self,char *name)
+void stats_init(statistics_t **self, char *name)
 {
 	*self = malloc(sizeof(statistics_t));
 	if (!*self)
@@ -18,11 +17,11 @@ void stats_init(statistics_t **self,char *name)
 		log_error("statistics allocation failed");
 		exit(1);
 	}
-	memset(*self,0,sizeof(statistics_t));
-	if(pthread_mutex_init(&(*self)->Lock, NULL) != 0)
+	memset(*self, 0, sizeof(statistics_t));
+	if (pthread_mutex_init(&(*self)->Lock, NULL) != 0)
 	{
-	    log_error("statistics mutex init has failed");
-	    exit(1);
+		log_error("statistics mutex init has failed");
+		exit(1);
 	}
 	if (!name || strlen(name) >= sizeof((*self)->name))
 	{
@@ -30,10 +29,9 @@ void stats_init(statistics_t **self,char *name)
 		exit(1);
 	}
 	memcpy((*self)->name, name, strlen(name) + 1);
-	time ( &(*self)->stat.StartTime );
+	time(&(*self)->stat.StartTime);
 	(*self)->next = NULL;
 }
-
 
 void stats_free(statistics_t *self)
 {
@@ -43,8 +41,7 @@ void stats_free(statistics_t *self)
 	free(self);
 }
 
-
-void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx)
+void stats_close_connection(statistics_t *self, uint32_t rx, uint32_t tx)
 {
 	if (!self)
 		return;
@@ -57,19 +54,18 @@ void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx)
 	pthread_mutex_unlock(&self->Lock);
 }
 
-
 void stats_open_connection(statistics_t *self)
 {
 	if (!self)
 		return;
 	pthread_mutex_lock(&self->Lock);
 	self->stat.ActiveConnection++;
-	if(self->stat.ActiveConnection>self->stat.MaxConnection)
+	if (self->stat.ActiveConnection > self->stat.MaxConnection)
 		self->stat.MaxConnection = self->stat.ActiveConnection;
 	pthread_mutex_unlock(&self->Lock);
 }
 
-void stats_get(statistics_t *self,stat_t *st)
+void stats_get(statistics_t *self, stat_t *st)
 {
 	if (!self)
 	{
@@ -77,7 +73,7 @@ void stats_get(statistics_t *self,stat_t *st)
 		return;
 	}
 	pthread_mutex_lock(&self->Lock);
-	*st =  self->stat;
+	*st = self->stat;
 	pthread_mutex_unlock(&self->Lock);
 }
 
@@ -90,4 +86,3 @@ void stats_set_extra(statistics_t *self, stats_extra_fn fn, void *ctx)
 	self->extra_ctx = ctx;
 	pthread_mutex_unlock(&self->Lock);
 }
-

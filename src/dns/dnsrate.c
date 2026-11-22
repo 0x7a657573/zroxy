@@ -27,11 +27,11 @@ bool dns_rate_take(dns_rate_t *rate, uint32_t ip, int64_t now_ms)
 	{
 		uint64_t elapsed = (uint64_t)(now_ms - slot->last_ms);
 		uint64_t refill = elapsed > UINT64_MAX / (uint64_t)rate->qps
-			? UINT64_MAX
-			: elapsed * (uint64_t)rate->qps;
+		                          ? UINT64_MAX
+		                          : elapsed * (uint64_t)rate->qps;
 		uint64_t tokens = refill > UINT64_MAX - (uint64_t)slot->tokens_milli
-			? UINT64_MAX
-			: (uint64_t)slot->tokens_milli + refill;
+		                          ? UINT64_MAX
+		                          : (uint64_t)slot->tokens_milli + refill;
 		if (tokens > burst)
 			tokens = burst;
 		slot->tokens_milli = (uint32_t)tokens;

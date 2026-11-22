@@ -42,7 +42,8 @@ static int open_pipe(int fds[2])
 #endif
 	if (pipe(fds) != 0)
 		return -1;
-	if (set_pipe_flags(fds[0]) != 0 || set_pipe_flags(fds[1]) != 0) {
+	if (set_pipe_flags(fds[0]) != 0 || set_pipe_flags(fds[1]) != 0)
+	{
 		close(fds[0]);
 		close(fds[1]);
 		fds[0] = -1;
@@ -55,13 +56,15 @@ static int open_pipe(int fds[2])
 static void sink_wakeup(resolver_sink *sink)
 {
 	char byte = 1;
-	for (;;) {
+	for (;;)
+	{
 		ssize_t n = write(sink->pipe_write, &byte, 1);
 		if (n >= 0)
 			return;
 		if (errno == EINTR)
 			continue;
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
+		{
 			if (g_resolver_pool)
 				__atomic_fetch_add(&g_resolver_pool->eagain_wakeups, 1u, __ATOMIC_RELAXED);
 			return;
@@ -92,16 +95,22 @@ static void push_completion(resolve_slot *slot, resolver_sink *sink)
 	int pushed = 0;
 	resolver_sink *die = NULL;
 	pthread_mutex_lock(&sink->mutex);
-	if (!sink->closed && ring_push(sink, slot) == 0) {
+	if (!sink->closed && ring_push(sink, slot) == 0)
+	{
 		pushed = 1;
-	} else if (sink->closed) {
+	}
+	else if (sink->closed)
+	{
 		if (g_resolver_pool)
 			__atomic_fetch_add(&g_resolver_pool->closed_drops, 1u, __ATOMIC_RELAXED);
-	} else if (g_resolver_pool) {
+	}
+	else if (g_resolver_pool)
+	{
 		__atomic_fetch_add(&g_resolver_pool->ring_full, 1u, __ATOMIC_RELAXED);
 	}
 	pthread_mutex_unlock(&sink->mutex);
-	if (pushed) {
+	if (pushed)
+	{
 		sink_wakeup(sink);
 		return;
 	}
@@ -134,7 +143,8 @@ int resolver_quota_ok_locked(resolver_sink *sink)
 
 void resolver_quota_inc_locked(resolver_sink *sink, resolve_slot *slot)
 {
-	if (sink->kind == RESOLVER_SINK_DIRECT) {
+	if (sink->kind == RESOLVER_SINK_DIRECT)
+	{
 		g_resolver_pool->direct_used++;
 		slot->quota_kind = RESOLVER_QUOTA_DIRECT;
 		return;
@@ -155,16 +165,21 @@ bool resolver_sink_open(int kind, resolver_sink **out)
 	if (!resolver_start())
 		return false;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	if (g_resolver_pool->stopping) {
+	if (g_resolver_pool->stopping)
+	{
 		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return false;
 	}
-	if (kind == RESOLVER_SINK_DIRECT) {
+	if (kind == RESOLVER_SINK_DIRECT)
+	{
 		quota = RESOLVER_DIRECT_RESERVE;
-	} else {
+	}
+	else
+	{
 		int remain = RESOLVER_SLOTS - RESOLVER_INFRA_RESERVE -
-				RESOLVER_DIRECT_RESERVE - g_resolver_pool->listener_quota_assigned;
-		if (remain <= 0) {
+		             RESOLVER_DIRECT_RESERVE - g_resolver_pool->listener_quota_assigned;
+		if (remain <= 0)
+		{
 			pthread_mutex_unlock(&g_resolver_pool->mu);
 			return false;
 		}
@@ -203,7 +218,8 @@ bool resolver_sink_open(int kind, resolver_sink **out)
 	*out = sink;
 	return true;
 fail_sink:
-	if (sink) {
+	if (sink)
+	{
 		if (sink->pipe_read >= 0)
 			close(sink->pipe_read);
 		if (sink->pipe_write >= 0)
@@ -236,7 +252,8 @@ void resolver_sink_destroy(resolver_sink *sink)
 	if (!sink)
 		return;
 	pthread_mutex_lock(&sink->mutex);
-	while (sink->ring_count > 0 && n < RESOLVER_SLOTS) {
+	while (sink->ring_count > 0 && n < RESOLVER_SLOTS)
+	{
 		batch[n++] = sink->ring[sink->ring_head];
 		sink->ring[sink->ring_head] = NULL;
 		sink->ring_head++;
@@ -245,7 +262,8 @@ void resolver_sink_destroy(resolver_sink *sink)
 		sink->ring_count--;
 	}
 	pthread_mutex_unlock(&sink->mutex);
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < n; i++)
+	{
 		resolver_sink *die = NULL;
 		pthread_mutex_lock(&g_resolver_pool->mu);
 		if (batch[i])
@@ -254,11 +272,13 @@ void resolver_sink_destroy(resolver_sink *sink)
 		if (die && die != sink)
 			resolver_sink_destroy(die);
 	}
-	if (sink->pipe_read >= 0) {
+	if (sink->pipe_read >= 0)
+	{
 		close(sink->pipe_read);
 		sink->pipe_read = -1;
 	}
-	if (sink->pipe_write >= 0) {
+	if (sink->pipe_write >= 0)
+	{
 		close(sink->pipe_write);
 		sink->pipe_write = -1;
 	}
@@ -294,7 +314,8 @@ size_t resolver_drain(resolver_sink *sink, resolve_slot **out, size_t max_out)
 	size_t i;
 	if (!sink || !out || max_out == 0)
 		return 0;
-	for (;;) {
+	for (;;)
+	{
 		ssize_t r = read(sink->pipe_read, buf, sizeof(buf));
 		if (r < 0 && errno == EINTR)
 			continue;
@@ -302,7 +323,8 @@ size_t resolver_drain(resolver_sink *sink, resolve_slot **out, size_t max_out)
 			break;
 	}
 	pthread_mutex_lock(&sink->mutex);
-	while (sink->ring_count > 0 && n < max_out) {
+	while (sink->ring_count > 0 && n < max_out)
+	{
 		out[n++] = sink->ring[sink->ring_head];
 		sink->ring[sink->ring_head] = NULL;
 		sink->ring_head++;
@@ -314,11 +336,11 @@ size_t resolver_drain(resolver_sink *sink, resolve_slot **out, size_t max_out)
 	if (!g_resolver_pool)
 		return n;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < n; i++)
+	{
 		if (out[i])
 			out[i]->in_ring = 0;
 	}
 	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return n;
 }
-

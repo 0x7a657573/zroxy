@@ -45,9 +45,14 @@
 /* Set when the monitor starts, a few milliseconds after the process does. */
 static time_t mon_process_start;
 
-typedef enum { MON_READ, MON_WRITE } mon_phase;
+typedef enum
+{
+	MON_READ,
+	MON_WRITE
+} mon_phase;
 
-typedef struct {
+typedef struct
+{
 	int fd;
 	mon_phase phase;
 	uint8_t header[MON_MAX_HEADER];
@@ -71,12 +76,12 @@ struct mon
 	int fd;
 	uint16_t Port;
 	statistics_t *state;
-	mon_section_t *sections; /* guarded by stats_lock; nodes are never freed */
+	mon_section_t *sections;    /* guarded by stats_lock; nodes are never freed */
 	pthread_mutex_t stats_lock; /* guards the state list head only */
-	char *token; /* optional bearer secret; NULL disables authentication */
-	int header_timeout; /* seconds to wait for a complete header */
-	pthread_t thread; /* joined by monitor_stop */
-	int wake[2]; /* pipe that wakes the monitor thread */
+	char *token;                /* optional bearer secret; NULL disables authentication */
+	int header_timeout;         /* seconds to wait for a complete header */
+	pthread_t thread;           /* joined by monitor_stop */
+	int wake[2];                /* pipe that wakes the monitor thread */
 	reactor reactor;
 	mon_client_t clients[MON_MAX_CLIENTS];
 };
@@ -89,7 +94,7 @@ static bool http_headers_done(const uint8_t *buf, size_t len)
 	for (i = 0; i + 3 < len; i++)
 	{
 		if (buf[i] == '\r' && buf[i + 1] == '\n' &&
-		    buf[i + 2] == '\r' && buf[i + 3] == '\n')
+		        buf[i + 2] == '\r' && buf[i + 3] == '\n')
 			return true;
 	}
 	return false;
@@ -139,7 +144,7 @@ static int mon_classify_line(const uint8_t *buf, size_t line_len)
 	if (!(path_len == 1 && sp1[1] == '/'))
 		return 404;
 	if (!(ver_len == 8 &&
-	      (memcmp(sp2 + 1, "HTTP/1.0", 8) == 0 || memcmp(sp2 + 1, "HTTP/1.1", 8) == 0)))
+	            (memcmp(sp2 + 1, "HTTP/1.0", 8) == 0 || memcmp(sp2 + 1, "HTTP/1.1", 8) == 0)))
 		return 400;
 	return 0;
 }
@@ -247,7 +252,7 @@ static size_t mon_send_empty(uint8_t *out, size_t cap, int code)
 	else if (code == 500)
 		text = "500 Internal Server Error";
 	n = snprintf((char *)out, cap,
-		"HTTP/1.1 %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", text);
+	        "HTTP/1.1 %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", text);
 	if (n < 0 || (size_t)n >= cap)
 		return 0;
 	return (size_t)n;
@@ -295,7 +300,7 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 		return NULL;
 	}
 
-	if(net_listen_ipv4(addr.s_addr, port, &sockfd)==false)
+	if (net_listen_ipv4(addr.s_addr, port, &sockfd) == false)
 	{
 		log_error("monitor can not listen on Port %i", port);
 		return NULL;
@@ -363,8 +368,8 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 		return NULL;
 	}
 	if (!reactor_add(&mon->reactor, sockfd, RE_IN, mon) ||
-	    !reactor_add(&mon->reactor, mon->wake[0], RE_IN, mon->wake) ||
-	    pthread_create(&mon->thread, NULL, monitor_thread, (void*)mon) != 0)
+	        !reactor_add(&mon->reactor, mon->wake[0], RE_IN, mon->wake) ||
+	        pthread_create(&mon->thread, NULL, monitor_thread, (void *)mon) != 0)
 	{
 		log_error("monitor thread create failed");
 		reactor_close(&mon->reactor);
@@ -380,12 +385,12 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	return mon;
 }
 
-bool monitor_attach_stat(mon_t *self,statistics_t *stat)
+bool monitor_attach_stat(mon_t *self, statistics_t *stat)
 {
 	if (!self || !stat)
 		return false;
 	pthread_mutex_lock(&self->stats_lock);
-	stat->next = self->state;	/* newest first, as the report lists them */
+	stat->next = self->state; /* newest first, as the report lists them */
 	self->state = stat;
 	pthread_mutex_unlock(&self->stats_lock);
 	return true;
@@ -477,7 +482,7 @@ static bool monitor_read_client(mon_t *mon, mon_client_t *client)
 	for (;;)
 	{
 		n = read(client->fd, client->header + client->header_len,
-			sizeof(client->header) - client->header_len);
+		        sizeof(client->header) - client->header_len);
 		if (n < 0 && errno == EINTR)
 			continue;
 		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
@@ -495,7 +500,7 @@ static bool monitor_read_client(mon_t *mon, mon_client_t *client)
 			if (status != 0)
 			{
 				client->out_len = mon_send_empty(client->response,
-					sizeof(client->response), status);
+				        sizeof(client->response), status);
 				client->out_off = 0;
 				client->phase = MON_WRITE;
 				client->deadline_ms = net_mono_ms() + (int64_t)mon->header_timeout * 1000;
@@ -509,10 +514,10 @@ static bool monitor_read_client(mon_t *mon, mon_client_t *client)
 		{
 			if (!mon_authorized(client->header, client->header_len, mon->token))
 				client->out_len = mon_send_empty(client->response,
-					sizeof(client->response), 401);
+				        sizeof(client->response), 401);
 			else
 				client->out_len = monitor_send_report(client->response,
-					sizeof(client->response), mon);
+				        sizeof(client->response), mon);
 			client->out_off = 0;
 			client->phase = MON_WRITE;
 			client->deadline_ms = net_mono_ms() + (int64_t)mon->header_timeout * 1000;
@@ -537,7 +542,7 @@ static bool monitor_write_client(mon_t *mon, mon_client_t *client)
 	while (client->out_off < client->out_len)
 	{
 		n = send(client->fd, client->response + client->out_off,
-			client->out_len - client->out_off, MSG_NOSIGNAL);
+		        client->out_len - client->out_off, MSG_NOSIGNAL);
 		if (n < 0 && errno == EINTR)
 			continue;
 		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
@@ -569,7 +574,7 @@ static void *monitor_thread(void *vargp)
 		timeout = -1;
 		for (i = 0; i < MON_MAX_CLIENTS; i++)
 			if (mon->clients[i].fd >= 0 &&
-			    (earliest < 0 || mon->clients[i].deadline_ms < earliest))
+			        (earliest < 0 || mon->clients[i].deadline_ms < earliest))
 				earliest = mon->clients[i].deadline_ms;
 		if (earliest >= 0)
 		{
@@ -640,7 +645,7 @@ void monitor_stop(mon_t *self)
 	close(self->fd);
 	close(self->wake[0]);
 	close(self->wake[1]);
-	for (sec = self->sections; sec; )
+	for (sec = self->sections; sec;)
 	{
 		mon_section_t *next = sec->next;
 		free(sec);
@@ -719,8 +724,8 @@ static void mon_read_status(long long *threads, long long *rss_kib, long long *h
 	struct kinfo_proc kp;
 	struct rusage ru;
 	size_t len;
-	int mib[6] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid(),
-		sizeof(struct kinfo_proc), 1 };
+	int mib[6] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid(),
+	        sizeof(struct kinfo_proc), 1};
 
 	*threads = -1;
 	*rss_kib = -1;
@@ -740,11 +745,13 @@ static void mon_read_status(long long *threads, long long *rss_kib, long long *h
 		mib[2] = KERN_PROC_PID | KERN_PROC_SHOW_THREADS;
 		mib[5] = 0;
 		if (sysctl(mib, 6, NULL, &all_len, NULL, 0) == 0 &&
-		    all_len > 0 && all_len % sizeof(*all) == 0) {
+		        all_len > 0 && all_len % sizeof(*all) == 0)
+		{
 			all = malloc(all_len);
 			mib[5] = (int)(all_len / sizeof(*all));
 			if (all && sysctl(mib, 6, all, &all_len, NULL, 0) == 0 &&
-			    all_len % sizeof(*all) == 0) {
+			        all_len % sizeof(*all) == 0)
+			{
 				for (i = 0; i < (int)(all_len / sizeof(*all)); i++)
 					if (all[i].p_tid != -1)
 						count++;
@@ -760,12 +767,13 @@ static void mon_read_status(long long *threads, long long *rss_kib, long long *h
 {
 	struct kinfo_proc kp;
 	size_t len = sizeof(kp);
-	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid() };
+	int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
 
 	*threads = -1;
 	*rss_kib = -1;
 	*hwm_kib = -1;
-	if (sysctl(mib, 4, &kp, &len, NULL, 0) == 0 && len >= sizeof(kp)) {
+	if (sysctl(mib, 4, &kp, &len, NULL, 0) == 0 && len >= sizeof(kp))
+	{
 		*threads = (long long)kp.ki_numthreads;
 		*rss_kib = (long long)kp.ki_rssize * (long long)getpagesize() / 1024;
 	}
@@ -857,12 +865,12 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 
 	open_files = count_open_files();
 	if (!mon_append(&ptr, end, "{\n\"ZroxyVersion\" : \"%s\",\n", version) ||
-	    !mon_append(&ptr, end, "\"CountOfOpenFile\" : %i,\n", open_files) ||
-	    !mon_process_json(&ptr, end, open_files))
+	        !mon_append(&ptr, end, "\"CountOfOpenFile\" : %i,\n", open_files) ||
+	        !mon_process_json(&ptr, end, open_files))
 	{
 		return mon_report_failed(response, response_cap, owner);
 	}
-	
+
 	/* Sections are added while the monitor runs, so walk the list locked. */
 	pthread_mutex_lock(&owner->stats_lock);
 	for (section = owner->sections; section && sections_ok; section = section->next)
@@ -878,7 +886,7 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 	}
 
 	statistics_t *sta = stat;
-	while(sta)
+	while (sta)
 	{
 		stat_t stdata;
 		stats_extra_fn extra;
@@ -911,7 +919,7 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 			return mon_report_failed(response, response_cap, owner);
 		}
 
-		sta = (statistics_t*)sta->next;
+		sta = (statistics_t *)sta->next;
 	}
 
 	if (ptr - message < 2)
@@ -926,9 +934,9 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 		int hlen;
 
 		hlen = snprintf(head, sizeof(head),
-			"HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\n"
-			"Content-Length: %zu\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-			body_len);
+		        "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\n"
+		        "Content-Length: %zu\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+		        body_len);
 		if (hlen < 0 || (size_t)hlen >= sizeof(head))
 		{
 			return mon_report_failed(response, response_cap, owner);
@@ -966,7 +974,7 @@ static int count_open_files(void)
 		long fd;
 
 		if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
-			continue;	/* "." and ".." */
+			continue; /* "." and ".." */
 		fd = strtol(entry->d_name, &tail, 10);
 		if (*tail == '\0' && fd == (long)self_fd)
 			continue;

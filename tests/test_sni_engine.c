@@ -44,7 +44,8 @@ static const char EVIL_REQ[] = "GET / HTTP/1.1\r\nHost: evil.test\r\n\r\n";
 
 static void expect_true(bool value, const char *name)
 {
-	if (!value) {
+	if (!value)
+	{
 		fprintf(stderr, "FAIL: %s\n", name);
 		failures++;
 	}
@@ -52,7 +53,8 @@ static void expect_true(bool value, const char *name)
 
 static void expect_int(int actual, int expected, const char *name)
 {
-	if (actual != expected) {
+	if (actual != expected)
+	{
 		fprintf(stderr, "FAIL: %s expected %d got %d\n", name, expected, actual);
 		failures++;
 	}
@@ -98,7 +100,7 @@ static void test_net_set_nodelay(void)
 		return;
 	expect_true(net_set_nodelay(fd), "net_set_nodelay succeeds");
 	expect_true(getsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &value, &len) == 0,
-		"get TCP_NODELAY");
+	        "get TCP_NODELAY");
 	expect_int(value, 1, "TCP_NODELAY enabled");
 	close(fd);
 }
@@ -107,9 +109,11 @@ static int write_full(int fd, const void *buf, size_t len)
 {
 	const uint8_t *p = (const uint8_t *)buf;
 	size_t off = 0;
-	while (off < len) {
+	while (off < len)
+	{
 		ssize_t n = write(fd, p + off, len - off);
-		if (n < 0) {
+		if (n < 0)
+		{
 			if (errno == EINTR)
 				continue;
 			return -1;
@@ -128,7 +132,8 @@ static int wait_fd(int fd, short ev, int timeout_ms)
 	pfd.fd = fd;
 	pfd.events = ev;
 	pfd.revents = 0;
-	do {
+	do
+	{
 		rc = poll(&pfd, 1, timeout_ms);
 	} while (rc < 0 && errno == EINTR);
 	if (rc <= 0)
@@ -141,7 +146,8 @@ static int read_full_ms(int fd, void *buf, size_t len, int timeout_ms)
 	uint8_t *p = (uint8_t *)buf;
 	size_t off = 0;
 	int64_t deadline = mono_ms() + timeout_ms;
-	while (off < len) {
+	while (off < len)
+	{
 		ssize_t n;
 		int left = (int)(deadline - mono_ms());
 		if (left < 0)
@@ -149,7 +155,8 @@ static int read_full_ms(int fd, void *buf, size_t len, int timeout_ms)
 		if (wait_fd(fd, POLLIN, left) != 0)
 			return -1;
 		n = read(fd, p + off, len - off);
-		if (n < 0) {
+		if (n < 0)
+		{
 			if (errno == EINTR)
 				continue;
 			return -1;
@@ -165,7 +172,8 @@ static int read_eof_ms(int fd, uint8_t *buf, size_t cap, size_t *out, int timeou
 {
 	size_t got = 0;
 	int64_t deadline = mono_ms() + timeout_ms;
-	while (got < cap) {
+	while (got < cap)
+	{
 		ssize_t n;
 		int left = (int)(deadline - mono_ms());
 		if (left < 0)
@@ -173,12 +181,14 @@ static int read_eof_ms(int fd, uint8_t *buf, size_t cap, size_t *out, int timeou
 		if (wait_fd(fd, POLLIN, left) != 0)
 			return -1;
 		n = read(fd, buf + got, cap - got);
-		if (n < 0) {
+		if (n < 0)
+		{
 			if (errno == EINTR)
 				continue;
 			return -1;
 		}
-		if (n == 0) {
+		if (n == 0)
+		{
 			*out = got;
 			return 0;
 		}
@@ -202,8 +212,9 @@ static int listen_loopback(uint16_t *port)
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	addr.sin_port = 0;
 	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-			listen(fd, 1024) != 0 ||
-			getsockname(fd, (struct sockaddr *)&addr, &len) != 0) {
+	        listen(fd, 1024) != 0 ||
+	        getsockname(fd, (struct sockaddr *)&addr, &len) != 0)
+	{
 		close(fd);
 		return -1;
 	}
@@ -220,7 +231,8 @@ static int connect_local(uint16_t port, int timeout_ms)
 	if (fd < 0)
 		return -1;
 	nodelay(fd);
-	if (set_nb(fd) != 0) {
+	if (set_nb(fd) != 0)
+	{
 		close(fd);
 		return -1;
 	}
@@ -229,15 +241,18 @@ static int connect_local(uint16_t port, int timeout_ms)
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	addr.sin_port = htons(port);
 	rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-	if (rc < 0 && errno != EINPROGRESS) {
+	if (rc < 0 && errno != EINPROGRESS)
+	{
 		close(fd);
 		return -1;
 	}
-	if (rc < 0) {
+	if (rc < 0)
+	{
 		int err = 0;
 		socklen_t el = sizeof(err);
 		if (wait_fd(fd, POLLOUT, timeout_ms) != 0 ||
-				getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) != 0 || err != 0) {
+		        getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) != 0 || err != 0)
+		{
 			close(fd);
 			return -1;
 		}
@@ -252,7 +267,8 @@ static int count_dir(const char *path)
 	int n = 0;
 	if (!d)
 		return -1;
-	while ((de = readdir(d)) != NULL) {
+	while ((de = readdir(d)) != NULL)
+	{
 		if (de->d_name[0] == '.')
 			continue;
 		n++;
@@ -264,17 +280,19 @@ static int count_dir(const char *path)
 static int count_threads(void)
 {
 #if defined(__OpenBSD__)
-	int mib[6] = { CTL_KERN, KERN_PROC, KERN_PROC_PID | KERN_PROC_SHOW_THREADS,
-		(int)getpid(), sizeof(struct kinfo_proc), 0 };
+	int mib[6] = {CTL_KERN, KERN_PROC, KERN_PROC_PID | KERN_PROC_SHOW_THREADS,
+	        (int)getpid(), sizeof(struct kinfo_proc), 0};
 	struct kinfo_proc *procs = NULL;
 	size_t len = 0;
 	int count = -1;
 	if (sysctl(mib, 6, NULL, &len, NULL, 0) == 0 &&
-	    len > 0 && len % sizeof(*procs) == 0) {
+	        len > 0 && len % sizeof(*procs) == 0)
+	{
 		procs = malloc(len);
 		mib[5] = (int)(len / sizeof(*procs));
 		if (procs && sysctl(mib, 6, procs, &len, NULL, 0) == 0 &&
-		    len % sizeof(*procs) == 0) {
+		        len % sizeof(*procs) == 0)
+		{
 			int i;
 			count = 0;
 			for (i = 0; i < (int)(len / sizeof(*procs)); i++)
@@ -284,19 +302,23 @@ static int count_threads(void)
 	}
 	free(procs);
 	/* Ignore a resolver thread that exits between samples. */
-	if (count >= 0) {
+	if (count >= 0)
+	{
 		int prev = count;
 		int i;
-		for (i = 0; i < 20; i++) {
+		for (i = 0; i < 20; i++)
+		{
 			usleep(10000);
 			count = -1;
 			len = 0;
 			if (sysctl(mib, 6, NULL, &len, NULL, 0) == 0 &&
-			    len > 0 && len % sizeof(*procs) == 0) {
+			        len > 0 && len % sizeof(*procs) == 0)
+			{
 				procs = malloc(len);
 				mib[5] = (int)(len / sizeof(*procs));
 				if (procs && sysctl(mib, 6, procs, &len, NULL, 0) == 0 &&
-				    len % sizeof(*procs) == 0) {
+				        len % sizeof(*procs) == 0)
+				{
 					int j;
 					count = 0;
 					for (j = 0; j < (int)(len / sizeof(*procs)); j++)
@@ -317,7 +339,7 @@ static int count_threads(void)
 #elif defined(__FreeBSD__)
 	struct kinfo_proc kp;
 	size_t len = sizeof(kp);
-	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid() };
+	int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
 	if (sysctl(mib, 4, &kp, &len, NULL, 0) == 0 && len >= sizeof(kp))
 		return kp.ki_numthreads;
 	return -1;
@@ -325,7 +347,8 @@ static int count_threads(void)
 	int prev = count_dir("/proc/self/task");
 	int i;
 	/* Ignore a resolver thread that exits between samples. */
-	for (i = 0; i < 20; i++) {
+	for (i = 0; i < 20; i++)
+	{
 		int now;
 		usleep(10000);
 		now = count_dir("/proc/self/task");
@@ -351,7 +374,8 @@ static void raise_nofile(void)
 	struct rlimit rl;
 	if (getrlimit(RLIMIT_NOFILE, &rl) != 0)
 		return;
-	if (rl.rlim_cur < 16384) {
+	if (rl.rlim_cur < 16384)
+	{
 		rl.rlim_cur = rl.rlim_max < 16384 ? rl.rlim_max : 16384;
 		setrlimit(RLIMIT_NOFILE, &rl);
 	}
@@ -412,7 +436,8 @@ static size_t first_host_len(const uint8_t *msg, size_t len)
 {
 	size_t i;
 	char host[ZROXY_MAX_HOSTNAME];
-	for (i = 1; i <= len; i++) {
+	for (i = 1; i <= len; i++)
+	{
 		host[0] = '\0';
 		if (net_get_host((uint8_t *)msg, (uint32_t)i, host, ZROXY_MAX_HOSTNAME))
 			return i;
@@ -421,7 +446,7 @@ static size_t first_host_len(const uint8_t *msg, size_t len)
 }
 
 static sniclient_t *make_client(int fd, uint16_t remote, int timeout,
-		statistics_t *st, filter_t *wl, sockshost_t *socks)
+        statistics_t *st, filter_t *wl, sockshost_t *socks)
 {
 	sniclient_t *c = (sniclient_t *)calloc(1, sizeof(*c));
 	if (!c)
@@ -440,7 +465,8 @@ static sniclient_t *make_client(int fd, uint16_t remote, int timeout,
 static int wait_client_bytes(uint32_t target, int timeout_ms)
 {
 	int64_t deadline = mono_ms() + timeout_ms;
-	while (sni_test_client_bytes() < target) {
+	while (sni_test_client_bytes() < target)
+	{
 		if (mono_ms() > deadline)
 			return -1;
 		usleep(1000);
@@ -452,7 +478,8 @@ static int wait_client_bytes(uint32_t target, int timeout_ms)
 
 #define ECHO_MAX 160
 
-typedef struct echo_conn {
+typedef struct echo_conn
+{
 	int fd;
 	int hold;
 	uint8_t pending[4096];
@@ -460,7 +487,8 @@ typedef struct echo_conn {
 	size_t pend_off;
 } echo_conn;
 
-typedef struct echo_srv {
+typedef struct echo_srv
+{
 	int lfd;
 	int wake_r;
 	int wake_w;
@@ -476,7 +504,8 @@ static int has_bytes(const uint8_t *buf, size_t n, const char *lit)
 	size_t i;
 	if (n < sl)
 		return 0;
-	for (i = 0; i + sl <= n; i++) {
+	for (i = 0; i + sl <= n; i++)
+	{
 		if (memcmp(buf + i, lit, sl) == 0)
 			return 1;
 	}
@@ -496,7 +525,8 @@ static void echo_queue(echo_conn *c, const uint8_t *buf, size_t n)
 {
 	if (c->hold)
 		return;
-	if (c->pend_len + n > sizeof(c->pending)) {
+	if (c->pend_len + n > sizeof(c->pending))
+	{
 		echo_close_conn(c);
 		return;
 	}
@@ -506,9 +536,11 @@ static void echo_queue(echo_conn *c, const uint8_t *buf, size_t n)
 
 static void echo_flush(echo_conn *c)
 {
-	while (c->fd >= 0 && c->pend_off < c->pend_len) {
+	while (c->fd >= 0 && c->pend_off < c->pend_len)
+	{
 		ssize_t n = write(c->fd, c->pending + c->pend_off, c->pend_len - c->pend_off);
-		if (n < 0) {
+		if (n < 0)
+		{
 			if (errno == EINTR)
 				continue;
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -516,13 +548,15 @@ static void echo_flush(echo_conn *c)
 			echo_close_conn(c);
 			return;
 		}
-		if (n == 0) {
+		if (n == 0)
+		{
 			echo_close_conn(c);
 			return;
 		}
 		c->pend_off += (size_t)n;
 	}
-	if (c->pend_off == c->pend_len) {
+	if (c->pend_off == c->pend_len)
+	{
 		c->pend_off = 0;
 		c->pend_len = 0;
 	}
@@ -534,7 +568,8 @@ static void *echo_main(void *arg)
 	int i;
 	for (i = 0; i < ECHO_MAX; i++)
 		srv->conns[i].fd = -1;
-	for (;;) {
+	for (;;)
+	{
 		struct pollfd pfds[ECHO_MAX + 2];
 		int map[ECHO_MAX + 2];
 		int np = 0;
@@ -549,7 +584,8 @@ static void *echo_main(void *arg)
 		pfds[np].revents = 0;
 		map[np] = -2;
 		np++;
-		for (i = 0; i < ECHO_MAX; i++) {
+		for (i = 0; i < ECHO_MAX; i++)
+		{
 			short ev;
 			if (srv->conns[i].fd < 0)
 				continue;
@@ -563,12 +599,14 @@ static void *echo_main(void *arg)
 			np++;
 		}
 		rc = poll(pfds, (nfds_t)np, 200);
-		if (rc < 0) {
+		if (rc < 0)
+		{
 			if (errno == EINTR)
 				continue;
 			break;
 		}
-		for (i = 0; i < np; i++) {
+		for (i = 0; i < np; i++)
+		{
 			echo_conn *c;
 			uint8_t tmp[4096];
 			ssize_t n;
@@ -576,7 +614,8 @@ static void *echo_main(void *arg)
 				continue;
 			if (map[i] == -2)
 				return NULL;
-			if (map[i] == -1) {
+			if (map[i] == -1)
+			{
 				int fd = accept(srv->lfd, NULL, NULL);
 				int slot;
 				if (fd < 0)
@@ -586,14 +625,17 @@ static void *echo_main(void *arg)
 				slot = -1;
 				{
 					int s;
-					for (s = 0; s < ECHO_MAX; s++) {
-						if (srv->conns[s].fd < 0) {
+					for (s = 0; s < ECHO_MAX; s++)
+					{
+						if (srv->conns[s].fd < 0)
+						{
 							slot = s;
 							break;
 						}
 					}
 				}
-				if (slot < 0) {
+				if (slot < 0)
+				{
 					close(fd);
 					continue;
 				}
@@ -605,21 +647,30 @@ static void *echo_main(void *arg)
 			c = &srv->conns[map[i]];
 			if (c->fd < 0)
 				continue;
-			if (pfds[i].revents & (POLLERR | POLLNVAL)) {
+			if (pfds[i].revents & (POLLERR | POLLNVAL))
+			{
 				echo_close_conn(c);
 				continue;
 			}
-			if (pfds[i].revents & POLLIN) {
+			if (pfds[i].revents & POLLIN)
+			{
 				n = read(c->fd, tmp, sizeof(tmp));
-				if (n < 0) {
+				if (n < 0)
+				{
 					if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
 						echo_close_conn(c);
-				} else if (n == 0) {
+				}
+				else if (n == 0)
+				{
 					echo_flush(c);
 					echo_close_conn(c);
-				} else if (!c->hold && has_bytes(tmp, (size_t)n, "HOLD")) {
+				}
+				else if (!c->hold && has_bytes(tmp, (size_t)n, "HOLD"))
+				{
 					c->hold = 1;
-				} else if (!c->hold) {
+				}
+				else if (!c->hold)
+				{
 					echo_queue(c, tmp, (size_t)n);
 					echo_flush(c);
 				}
@@ -638,14 +689,16 @@ static int echo_start(echo_srv *srv)
 	srv->lfd = listen_loopback(&srv->port);
 	if (srv->lfd < 0)
 		return -1;
-	if (set_nb(srv->lfd) != 0 || pipe(pipes) != 0) {
+	if (set_nb(srv->lfd) != 0 || pipe(pipes) != 0)
+	{
 		close(srv->lfd);
 		return -1;
 	}
 	srv->wake_r = pipes[0];
 	srv->wake_w = pipes[1];
 	set_nb(srv->wake_r);
-	if (pthread_create(&srv->thread, NULL, echo_main, srv) != 0) {
+	if (pthread_create(&srv->thread, NULL, echo_main, srv) != 0)
+	{
 		close(srv->lfd);
 		close(srv->wake_r);
 		close(srv->wake_w);
@@ -658,7 +711,8 @@ static void echo_stop(echo_srv *srv)
 {
 	char b = 1;
 	int i;
-	if (srv->wake_w >= 0) {
+	if (srv->wake_w >= 0)
+	{
 		if (write(srv->wake_w, &b, 1) < 0)
 			perror("echo wake");
 	}
@@ -681,12 +735,14 @@ static int echo_roundtrip(uint16_t port, const void *msg, size_t len, int timeou
 	size_t got = 0;
 	if (fd < 0)
 		return -1;
-	if (write_full(fd, msg, len) != 0) {
+	if (write_full(fd, msg, len) != 0)
+	{
 		close(fd);
 		return -1;
 	}
 	shutdown(fd, SHUT_WR);
-	if (read_eof_ms(fd, buf, sizeof(buf), &got, timeout_ms) != 0) {
+	if (read_eof_ms(fd, buf, sizeof(buf), &got, timeout_ms) != 0)
+	{
 		close(fd);
 		return -1;
 	}
@@ -697,7 +753,7 @@ static int echo_roundtrip(uint16_t port, const void *msg, size_t len, int timeou
 }
 
 static void fill_listener(SniServer_t *cfg, uint16_t local, uint16_t remote, int timeout,
-		statistics_t *st, filter_t *wl, sockshost_t *socks)
+        statistics_t *st, filter_t *wl, sockshost_t *socks)
 {
 	memset(cfg, 0, sizeof(*cfg));
 	memcpy(cfg->Port.bindip, "127.0.0.1", 10);
@@ -749,12 +805,14 @@ static void test_split_prefixes(const uint8_t *msg, size_t len, const char *name
 	ready = first_host_len(msg, len);
 	snprintf(label, sizeof(label), "%s host becomes visible", name);
 	expect_true(ready > 1 && ready <= len, label);
-	if (ready == 0) {
+	if (ready == 0)
+	{
 		close(lfd);
 		return;
 	}
 	expect_true(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "prefix socketpair");
-	if (pair[0] < 0) {
+	if (pair[0] < 0)
+	{
 		close(lfd);
 		return;
 	}
@@ -763,14 +821,16 @@ static void test_split_prefixes(const uint8_t *msg, size_t len, const char *name
 	sni_test_reset_counters();
 	client = make_client(pair[1], port, 5, NULL, NULL, NULL);
 	expect_true(client != NULL, "prefix client");
-	if (!client || pthread_create(&tid, NULL, sni_client_handler, client) != 0) {
+	if (!client || pthread_create(&tid, NULL, sni_client_handler, client) != 0)
+	{
 		close(pair[0]);
 		close(pair[1]);
 		close(lfd);
 		free(client);
 		return;
 	}
-	for (i = 1; i < ready; i++) {
+	for (i = 1; i < ready; i++)
+	{
 		snprintf(label, sizeof(label), "%s consume prefix %zu", name, i);
 		expect_true(write_full(pair[0], msg + (i - 1), 1) == 0, label);
 		expect_true(wait_client_bytes((uint32_t)i, 2000) == 0, label);
@@ -787,11 +847,14 @@ static void test_split_prefixes(const uint8_t *msg, size_t len, const char *name
 			up = accept(lfd, NULL, NULL);
 		snprintf(label, sizeof(label), "%s upstream accepted", name);
 		expect_true(up >= 0, label);
-		if (up >= 0) {
+		if (up >= 0)
+		{
 			snprintf(label, sizeof(label), "%s full payload", name);
 			expect_true(read_full_ms(up, got, len, 2000) == 0, label);
-			if (failures == 0 || true) {
-				if (memcmp(got, msg, len) != 0) {
+			if (failures == 0 || true)
+			{
+				if (memcmp(got, msg, len) != 0)
+				{
 					snprintf(label, sizeof(label), "%s payload bytes", name);
 					expect_true(false, label);
 				}
@@ -829,7 +892,8 @@ static void test_partial_write_and_eagain(void)
 	sni_test_reset_counters();
 	expect_true(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "eagain pair");
 	client = make_client(pair[1], port, 5, NULL, NULL, NULL);
-	if (!client || pthread_create(&tid, NULL, sni_client_handler, client) != 0) {
+	if (!client || pthread_create(&tid, NULL, sni_client_handler, client) != 0)
+	{
 		expect_true(false, "eagain handler");
 		close(lfd);
 		return;
@@ -843,7 +907,8 @@ static void test_partial_write_and_eagain(void)
 		up = accept(lfd, NULL, NULL);
 	}
 	expect_true(up >= 0, "eagain accept");
-	if (up >= 0) {
+	if (up >= 0)
+	{
 		uint8_t got[128];
 		setsockopt(up, SOL_SOCKET, SO_RCVBUF, &one, sizeof(one));
 		expect_true(read_full_ms(up, got, sizeof(REQ) - 1, 2000) == 0, "eagain got request");
@@ -855,13 +920,16 @@ static void test_partial_write_and_eagain(void)
 		sni_test_set_faults(&faults);
 		memset(bulk, 0x61, sizeof(bulk));
 		deadline = mono_ms() + 2000;
-		while (mono_ms() < deadline && !client_blocked) {
+		while (mono_ms() < deadline && !client_blocked)
+		{
 			ssize_t n = write(pair[0], bulk, sizeof(bulk));
-			if (n > 0) {
+			if (n > 0)
+			{
 				sent += (size_t)n;
 				continue;
 			}
-			if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+			if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			{
 				client_blocked = 1;
 				break;
 			}
@@ -921,7 +989,8 @@ static void test_eintr_still_forwards(void)
 			up = accept(lfd, NULL, NULL);
 	}
 	expect_true(up >= 0, "eintr upstream");
-	if (up >= 0) {
+	if (up >= 0)
+	{
 		expect_true(read_full_ms(up, got, sizeof(REQ) - 1, 2000) == 0, "eintr payload");
 		expect_true(memcmp(got, REQ, sizeof(REQ) - 1) == 0, "eintr bytes");
 		close(up);
@@ -932,7 +1001,8 @@ static void test_eintr_still_forwards(void)
 	sni_test_clear_faults();
 }
 
-enum {
+enum
+{
 	SOCKS_NOAUTH = 1,
 	SOCKS_AUTH,
 	SOCKS_BAD_VER,
@@ -942,7 +1012,8 @@ enum {
 	SOCKS_TOR
 };
 
-typedef struct socks_job {
+typedef struct socks_job
+{
 	int lfd;
 	int mode;
 	const char *user;
@@ -965,10 +1036,12 @@ static int socks_write(int fd, const void *buf, size_t len, int split)
 {
 	const uint8_t *p = (const uint8_t *)buf;
 	size_t off = 0;
-	while (off < len) {
+	while (off < len)
+	{
 		size_t chunk = split ? 1 : (len - off);
 		ssize_t n = write(fd, p + off, chunk);
-		if (n < 0) {
+		if (n < 0)
+		{
 			if (errno == EINTR)
 				continue;
 			return -1;
@@ -986,18 +1059,21 @@ static void socks_relay(int a, int b)
 	int b_eof = 0;
 	set_nb(a);
 	set_nb(b);
-	while (!a_eof || !b_eof) {
+	while (!a_eof || !b_eof)
+	{
 		struct pollfd pfd[2];
 		int nfd = 0;
 		int rc;
 		uint8_t buf[2048];
-		if (!a_eof) {
+		if (!a_eof)
+		{
 			pfd[nfd].fd = a;
 			pfd[nfd].events = POLLIN;
 			pfd[nfd].revents = 0;
 			nfd++;
 		}
-		if (!b_eof) {
+		if (!b_eof)
+		{
 			pfd[nfd].fd = b;
 			pfd[nfd].events = POLLIN;
 			pfd[nfd].revents = 0;
@@ -1008,7 +1084,8 @@ static void socks_relay(int a, int b)
 		rc = poll(pfd, (nfds_t)nfd, 2000);
 		if (rc <= 0)
 			break;
-		for (rc = 0; rc < nfd; rc++) {
+		for (rc = 0; rc < nfd; rc++)
+		{
 			ssize_t n;
 			int src;
 			int dst;
@@ -1017,7 +1094,8 @@ static void socks_relay(int a, int b)
 			src = pfd[rc].fd;
 			dst = src == a ? b : a;
 			n = read(src, buf, sizeof(buf));
-			if (n <= 0) {
+			if (n <= 0)
+			{
 				if (src == a)
 					a_eof = 1;
 				else
@@ -1044,11 +1122,13 @@ static void *socks_thread(void *arg)
 	if (fd < 0)
 		return NULL;
 	nodelay(fd);
-	if (socks_read(fd, hdr, 2) != 0 || hdr[1] > sizeof(methods)) {
+	if (socks_read(fd, hdr, 2) != 0 || hdr[1] > sizeof(methods))
+	{
 		close(fd);
 		return NULL;
 	}
-	if (socks_read(fd, methods, hdr[1]) != 0) {
+	if (socks_read(fd, methods, hdr[1]) != 0)
+	{
 		close(fd);
 		return NULL;
 	}
@@ -1056,13 +1136,15 @@ static void *socks_thread(void *arg)
 	for (int i = 0; i < hdr[1]; i++)
 		if (methods[i] == 0x02)
 			job->offered_auth = 1;
-	if (job->mode == SOCKS_BAD_VER) {
+	if (job->mode == SOCKS_BAD_VER)
+	{
 		socks_write(fd, "\x04\x00", 2, job->split);
 		close(fd);
 		job->ok = 1;
 		return NULL;
 	}
-	if (job->mode == SOCKS_BAD_METHOD) {
+	if (job->mode == SOCKS_BAD_METHOD)
+	{
 		socks_write(fd, "\x05\xff", 2, job->split);
 		close(fd);
 		job->ok = 1;
@@ -1070,66 +1152,81 @@ static void *socks_thread(void *arg)
 	}
 	/* SOCKS_TOR selects username/password whenever the client offers it. */
 	if (job->mode == SOCKS_AUTH || job->mode == SOCKS_BAD_AUTH ||
-			(job->mode == SOCKS_TOR && job->offered_auth)) {
+	        (job->mode == SOCKS_TOR && job->offered_auth))
+	{
 		uint8_t alen[2];
 		uint8_t auth[512];
 		size_t need;
-		if (socks_write(fd, "\x05\x02", 2, job->split) != 0) {
+		if (socks_write(fd, "\x05\x02", 2, job->split) != 0)
+		{
 			close(fd);
 			return NULL;
 		}
-		if (socks_read(fd, alen, 2) != 0) {
+		if (socks_read(fd, alen, 2) != 0)
+		{
 			close(fd);
 			return NULL;
 		}
 		need = (size_t)alen[1];
-		if (need > sizeof(auth) || socks_read(fd, auth, need) != 0) {
+		if (need > sizeof(auth) || socks_read(fd, auth, need) != 0)
+		{
 			close(fd);
 			return NULL;
 		}
-		if (socks_read(fd, alen, 1) != 0) {
+		if (socks_read(fd, alen, 1) != 0)
+		{
 			close(fd);
 			return NULL;
 		}
-		if (socks_read(fd, auth + need, alen[0]) != 0) {
+		if (socks_read(fd, auth + need, alen[0]) != 0)
+		{
 			close(fd);
 			return NULL;
 		}
-		if (job->mode == SOCKS_BAD_AUTH) {
+		if (job->mode == SOCKS_BAD_AUTH)
+		{
 			socks_write(fd, "\x01\x01", 2, job->split);
 			close(fd);
 			job->ok = 1;
 			return NULL;
 		}
-		if (job->user && (strlen(job->user) != need || memcmp(auth, job->user, need) != 0)) {
+		if (job->user && (strlen(job->user) != need || memcmp(auth, job->user, need) != 0))
+		{
 			close(fd);
 			return NULL;
 		}
-		if (socks_write(fd, "\x01\x00", 2, job->split) != 0) {
+		if (socks_write(fd, "\x01\x00", 2, job->split) != 0)
+		{
 			close(fd);
 			return NULL;
 		}
-	} else if (socks_write(fd, "\x05\x00", 2, job->split) != 0) {
+	}
+	else if (socks_write(fd, "\x05\x00", 2, job->split) != 0)
+	{
 		close(fd);
 		return NULL;
 	}
-	if (socks_read(fd, req, 4) != 0 || req[3] != 0x03) {
+	if (socks_read(fd, req, 4) != 0 || req[3] != 0x03)
+	{
 		close(fd);
 		return NULL;
 	}
-	if (socks_read(fd, req + 4, 1) != 0) {
+	if (socks_read(fd, req + 4, 1) != 0)
+	{
 		close(fd);
 		return NULL;
 	}
 	if (socks_read(fd, req + 5, req[4]) != 0 ||
-			socks_read(fd, req + 5 + req[4], 2) != 0) {
+	        socks_read(fd, req + 5 + req[4], 2) != 0)
+	{
 		close(fd);
 		return NULL;
 	}
 	memcpy(job->host, req + 5, req[4]);
 	job->host[req[4]] = '\0';
 	job->port = ((int)req[5 + req[4]] << 8) | req[6 + req[4]];
-	if (job->mode == SOCKS_BAD_REP) {
+	if (job->mode == SOCKS_BAD_REP)
+	{
 		memset(reply, 0, sizeof(reply));
 		reply[0] = 0x05;
 		reply[1] = 0x05;
@@ -1145,7 +1242,8 @@ static void *socks_thread(void *arg)
 	reply[4] = 127;
 	socks_write(fd, reply, 10, job->split);
 	up = connect_local((uint16_t)job->port, 2000);
-	if (up < 0) {
+	if (up < 0)
+	{
 		close(fd);
 		return NULL;
 	}
@@ -1181,11 +1279,13 @@ static void test_socks_mode(int mode, int with_auth, int split, const char *name
 	job.pass = "secret";
 	socks.host = (char *)"127.0.0.1";
 	socks.port = sport;
-	if (with_auth) {
+	if (with_auth)
+	{
 		socks.user = (char *)"alice";
 		socks.pass = (char *)"secret";
 	}
-	if (split) {
+	if (split)
+	{
 		faults.read_limit = 1;
 		faults.write_limit = 1;
 		sni_test_set_faults(&faults);
@@ -1197,14 +1297,16 @@ static void test_socks_mode(int mode, int with_auth, int split, const char *name
 	client = make_client(pair[1], eport, 4, NULL, NULL, &socks);
 	expect_true(client && pthread_create(&htid, NULL, sni_client_handler, client) == 0, "socks handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "socks client write");
-	if (mode == SOCKS_NOAUTH || mode == SOCKS_AUTH || mode == SOCKS_TOR) {
+	if (mode == SOCKS_NOAUTH || mode == SOCKS_AUTH || mode == SOCKS_TOR)
+	{
 		struct pollfd pfd;
 		pfd.fd = efd;
 		pfd.events = POLLIN;
 		if (poll(&pfd, 1, 3000) > 0)
 			up = accept(efd, NULL, NULL);
 		expect_true(up >= 0, name);
-		if (up >= 0) {
+		if (up >= 0)
+		{
 			expect_true(read_full_ms(up, got, sizeof(REQ) - 1, 3000) == 0, "socks upstream bytes");
 			expect_true(memcmp(got, REQ, sizeof(REQ) - 1) == 0, "socks upstream match");
 			expect_true(write_full(up, "OK", 2) == 0, "socks reply");
@@ -1217,7 +1319,9 @@ static void test_socks_mode(int mode, int with_auth, int split, const char *name
 		}
 		expect_true(strcmp(job.host, "localhost") == 0, "socks connect host");
 		expect_int(job.port, (int)eport, "socks connect port");
-	} else {
+	}
+	else
+	{
 		uint8_t sink[8];
 		size_t gotn = 0;
 		/* Protocol failure closes the client without reaching upstream. */
@@ -1347,13 +1451,15 @@ static void test_zero_timeout_relays(void)
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "zero-timeout request");
 	up = accept_ms(lfd, 2000);
 	expect_true(up >= 0, "zero-timeout upstream accepted");
-	if (up >= 0) {
+	if (up >= 0)
+	{
 		expect_true(read_full_ms(up, req, sizeof(REQ) - 1, 2000) == 0, "zero-timeout upstream read");
 		usleep(300000);
 		expect_true(write_full(up, "PONG", 4) == 0, "zero-timeout reply");
 	}
 	expect_true(read_full_ms(pair[0], reply, sizeof(reply), 2000) == 0 &&
-			memcmp(reply, "PONG", 4) == 0, "snitimeout 0 keeps an idle relay open");
+	                    memcmp(reply, "PONG", 4) == 0,
+	        "snitimeout 0 keeps an idle relay open");
 	start = mono_ms();
 	pthread_join(tid, NULL);
 	expect_true(mono_ms() - start < 2500, "snitimeout 0 still idles out");
@@ -1383,17 +1489,19 @@ static void test_idle_timeout_separate(void)
 	if (client)
 		client->SniConfig.sniidletimeout = 3;
 	expect_true(client && pthread_create(&tid, NULL, sni_client_handler, client) == 0,
-			"idle-separate handler");
+	        "idle-separate handler");
 	expect_true(write_full(pair[0], REQ, sizeof(REQ) - 1) == 0, "idle-separate request");
 	up = accept_ms(lfd, 2000);
 	expect_true(up >= 0, "idle-separate upstream accepted");
-	if (up >= 0) {
+	if (up >= 0)
+	{
 		expect_true(read_full_ms(up, req, sizeof(REQ) - 1, 2000) == 0, "idle-separate upstream read");
 		usleep(1600000);
 		expect_true(write_full(up, "PONG", 4) == 0, "idle-separate reply");
 	}
 	expect_true(read_full_ms(pair[0], reply, sizeof(reply), 2000) == 0 &&
-			memcmp(reply, "PONG", 4) == 0, "relay outlives snitimeout while idle");
+	                    memcmp(reply, "PONG", 4) == 0,
+	        "relay outlives snitimeout while idle");
 	start = mono_ms();
 	pthread_join(tid, NULL);
 	took = mono_ms() - start;
@@ -1443,7 +1551,8 @@ static void test_listener_self_exit(void)
 
 #define BULK_LEN (1024u * 1024u)
 
-typedef struct bulk_up {
+typedef struct bulk_up
+{
 	int lfd;
 	int ok;
 } bulk_up;
@@ -1457,11 +1566,13 @@ static void *bulk_upstream(void *arg)
 	int up = accept_ms(b->lfd, 2000);
 	if (up < 0)
 		return NULL;
-	if (read_full_ms(up, req, sizeof(REQ) - 1, 2000) != 0) {
+	if (read_full_ms(up, req, sizeof(REQ) - 1, 2000) != 0)
+	{
 		close(up);
 		return NULL;
 	}
-	while (sent < BULK_LEN) {
+	while (sent < BULK_LEN)
+	{
 		uint32_t i;
 		for (i = 0; i < sizeof(chunk); i++)
 			chunk[i] = (uint8_t)((sent + i) * 131u);
@@ -1490,7 +1601,8 @@ static void test_relay_budget(void)
 	memset(&b, 0, sizeof(b));
 	b.lfd = listen_loopback(&port);
 	expect_true(buf && b.lfd >= 0 && socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "budget setup");
-	if (!buf || b.lfd < 0) {
+	if (!buf || b.lfd < 0)
+	{
 		free(buf);
 		return;
 	}
@@ -1505,8 +1617,10 @@ static void test_relay_budget(void)
 	pthread_join(utid, NULL);
 	expect_true(b.ok, "budget upstream sent everything");
 	expect_int((int)got, (int)BULK_LEN, "budget transfer length");
-	for (i = 0; i < got; i++) {
-		if (buf[i] != (uint8_t)(i * 131u)) {
+	for (i = 0; i < got; i++)
+	{
+		if (buf[i] != (uint8_t)(i * 131u))
+		{
 			intact = 0;
 			break;
 		}
@@ -1562,7 +1676,8 @@ static void test_upstream_eof(void)
 			up = accept(lfd, NULL, NULL);
 	}
 	expect_true(up >= 0, "up-eof accept");
-	if (up >= 0) {
+	if (up >= 0)
+	{
 		uint8_t req[64];
 		expect_true(read_full_ms(up, req, sizeof(REQ) - 1, 2000) == 0, "up-eof read");
 		close(up);
@@ -1601,7 +1716,8 @@ static void test_half_close(void)
 			up = accept(lfd, NULL, NULL);
 	}
 	expect_true(up >= 0, "half accept");
-	if (up >= 0) {
+	if (up >= 0)
+	{
 		size_t got = 0;
 		uint8_t all[128];
 		expect_true(read_eof_ms(up, all, sizeof(all), &got, 2000) == 0, "upstream sees client half-close");
@@ -1643,7 +1759,8 @@ static void test_upstream_half_close(void)
 			up = accept(lfd, NULL, NULL);
 	}
 	expect_true(up >= 0, "up-half accept");
-	if (up >= 0) {
+	if (up >= 0)
+	{
 		expect_true(read_full_ms(up, req, sizeof(REQ) - 1, 2000) == 0, "up-half read request");
 		expect_true(write_full(up, "OK", 2) == 0, "up-half reply");
 		shutdown(up, SHUT_WR);
@@ -1710,13 +1827,15 @@ static void test_hello_with_trailing_data(void)
 	msg = malloc(total);
 	back = malloc(total);
 	expect_true(msg && back, "trailing buffers");
-	if (msg && back) {
+	if (msg && back)
+	{
 		memcpy(msg, hello, hello_len);
 		for (i = hello_len; i < total; i++)
 			msg[i] = (uint8_t)(i * 31u + 7u);
 		fd = connect_local(local, 1000);
 		expect_true(fd >= 0, "trailing connect");
-		if (fd >= 0) {
+		if (fd >= 0)
+		{
 			expect_true(write_full(fd, msg, total) == 0, "trailing write");
 			expect_true(read_full_ms(fd, back, total, 5000) == 0, "trailing echoed back");
 			expect_true(memcmp(msg, back, total) == 0, "trailing bytes unchanged");
@@ -1756,7 +1875,8 @@ static void test_alloc_failure(void)
 	sni_test_set_faults(&faults);
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0, "alloc connect");
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		expect_true(read_eof_ms(fd, sink, sizeof(sink), &got, 1000) == 0, "alloc failure closes");
 		close(fd);
 	}
@@ -1799,7 +1919,8 @@ static void test_stats_once(void)
 	{
 		int fd = connect_local(local, 1000);
 		expect_true(fd >= 0, "stats ip connect");
-		if (fd >= 0) {
+		if (fd >= 0)
+		{
 			uint8_t sink[8];
 			size_t got = 0;
 			write_full(fd, IP_REQ, sizeof(IP_REQ) - 1);
@@ -1813,7 +1934,8 @@ static void test_stats_once(void)
 	{
 		int fd = connect_local(local, 1000);
 		expect_true(fd >= 0, "stats timeout connect");
-		if (fd >= 0) {
+		if (fd >= 0)
+		{
 			uint8_t sink[8];
 			size_t got = 0;
 			read_eof_ms(fd, sink, sizeof(sink), &got, 2500);
@@ -1840,7 +1962,7 @@ static void test_whitelist_and_ip(void)
 	echo_srv echo;
 	sni_listener *ls = NULL;
 	SniServer_t cfg;
-	static const char *const allow[] = { "localhost" };
+	static const char *const allow[] = {"localhost"};
 	filter_t *wl;
 	uint16_t local = 0;
 	int binder;
@@ -1860,7 +1982,8 @@ static void test_whitelist_and_ip(void)
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, EVIL_REQ, sizeof(EVIL_REQ) - 1) == 0, "deny write");
 	got = 0;
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		read_eof_ms(fd, sink, sizeof(sink), &got, 2000);
 		close(fd);
 	}
@@ -1869,7 +1992,8 @@ static void test_whitelist_and_ip(void)
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, IP_REQ, sizeof(IP_REQ) - 1) == 0, "ip write");
 	got = 0;
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		read_eof_ms(fd, sink, sizeof(sink), &got, 2000);
 		close(fd);
 	}
@@ -1941,10 +2065,13 @@ static void test_load_and_threads(void)
 	expect_true(echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) == 0, "warmup");
 	base_threads = count_threads();
 	base_fds = count_fds();
-	for (n = 0; n < 4; n++) {
+	for (n = 0; n < 4; n++)
+	{
 		char label[64];
-		for (i = 0; i < steps[n]; i++) {
-			if (echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) != 0) {
+		for (i = 0; i < steps[n]; i++)
+		{
+			if (echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) != 0)
+			{
 				snprintf(label, sizeof(label), "sequential exchange %d/%d", i, steps[n]);
 				expect_true(false, label);
 				break;
@@ -1960,7 +2087,8 @@ static void test_load_and_threads(void)
 		int up_ok = 0;
 		for (i = 0; i < 100; i++)
 			fds[i] = -1;
-		for (i = 0; i < 100; i++) {
+		for (i = 0; i < 100; i++)
+		{
 			fds[i] = connect_local(local, 2000);
 			if (fds[i] < 0)
 				break;
@@ -1969,13 +2097,14 @@ static void test_load_and_threads(void)
 			shutdown(fds[i], SHUT_WR);
 		}
 		expect_int(count_threads(), base_threads, "threads during 100 in flight");
-		for (i = 0; i < 100; i++) {
+		for (i = 0; i < 100; i++)
+		{
 			uint8_t buf[128];
 			size_t got = 0;
 			if (fds[i] < 0)
 				continue;
 			if (read_eof_ms(fds[i], buf, sizeof(buf), &got, 2000) == 0 &&
-					got == sizeof(REQ) - 1 && memcmp(buf, REQ, got) == 0)
+			        got == sizeof(REQ) - 1 && memcmp(buf, REQ, got) == 0)
 				up_ok++;
 			close(fds[i]);
 		}
@@ -1987,14 +2116,15 @@ static void test_load_and_threads(void)
 		int live = connect_local(local, 2000);
 		uint8_t buf[128];
 		expect_true(live >= 0, "long-lived connect");
-		if (live >= 0) {
+		if (live >= 0)
+		{
 			expect_true(write_full(live, REQ, sizeof(REQ) - 1) == 0, "long-lived write");
 			expect_true(read_full_ms(live, buf, sizeof(REQ) - 1, 2000) == 0, "long-lived echo");
 			for (i = 0; i < 30; i++)
 				expect_true(echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) == 0, "short beside long");
 			expect_true(write_full(live, "PING", 4) == 0, "long-lived second write");
 			expect_true(read_full_ms(live, buf, 4, 2000) == 0 && memcmp(buf, "PING", 4) == 0,
-					"long-lived still relays");
+			        "long-lived still relays");
 			expect_int(count_threads(), base_threads, "long-lived did not add threads");
 			close(live);
 		}
@@ -2089,20 +2219,23 @@ static void test_accept_pause(void)
 	start = mono_ms();
 	b = connect_local(local, 2000);
 	expect_true(b >= 0 && write_full(b, REQ, sizeof(REQ) - 1) == 0, "queue client while accept fails");
-	while (b >= 0 && a >= 0 && mono_ms() - start < 3000) {
+	while (b >= 0 && a >= 0 && mono_ms() - start < 3000)
+	{
 		int64_t t0 = mono_ms();
 		uint8_t one = 'x';
 		uint8_t back = 0;
-		if (write_full(a, &one, 1) != 0 || read_full_ms(a, &back, 1, 1000) != 0 || back != 'x') {
+		if (write_full(a, &one, 1) != 0 || read_full_ms(a, &back, 1, 1000) != 0 || back != 'x')
+		{
 			expect_true(false, "relayed connection keeps echoing while accept is paused");
 			break;
 		}
 		if (mono_ms() - t0 > slowest)
 			slowest = mono_ms() - t0;
 		rounds++;
-		if (wait_fd(b, POLLIN, 0) == 0) {
+		if (wait_fd(b, POLLIN, 0) == 0)
+		{
 			served = read_full_ms(b, buf, sizeof(REQ) - 1, 1000) == 0 &&
-				memcmp(buf, REQ, sizeof(REQ) - 1) == 0;
+			         memcmp(buf, REQ, sizeof(REQ) - 1) == 0;
 			break;
 		}
 		usleep(5000);
@@ -2140,7 +2273,8 @@ static int wait_active(statistics_t *st, int target, int timeout_ms)
 {
 	int64_t deadline = mono_ms() + timeout_ms;
 	stat_t snap;
-	do {
+	do
+	{
 		stats_get(st, &snap);
 		if ((int)snap.ActiveConnection == target)
 			return 0;
@@ -2152,7 +2286,10 @@ static int wait_active(statistics_t *st, int target, int timeout_ms)
 /* Full cap, every slot an idle handshake: the oldest one makes room. */
 static void test_evict_idle_hello(void)
 {
-	enum { CAP = 3 };
+	enum
+	{
+		CAP = 3
+	};
 	echo_srv echo;
 	sni_listener *ls = NULL;
 	SniServer_t cfg;
@@ -2176,7 +2313,8 @@ static void test_evict_idle_hello(void)
 	sni_test_set_hello_idle_ms(60000);
 	sni_conn_set_limit(CAP);
 	expect_true(sni_listener_open(&cfg, &ls), "evict listener");
-	for (i = 0; i < CAP; i++) {
+	for (i = 0; i < CAP; i++)
+	{
 		idle[i] = connect_local(local, 2000);
 		expect_true(idle[i] >= 0 && write(idle[i], "G", 1) == 1, "idle handshake");
 		expect_int(wait_active(st, i + 1, 2000), 0, "handshake counted");
@@ -2186,9 +2324,10 @@ static void test_evict_idle_hello(void)
 	fresh = connect_local(local, 2000);
 	expect_true(fresh >= 0 && write_full(fresh, REQ, sizeof(REQ) - 1) == 0, "new client at the cap");
 	expect_true(fresh >= 0 && read_full_ms(fresh, back, sizeof(REQ) - 1, 3000) == 0 &&
-			memcmp(back, REQ, sizeof(REQ) - 1) == 0, "new client is served");
+	                    memcmp(back, REQ, sizeof(REQ) - 1) == 0,
+	        "new client is served");
 	expect_true(read_eof_ms(idle[0], sink, sizeof(sink), &got, 3000) == 0 && got == 0,
-			"the oldest handshake was closed");
+	        "the oldest handshake was closed");
 	for (i = 1; i < CAP; i++)
 		expect_true(wait_fd(idle[i], POLLIN, 50) != 0, "younger handshakes stay open");
 	expect_int((int)(sni_counter("Evicted") - evicted0), 1, "Evicted counts the closed handshake");
@@ -2209,7 +2348,10 @@ static void test_evict_idle_hello(void)
 /* Full cap with every connection relaying: nothing is evicted, the new one is refused. */
 static void test_no_evict_when_relaying(void)
 {
-	enum { CAP = 2 };
+	enum
+	{
+		CAP = 2
+	};
 	echo_srv echo;
 	sni_listener *ls = NULL;
 	SniServer_t cfg;
@@ -2232,7 +2374,8 @@ static void test_no_evict_when_relaying(void)
 	fill_listener(&cfg, local, echo.port, 30, st, NULL, NULL);
 	sni_conn_set_limit(CAP);
 	expect_true(sni_listener_open(&cfg, &ls), "no-evict listener");
-	for (i = 0; i < CAP; i++) {
+	for (i = 0; i < CAP; i++)
+	{
 		live[i] = connect_local(local, 2000);
 		expect_true(live[i] >= 0 && write_full(live[i], REQ, sizeof(REQ) - 1) == 0, "relay client");
 		expect_true(live[i] >= 0 && read_full_ms(live[i], buf, sizeof(REQ) - 1, 2000) == 0, "relay is up");
@@ -2242,15 +2385,17 @@ static void test_no_evict_when_relaying(void)
 	refused0 = sni_counter("Refused");
 	extra = connect_local(local, 2000);
 	expect_true(extra >= 0, "extra client connects");
-	if (extra >= 0) {
+	if (extra >= 0)
+	{
 		expect_true(read_eof_ms(extra, sink, sizeof(sink), &got, 3000) == 0 && got == 0, "extra client is refused");
 		close(extra);
 	}
 	expect_int((int)(sni_counter("Refused") - refused0), 1, "Refused counts the extra client");
 	expect_int((int)(sni_counter("Evicted") - evicted0), 0, "relaying connections are not evicted");
-	for (i = 0; i < CAP; i++) {
+	for (i = 0; i < CAP; i++)
+	{
 		expect_true(write_full(live[i], "y", 1) == 0 && read_full_ms(live[i], buf, 1, 2000) == 0 && buf[0] == 'y',
-				"relays still work");
+		        "relays still work");
 		close(live[i]);
 	}
 	expect_int(wait_active(st, 0, 3000), 0, "no-evict test drained");
@@ -2293,7 +2438,8 @@ static void test_client_acl(void)
 	refused0 = sni_counter("Refused");
 	fd = connect_local(local, 2000);
 	expect_true(fd >= 0, "denied client completes the handshake");
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		expect_true(read_eof_ms(fd, sink, sizeof(sink), &got, 3000) == 0 && got == 0, "denied client is closed");
 		close(fd);
 	}
@@ -2331,9 +2477,10 @@ static void test_connection_cap(void)
 	struct rlimit rl;
 	stat_t snap;
 	statistics_t *st = NULL;
-	if (getrlimit(RLIMIT_NOFILE, &rl) != 0 || rl.rlim_cur < 4096) {
+	if (getrlimit(RLIMIT_NOFILE, &rl) != 0 || rl.rlim_cur < 4096)
+	{
 		fprintf(stderr, "SKIP: connection cap needs a higher RLIMIT_NOFILE (have %lu)\n",
-				(unsigned long)rl.rlim_cur);
+		        (unsigned long)rl.rlim_cur);
 		return;
 	}
 	fds = (int *)calloc(1024, sizeof(int));
@@ -2349,20 +2496,24 @@ static void test_connection_cap(void)
 	sni_test_set_hello_idle_ms(180000);
 	expect_true(sni_listener_open(&cfg, &ls), "cap listener");
 	expect_int(count_threads(), base + 1, "cap listener thread");
-	for (i = 0; i < 1024; i++) {
+	for (i = 0; i < 1024; i++)
+	{
 		int j;
 		fds[i] = connect_local(local, 2000);
 		if (fds[i] < 0)
 			break;
-		if (write(fds[i], "G", 1) != 1) {
+		if (write(fds[i], "G", 1) != 1)
+		{
 			close(fds[i]);
 			fds[i] = -1;
 			break;
 		}
 		opened++;
 		/* A byte resets the 5s handshake idle once the loop reads it. */
-		if ((opened % 64) == 0) {
-			for (j = 0; j < opened; j++) {
+		if ((opened % 64) == 0)
+		{
+			for (j = 0; j < opened; j++)
+			{
 				ssize_t n = write(fds[j], "G", 1);
 				(void)n;
 			}
@@ -2371,12 +2522,14 @@ static void test_connection_cap(void)
 	expect_int(opened, 1024, "opened the connection cap");
 	{
 		int64_t deadline = mono_ms() + 20000;
-		do {
+		do
+		{
 			int j;
 			stats_get(st, &snap);
 			if (snap.ActiveConnection >= 1024)
 				break;
-			for (j = 0; j < opened; j++) {
+			for (j = 0; j < opened; j++)
+			{
 				ssize_t n = write(fds[j], "G", 1);
 				(void)n;
 			}
@@ -2387,7 +2540,8 @@ static void test_connection_cap(void)
 	/* Every slot is an idle handshake, so one more client evicts the oldest. */
 	extra = connect_local(local, 1000);
 	expect_true(extra >= 0, "extra connect completes the handshake");
-	if (extra >= 0) {
+	if (extra >= 0)
+	{
 		uint8_t sink[8];
 		size_t got = 99;
 		expect_true(write(extra, "G", 1) == 1, "extra client sends a byte");
@@ -2396,7 +2550,8 @@ static void test_connection_cap(void)
 	}
 	{
 		int64_t deadline = mono_ms() + 5000;
-		do {
+		do
+		{
 			stats_get(st, &snap);
 			if (snap.TotalConnection >= 1025)
 				break;
@@ -2411,7 +2566,8 @@ static void test_connection_cap(void)
 		close(extra);
 	{
 		int64_t deadline = mono_ms() + 15000;
-		do {
+		do
+		{
 			stats_get(st, &snap);
 			if (snap.ActiveConnection == 0)
 				break;
@@ -2452,21 +2608,25 @@ static void test_stress_cycles(void)
 	base_fds = count_fds();
 	for (i = 0; i < 8; i++)
 		holds[i] = -1;
-	for (i = 0; i < 200; i++) {
-		if (i % 25 == 0 && hi < 8) {
+	for (i = 0; i < 200; i++)
+	{
+		if (i % 25 == 0 && hi < 8)
+		{
 			holds[hi] = connect_local(local, 2000);
 			if (holds[hi] >= 0)
 				write_full(holds[hi], HOLD_REQ, sizeof(HOLD_REQ) - 1);
 			hi++;
 			continue;
 		}
-		if (echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) != 0) {
+		if (echo_roundtrip(local, REQ, sizeof(REQ) - 1, 2000) != 0)
+		{
 			expect_true(false, "stress cycle");
 			break;
 		}
 	}
 	expect_int(count_threads(), base_threads, "stress threads stayed at the event-loop count");
-	for (i = 0; i < hi; i++) {
+	for (i = 0; i < hi; i++)
+	{
 		if (holds[i] >= 0)
 			close(holds[i]);
 	}
@@ -2486,7 +2646,8 @@ static void test_production_spawn(void)
 	expect_true(pid >= 0, "fork production spawn");
 	if (pid < 0)
 		return;
-	if (pid == 0) {
+	if (pid == 0)
+	{
 		echo_srv echo;
 		SniServer_t cfg;
 		uint16_t local = 0;
@@ -2522,7 +2683,8 @@ static void expect_pool(const char *name)
 {
 	resolver_accounting a;
 	int sum;
-	if (!resolver_test_accounting(&a)) {
+	if (!resolver_test_accounting(&a))
+	{
 		expect_true(false, name);
 		return;
 	}
@@ -2557,11 +2719,13 @@ static void release_slot(resolve_slot *slot)
 static resolve_slot *wait_one(resolver_sink *sink, int ms)
 {
 	int64_t deadline = mono_ms() + ms;
-	while (mono_ms() < deadline) {
+	while (mono_ms() < deadline)
+	{
 		resolve_slot *batch[8];
 		size_t n = resolver_drain(sink, batch, 8);
 		size_t i;
-		if (n > 0) {
+		if (n > 0)
+		{
 			for (i = 1; i < n; i++)
 				release_slot(batch[i]);
 			return batch[0];
@@ -2573,7 +2737,8 @@ static resolve_slot *wait_one(resolver_sink *sink, int ms)
 
 static void set_port_test(resolver_addr *addr, uint16_t port);
 
-typedef struct drain_pack {
+typedef struct drain_pack
+{
 	resolver_sink *sink;
 	resolve_slot **got;
 	int *gotn;
@@ -2606,7 +2771,8 @@ static void fill_v6(resolver_addr *out, size_t *count, const char *ip)
 	*count = 1;
 }
 
-enum {
+enum
+{
 	HOOK_V4 = 1,
 	HOOK_V6,
 	HOOK_ERR,
@@ -2616,7 +2782,8 @@ enum {
 	HOOK_MAPPED
 };
 
-typedef struct hook_cfg {
+typedef struct hook_cfg
+{
 	_Atomic int mode;
 	_Atomic int err;
 	_Atomic int eintr_left;
@@ -2629,7 +2796,7 @@ static pthread_mutex_t g_hook_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_hook_cv = PTHREAD_COND_INITIALIZER;
 
 static int test_hook(const char *hostname, int family, resolver_addr *out,
-		size_t max_out, size_t *count, void *cookie)
+        size_t max_out, size_t *count, void *cookie)
 {
 	hook_cfg *cfg = (hook_cfg *)cookie;
 	(void)family;
@@ -2637,20 +2804,23 @@ static int test_hook(const char *hostname, int family, resolver_addr *out,
 	*count = 0;
 	if (max_out == 0)
 		return EAI_FAIL;
-	if (cfg->mode == HOOK_EINTR && atomic_load_explicit(&cfg->eintr_left, memory_order_relaxed) > 0) {
+	if (cfg->mode == HOOK_EINTR && atomic_load_explicit(&cfg->eintr_left, memory_order_relaxed) > 0)
+	{
 		atomic_fetch_sub_explicit(&cfg->eintr_left, 1, memory_order_relaxed);
 		errno = EINTR;
 		return EAI_SYSTEM;
 	}
 	if (cfg->mode == HOOK_DELAY && cfg->delay_ms > 0)
 		usleep((useconds_t)cfg->delay_ms * 1000u);
-	if (cfg->mode == HOOK_ORDER && strcmp(hostname, "first.test") == 0) {
+	if (cfg->mode == HOOK_ORDER && strcmp(hostname, "first.test") == 0)
+	{
 		/* Held until the test has drained second.test's completion. */
 		struct timespec ts;
 		pthread_mutex_lock(&g_hook_mu);
 		clock_gettime(CLOCK_REALTIME, &ts);
 		ts.tv_sec += 5;
-		while (!cfg->release_first) {
+		while (!cfg->release_first)
+		{
 			if (pthread_cond_timedwait(&g_hook_cv, &g_hook_mu, &ts) == ETIMEDOUT)
 				break;
 		}
@@ -2658,11 +2828,13 @@ static int test_hook(const char *hostname, int family, resolver_addr *out,
 	}
 	if (cfg->mode == HOOK_ERR)
 		return cfg->err;
-	if (cfg->mode == HOOK_V6) {
+	if (cfg->mode == HOOK_V6)
+	{
 		fill_v6(out, count, "::1");
 		return 0;
 	}
-	if (cfg->mode == HOOK_MAPPED) {
+	if (cfg->mode == HOOK_MAPPED)
+	{
 		fill_v6(out, count, "::ffff:127.0.0.1");
 		return 0;
 	}
@@ -2671,7 +2843,7 @@ static int test_hook(const char *hostname, int family, resolver_addr *out,
 }
 
 static int submit_name(resolver_sink *sink, const char *host, int64_t deadline,
-		int *slot, uint64_t *req)
+        int *slot, uint64_t *req)
 {
 	return resolver_submit(sink, 1, 1, host, 9, AF_UNSPEC, deadline, slot, req);
 }
@@ -2695,7 +2867,8 @@ static void test_normalize(void)
 	{
 		int pos = 0;
 		int label;
-		for (label = 0; label < 3; label++) {
+		for (label = 0; label < 3; label++)
+		{
 			int k;
 			for (k = 0; k < 63; k++)
 				big[pos++] = 'a';
@@ -2733,23 +2906,19 @@ static void test_policy_addresses(void)
 	const unsigned lo = RESOLVER_POLICY_ALLOW_LOOPBACK;
 	const unsigned priv = RESOLVER_POLICY_DENY_PRIVATE;
 	static const char *const v4_always[] = {
-		"0.0.0.0", "0.1.2.3", "255.255.255.255", "169.254.1.1", "224.0.0.1",
-		"239.255.255.250", "240.0.0.1", "254.1.1.1"
-	};
+	        "0.0.0.0", "0.1.2.3", "255.255.255.255", "169.254.1.1", "224.0.0.1",
+	        "239.255.255.250", "240.0.0.1", "254.1.1.1"};
 	static const char *const v6_always[] = {
-		"::", "ff02::1", "fe80::1", "febf::1", "fec0::1", "feff::1",
-		"::0.0.0.2", "::0.1.2.3", "::169.254.1.1", "::224.0.0.1",
-		"::240.0.0.1", "64:ff9b::0.0.0.0", "64:ff9b::169.254.1.1",
-		"64:ff9b::224.0.0.1", "64:ff9b::255.255.255.255"
-	};
+	        "::", "ff02::1", "fe80::1", "febf::1", "fec0::1", "feff::1",
+	        "::0.0.0.2", "::0.1.2.3", "::169.254.1.1", "::224.0.0.1",
+	        "::240.0.0.1", "64:ff9b::0.0.0.0", "64:ff9b::169.254.1.1",
+	        "64:ff9b::224.0.0.1", "64:ff9b::255.255.255.255"};
 	static const char *const v4_priv[] = {
-		"10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1",
-		"100.64.0.1", "100.127.255.255"
-	};
+	        "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1",
+	        "100.64.0.1", "100.127.255.255"};
 	static const char *const v4_public[] = {
-		"8.8.8.8", "172.15.255.255", "172.32.0.1", "192.167.1.1",
-		"100.63.255.255", "100.128.0.1", "223.255.255.255"
-	};
+	        "8.8.8.8", "172.15.255.255", "172.32.0.1", "192.167.1.1",
+	        "100.63.255.255", "100.128.0.1", "223.255.255.255"};
 	size_t i;
 	expect_true(resolver_sink_open(RESOLVER_SINK_LISTENER, &sink), "policy sink");
 	resolver_watch_bind(sink->listener_id, "192.168.1.1", 8443);
@@ -2771,15 +2940,18 @@ static void test_policy_addresses(void)
 	expect_int(policy_kept(0, "192.168.1.1", 8443, 0), 0, "own ip:port refused");
 	expect_int(policy_kept(0, "192.168.1.1", 8444, 0), 1, "own ip other port kept");
 
-	for (i = 0; i < sizeof(v4_always) / sizeof(v4_always[0]); i++) {
+	for (i = 0; i < sizeof(v4_always) / sizeof(v4_always[0]); i++)
+	{
 		expect_policy(0, v4_always[i], 0, 0, "refused");
 		expect_policy(0, v4_always[i], lo | priv, 0, "refused with every opt-in");
 	}
-	for (i = 0; i < sizeof(v6_always) / sizeof(v6_always[0]); i++) {
+	for (i = 0; i < sizeof(v6_always) / sizeof(v6_always[0]); i++)
+	{
 		expect_policy(1, v6_always[i], 0, 0, "refused");
 		expect_policy(1, v6_always[i], lo | priv, 0, "refused with every opt-in");
 	}
-	for (i = 0; i < sizeof(v4_priv) / sizeof(v4_priv[0]); i++) {
+	for (i = 0; i < sizeof(v4_priv) / sizeof(v4_priv[0]); i++)
+	{
 		expect_policy(0, v4_priv[i], 0, 1, "private kept by default");
 		expect_policy(0, v4_priv[i], priv, 0, "private refused by opt-in");
 	}
@@ -2847,7 +3019,8 @@ static void test_resolver_results(void)
 	expect_int(submit_name(sink, "v4.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "v4 submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == 0 && slot->address_count == 1, "v4 result");
-	if (slot) {
+	if (slot)
+	{
 		struct sockaddr_in in;
 		memcpy(&in, &slot->addresses[0].address, sizeof(in));
 		expect_int(in.sin_family, AF_INET, "v4 family");
@@ -2858,7 +3031,8 @@ static void test_resolver_results(void)
 	expect_int(submit_name(sink, "v6.test", mono_ms() + 2000, &idx, &req), RESOLVER_SUBMIT_OK, "v6 submit");
 	slot = wait_one(sink, 2000);
 	expect_true(slot != NULL && slot->gai_error == 0, "v6 result");
-	if (slot) {
+	if (slot)
+	{
 		struct sockaddr_in6 in6;
 		memcpy(&in6, &slot->addresses[0].address, sizeof(in6));
 		expect_int(in6.sin6_family, AF_INET6, "v6 family");
@@ -2938,9 +3112,9 @@ static void test_resolver_quota_and_cancel(void)
 		n++;
 	expect_int(n, resolver_sink_quota(a), "listener A filled its quota");
 	expect_int(submit_name(a, "overflow.test", mono_ms() + 5000, &idx, &req),
-			RESOLVER_SUBMIT_OVERFLOW, "queue overflow");
+	        RESOLVER_SUBMIT_OVERFLOW, "queue overflow");
 	expect_int(submit_name(b, "other.test", mono_ms() + 5000, &idx, &req),
-			RESOLVER_SUBMIT_OK, "listener B still has quota");
+	        RESOLVER_SUBMIT_OK, "listener B still has quota");
 	resolver_cancel(idx, req);
 	expect_int(resolver_test_fill_infra(), RESOLVER_INFRA_RESERVE, "infra reserve filled");
 	expect_int(resolver_test_fill_infra(), 0, "infra reserve stops at the cap");
@@ -3003,9 +3177,11 @@ static void test_resolver_quota_and_cancel(void)
 		resolve_slot *second = NULL;
 		resolver_test_set_hook(test_hook, &cfg);
 		expect_int(resolver_submit(a, 1, 1, "first.test", 9, AF_UNSPEC,
-				mono_ms() + 3000, &i1, &r1), RESOLVER_SUBMIT_OK, "order first");
+		                   mono_ms() + 3000, &i1, &r1),
+		        RESOLVER_SUBMIT_OK, "order first");
 		expect_int(resolver_submit(a, 2, 2, "second.test", 9, AF_UNSPEC,
-				mono_ms() + 3000, &i2, &r2), RESOLVER_SUBMIT_OK, "order second");
+		                   mono_ms() + 3000, &i2, &r2),
+		        RESOLVER_SUBMIT_OK, "order second");
 		/*
 		 * first.test is held in its hook, so the only completion that can
 		 * arrive now is second.test, unless the pool serialized it behind first.
@@ -3017,7 +3193,8 @@ static void test_resolver_quota_and_cancel(void)
 		pthread_mutex_unlock(&g_hook_mu);
 		second = wait_one(a, 3000);
 		expect_true(first && second, "both completions");
-		if (first && second) {
+		if (first && second)
+		{
 			expect_true(strcmp(first->hostname, "second.test") == 0, "out of order completion");
 			release_slot(first);
 			release_slot(second);
@@ -3025,7 +3202,8 @@ static void test_resolver_quota_and_cancel(void)
 	}
 	resolver_test_pause_dequeue(1);
 	n = 0;
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < 4; i++)
+	{
 		if (submit_name(a, "ring.test", mono_ms() + 2000, &idx, &req) == RESOLVER_SUBMIT_OK)
 			n++;
 	}
@@ -3034,7 +3212,8 @@ static void test_resolver_quota_and_cancel(void)
 		int64_t deadline = mono_ms() + 2000;
 		resolver_accounting acc;
 		memset(&acc, 0, sizeof(acc));
-		while (mono_ms() < deadline) {
+		while (mono_ms() < deadline)
+		{
 			if (resolver_test_accounting(&acc) && acc.in_ring >= n && n > 0)
 				break;
 			usleep(1000);
@@ -3058,7 +3237,7 @@ static void test_resolver_quota_and_cancel(void)
 		resolver_test_pause_dequeue(1);
 		for (i = 0; i < 16; i++)
 			expect_int(submit_name(a, "race.test", mono_ms() + 3000, &idx, &req),
-					RESOLVER_SUBMIT_OK, "race submit");
+			        RESOLVER_SUBMIT_OK, "race submit");
 		expect_true(pthread_create(&drainer, NULL, race_drain, &arg) == 0, "drain thread");
 		resolver_test_pause_dequeue(0);
 		pthread_join(drainer, NULL);
@@ -3074,9 +3253,10 @@ static void test_resolver_quota_and_cancel(void)
 			resolver_test_reset_stats();
 			resolver_test_hold_running(1);
 			expect_int(submit_name(a, "eagain.test", mono_ms() + 2000, &idx, &req),
-					RESOLVER_SUBMIT_OK, "eagain submit");
+			        RESOLVER_SUBMIT_OK, "eagain submit");
 			expect_true(resolver_test_wait_running(1, 2000) != 0, "eagain worker is held");
-			for (;;) {
+			for (;;)
+			{
 				ssize_t wr = write(a->pipe_write, buf, sizeof(buf));
 				if (wr < 0 && errno == EINTR)
 					continue;
@@ -3085,7 +3265,8 @@ static void test_resolver_quota_and_cancel(void)
 			}
 			resolver_test_hold_running(0);
 			wake_by = mono_ms() + 2000;
-			do {
+			do
+			{
 				resolver_test_stats(&before);
 				if (before.eagain_wakeups >= 1)
 					break;
@@ -3106,7 +3287,8 @@ static void *race_drain(void *arg)
 {
 	drain_pack *job = (drain_pack *)arg;
 	int64_t deadline = mono_ms() + 3000;
-	while (*job->gotn < job->want && mono_ms() < deadline) {
+	while (*job->gotn < job->want && mono_ms() < deadline)
+	{
 		resolve_slot *batch[8];
 		size_t n = resolver_drain(job->sink, batch, 8);
 		size_t i;
@@ -3125,7 +3307,8 @@ static void test_stuck_worker_shutdown(void)
 	expect_true(pid >= 0, "fork stuck worker");
 	if (pid < 0)
 		return;
-	if (pid == 0) {
+	if (pid == 0)
+	{
 		resolver_sink *sink = NULL;
 		hook_cfg cfg;
 		int slot = -1;
@@ -3137,12 +3320,12 @@ static void test_stuck_worker_shutdown(void)
 		resolver_test_set_hook(test_hook, &cfg);
 		resolver_test_hold_running(1);
 		if (!resolver_sink_open(RESOLVER_SINK_DIRECT, &sink) ||
-				submit_name(sink, "stuck.test", mono_ms() + 10000, &slot, &req) != RESOLVER_SUBMIT_OK ||
-				!resolver_test_wait_running(1, 2000) ||
-				resolver_shutdown(200) != 1 ||
-				!resolver_test_mutex_ok() ||
-				!resolver_test_accounting(&a) ||
-				a.abandoned != 1)
+		        submit_name(sink, "stuck.test", mono_ms() + 10000, &slot, &req) != RESOLVER_SUBMIT_OK ||
+		        !resolver_test_wait_running(1, 2000) ||
+		        resolver_shutdown(200) != 1 ||
+		        !resolver_test_mutex_ok() ||
+		        !resolver_test_accounting(&a) ||
+		        a.abandoned != 1)
 			_exit(1);
 		_exit(0);
 	}
@@ -3162,7 +3345,7 @@ static void test_sni_resolver_behavior(void)
 	uint16_t local = 0;
 	int binder;
 	int calls_before;
-	static const char *const allow[] = { "localhost" };
+	static const char *const allow[] = {"localhost"};
 	filter_t *wl;
 	uint32_t waits;
 	int fd;
@@ -3174,7 +3357,7 @@ static void test_sni_resolver_behavior(void)
 		resolver_addr one;
 		size_t n = 0;
 		expect_int(resolver_copy_upstream("127.0.0.1", 9, &one, &n), RESOLVER_UP_READY,
-				"numeric destination bypasses the resolver");
+		        "numeric destination bypasses the resolver");
 		expect_int((int)n, 1, "numeric address count");
 		expect_int(cfg.calls, 0, "numeric lookup was not submitted");
 	}
@@ -3189,7 +3372,8 @@ static void test_sni_resolver_behavior(void)
 	calls_before = cfg.calls;
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, EVIL_REQ, sizeof(EVIL_REQ) - 1) == 0, "evil write");
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		uint8_t sinkb[8];
 		size_t got = 0;
 		read_eof_ms(fd, sinkb, sizeof(sinkb), &got, 1000);
@@ -3198,9 +3382,9 @@ static void test_sni_resolver_behavior(void)
 	usleep(50000);
 	expect_int(cfg.calls, calls_before, "whitelist rejection does not resolve");
 	expect_true(echo_roundtrip(local, CASE_REQ, sizeof(CASE_REQ) - 1, 2000) == 0,
-			"case and trailing dot match");
+	        "case and trailing dot match");
 	expect_true(echo_roundtrip(local, PORT_REQ, sizeof(PORT_REQ) - 1, 2000) == 0,
-			"lowercase header name and Host port match");
+	        "lowercase header name and Host port match");
 	expect_true(cfg.calls > calls_before, "direct hostname used the resolver");
 	resolver_test_hold_running(1);
 	sni_test_reset_counters();
@@ -3214,7 +3398,7 @@ static void test_sni_resolver_behavior(void)
 	shutdown(fd, SHUT_WR);
 	usleep(50000);
 	expect_int(__atomic_load_n(&echo.accepts, __ATOMIC_RELAXED),
-			__atomic_load_n(&echo.accepts, __ATOMIC_RELAXED), "still resolving");
+	        __atomic_load_n(&echo.accepts, __ATOMIC_RELAXED), "still resolving");
 	{
 		int accepts = __atomic_load_n(&echo.accepts, __ATOMIC_RELAXED);
 		resolver_test_hold_running(0);
@@ -3237,7 +3421,7 @@ static void test_sni_resolver_behavior(void)
 		expect_true(resolver_test_wait_running(1, 2000) != 0, "lookup is blocked");
 		expect_true(write_full(live, "PING", 4) == 0, "ping during lookup");
 		expect_true(read_full_ms(live, buf, 4, 1000) == 0 && memcmp(buf, "PING", 4) == 0,
-				"existing relay is not stalled by resolution");
+		        "existing relay is not stalled by resolution");
 		resolver_test_hold_running(0);
 		close(fd);
 		close(live);
@@ -3257,7 +3441,8 @@ static void test_sni_resolver_behavior(void)
 	expect_true(sni_listener_open(&scfg, &ls), "self listener");
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "self write");
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		uint8_t sinkb[8];
 		size_t got = 99;
 		int64_t start = mono_ms();
@@ -3274,7 +3459,8 @@ static void test_sni_resolver_behavior(void)
 	expect_true(sni_listener_open(&scfg, &ls), "mapped listener");
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "mapped write");
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		uint8_t sinkb[8];
 		size_t got = 99;
 		expect_true(read_eof_ms(fd, sinkb, sizeof(sinkb), &got, 1500) == 0, "mapped loopback closes");
@@ -3361,7 +3547,8 @@ static void test_socks_resolver_cache(void)
 		resolver_test_age_cache(mono_ms() - 200000, mono_ms() - 1000, mono_ms() - 1000);
 		fd = connect_local(local, 1000);
 		expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "stale max write");
-		if (fd >= 0) {
+		if (fd >= 0)
+		{
 			uint8_t sinkb[8];
 			size_t got = 99;
 			int64_t start = mono_ms();
@@ -3390,7 +3577,8 @@ static void test_socks_resolver_cache(void)
 	expect_true(sni_listener_open(&scfg, &ls), "unresolved listener still starts");
 	fd = connect_local(local, 1000);
 	expect_true(fd >= 0 && write_full(fd, REQ, sizeof(REQ) - 1) == 0, "unresolved write");
-	if (fd >= 0) {
+	if (fd >= 0)
+	{
 		uint8_t sinkb[8];
 		size_t got = 99;
 		int64_t start = mono_ms();

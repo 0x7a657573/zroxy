@@ -35,7 +35,7 @@ void sni_listener_close(sni_listener *ls);
 /* Single-connection path; compiled only into the SNI_TEST_HOOKS libraries. */
 typedef struct
 {
-	int		 connid;
+	int connid;
 	struct sockaddr_in cli;
 	socklen_t addr_len;
 	SniServer_t SniConfig;
@@ -52,17 +52,18 @@ void *sni_client_handler(void *arg);
  */
 void sni_connection_run(sniclient_t *client);
 
-typedef struct {
-	int read_limit;     /* 0 = full reads, else max bytes per read */
-	int write_limit;    /* 0 = full writes, else max bytes per write */
-	int eagain_write;   /* forced EAGAIN returns from event-loop writes */
+typedef struct
+{
+	int read_limit;   /* 0 = full reads, else max bytes per read */
+	int write_limit;  /* 0 = full writes, else max bytes per write */
+	int eagain_write; /* forced EAGAIN returns from event-loop writes */
 	int eintr_read;
 	int eintr_write;
 	int eintr_connect;
 	int eintr_wait;
-	int fail_wait;      /* forced non-EINTR wait failures (loop exits) */
+	int fail_wait; /* forced non-EINTR wait failures (loop exits) */
 	int fail_allocs;
-	int fail_accept;    /* forced EMFILE returns from accept() */
+	int fail_accept; /* forced EMFILE returns from accept() */
 } sni_test_faults;
 
 void sni_test_set_faults(const sni_test_faults *faults);

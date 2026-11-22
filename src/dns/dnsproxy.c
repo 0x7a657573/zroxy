@@ -43,45 +43,46 @@ bool dns_stats_json(void *ctx, char **ptr, char *end)
 		return false;
 	dnscache_get_counters(dns->cache, &cache);
 	return dns_stats_append(ptr, end, ",\n\"CacheHits\" : %" PRIu64 ",\n"
-		"\"CacheMisses\" : %" PRIu64 ",\n"
-		"\"CacheShared\" : %" PRIu64 ",\n"
-		"\"CacheEntries\" : %zu,\n"
-		"\"CacheEvictions\" : %" PRIu64 ",\n"
-		"\"QueueStaleDropped\" : 0,\n"
-		"\"QueueFull\" : 0,\n"
-		"\"AclDropped\" : %" PRIu32 ",\n"
-		"\"RateDropped\" : %" PRIu32 ",\n"
-		"\"TcpRefused\" : %" PRIu32 ",\n"
-		"\"TcpActive\" : %d,\n"
-		"\"QueueDropped\" : %" PRIu32 ",\n"
-		"\"UpstreamTimeouts\" : %" PRIu32 ",\n"
-		"\"UpstreamErrors\" : %" PRIu32 ",\n"
-		"\"ActiveUpstreams\" : %" PRIu32 ",\n"
-		"\"ActiveUpstream\" : %" PRIu32 ",\n"
-		"\"UpstreamSwitches\" : %" PRIu32,
-		cache.hits, cache.misses, cache.shared, cache.entries, cache.evicted,
-		__atomic_load_n(&dns->acl_dropped, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->rate_dropped, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->tcp_refused, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->tcp_active, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->queue_dropped, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->upstream_timeouts, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->upstream_errors, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->active_upstreams, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->active_route, __ATOMIC_RELAXED),
-		__atomic_load_n(&dns->route_switches, __ATOMIC_RELAXED));
+	                                  "\"CacheMisses\" : %" PRIu64 ",\n"
+	                                  "\"CacheShared\" : %" PRIu64 ",\n"
+	                                  "\"CacheEntries\" : %zu,\n"
+	                                  "\"CacheEvictions\" : %" PRIu64 ",\n"
+	                                  "\"QueueStaleDropped\" : 0,\n"
+	                                  "\"QueueFull\" : 0,\n"
+	                                  "\"AclDropped\" : %" PRIu32 ",\n"
+	                                  "\"RateDropped\" : %" PRIu32 ",\n"
+	                                  "\"TcpRefused\" : %" PRIu32 ",\n"
+	                                  "\"TcpActive\" : %d,\n"
+	                                  "\"QueueDropped\" : %" PRIu32 ",\n"
+	                                  "\"UpstreamTimeouts\" : %" PRIu32 ",\n"
+	                                  "\"UpstreamErrors\" : %" PRIu32 ",\n"
+	                                  "\"ActiveUpstreams\" : %" PRIu32 ",\n"
+	                                  "\"ActiveUpstream\" : %" PRIu32 ",\n"
+	                                  "\"UpstreamSwitches\" : %" PRIu32,
+	        cache.hits, cache.misses, cache.shared, cache.entries, cache.evicted,
+	        __atomic_load_n(&dns->acl_dropped, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->rate_dropped, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->tcp_refused, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->tcp_active, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->queue_dropped, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->upstream_timeouts, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->upstream_errors, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->active_upstreams, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->active_route, __ATOMIC_RELAXED),
+	        __atomic_load_n(&dns->route_switches, __ATOMIC_RELAXED));
 }
 
 static void close_fd(int *fd)
 {
-	if (fd && *fd >= 0) {
+	if (fd && *fd >= 0)
+	{
 		close(*fd);
 		*fd = -1;
 	}
 }
 
 bool dnsproxy_test_throttle_take(log_throttle_t *throttle, int64_t now_ms,
-		int64_t interval_ms, uint32_t *dropped)
+        int64_t interval_ms, uint32_t *dropped)
 {
 	uint32_t last;
 	uint32_t now;
@@ -94,14 +95,17 @@ bool dnsproxy_test_throttle_take(log_throttle_t *throttle, int64_t now_ms,
 	if (now == 0)
 		now = 1;
 	interval = interval_ms > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)interval_ms;
-	for (;;) {
+	for (;;)
+	{
 		last = __atomic_load_n(&throttle->last_ms, __ATOMIC_ACQUIRE);
-		if (last != 0 && now - last < interval) {
+		if (last != 0 && now - last < interval)
+		{
 			(void)__atomic_fetch_add(&throttle->suppressed, 1u, __ATOMIC_RELAXED);
 			return false;
 		}
 		if (__atomic_compare_exchange_n(&throttle->last_ms, &last, now, false,
-				__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+		            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+		{
 			*dropped = __atomic_exchange_n(&throttle->suppressed, 0u, __ATOMIC_ACQ_REL);
 			return true;
 		}
@@ -121,42 +125,53 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 	dns->tcp_sock = -1;
 	dns->wake[0] = -1;
 	dns->wake[1] = -1;
-	if (strlen(conf->Local.ip) >= sizeof(dns->listen_addr)) {
+	if (strlen(conf->Local.ip) >= sizeof(dns->listen_addr))
+	{
 		localdns_free(dns);
 		return NULL;
 	}
 	memcpy(dns->listen_addr, conf->Local.ip, strlen(conf->Local.ip) + 1);
 	snprintf(dns->listen_port, sizeof(dns->listen_port), "%u",
-		(unsigned)conf->Local.port);
-	if (conf->route_count == 0 || conf->route_count > DNS_ROUTES_MAX) {
+	        (unsigned)conf->Local.port);
+	if (conf->route_count == 0 || conf->route_count > DNS_ROUTES_MAX)
+	{
 		localdns_free(dns);
 		return NULL;
 	}
 	dns->route_count = conf->route_count;
-	for (unsigned i = 0; i < conf->route_count; i++) {
+	for (unsigned i = 0; i < conf->route_count; i++)
+	{
 		dns->routes[i] = conf->routes[i];
-		dns->routes[i].socks = conf->routes[i].direct ? NULL :
-			conf->routes[i].socks ? conf->routes[i].socks : conf->Socks;
+		dns->routes[i].socks = conf->routes[i].direct ? NULL : conf->routes[i].socks ? conf->routes[i].socks
+		                                                                             : conf->Socks;
 	}
-	if (conf->acl_set) {
+	if (conf->acl_set)
+	{
 		dns->acl = malloc(conf->acl_count * sizeof(*dns->acl));
-		if (!dns->acl) {
+		if (!dns->acl)
+		{
 			localdns_free(dns);
 			return NULL;
 		}
 		memcpy(dns->acl, conf->acl, conf->acl_count * sizeof(*dns->acl));
 		dns->acl_count = conf->acl_count;
-	} else {
+	}
+	else
+	{
 		struct in_addr listen_ip;
 		if (inet_pton(AF_INET, dns->listen_addr, &listen_ip) != 1 ||
-				(ntohl(listen_ip.s_addr) & 0xff000000u) != 0x7f000000u) {
+		        (ntohl(listen_ip.s_addr) & 0xff000000u) != 0x7f000000u)
+		{
 			static const zroxy_cidr_t private_acl[] = {
-				{ 0x7f000000u, 0xff000000u }, { 0x0a000000u, 0xff000000u },
-				{ 0xac100000u, 0xfff00000u }, { 0xc0a80000u, 0xffff0000u },
-				{ 0x64400000u, 0xffc00000u },
+			        {0x7f000000u, 0xff000000u},
+			        {0x0a000000u, 0xff000000u},
+			        {0xac100000u, 0xfff00000u},
+			        {0xc0a80000u, 0xffff0000u},
+			        {0x64400000u, 0xffc00000u},
 			};
 			dns->acl = malloc(sizeof(private_acl));
-			if (!dns->acl) {
+			if (!dns->acl)
+			{
 				localdns_free(dns);
 				return NULL;
 			}
@@ -165,9 +180,11 @@ dnsserver_t *localdns_init_config(dnshost_t *conf)
 		}
 	}
 	dns->rate.qps = conf->rate_qps;
-	if (conf->cache_entries > 0) {
+	if (conf->cache_entries > 0)
+	{
 		dns->cache = dnscache_create(conf->cache_entries);
-		if (!dns->cache) {
+		if (!dns->cache)
+		{
 			localdns_free(dns);
 			return NULL;
 		}
@@ -209,12 +226,14 @@ bool localdns_init_sockets(dnsserver_t *dns)
 	addr.sin_family = AF_INET;
 	port = strtoul(dns->listen_port, &end, 10);
 	if (dns->listen_port[0] == '\0' || !end || *end != '\0' || port > 65535UL ||
-			inet_pton(AF_INET, dns->listen_addr, &addr.sin_addr) != 1) {
+	        inet_pton(AF_INET, dns->listen_addr, &addr.sin_addr) != 1)
+	{
 		close_fd(&dns->local_sock);
 		return false;
 	}
 	addr.sin_port = htons((uint16_t)port);
-	if (bind(dns->local_sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+	if (bind(dns->local_sock, (struct sockaddr *)&addr, sizeof(addr)) != 0)
+	{
 		log_error("Can't bind address %s:%s", dns->listen_addr, dns->listen_port);
 		close_fd(&dns->local_sock);
 		return false;
@@ -229,14 +248,15 @@ bool localdns_init_tcp(dnsserver_t *dns)
 	int on = 1;
 
 	if (!dns || dns->local_sock < 0 ||
-			getsockname(dns->local_sock, (struct sockaddr *)&addr, &len) != 0)
+	        getsockname(dns->local_sock, (struct sockaddr *)&addr, &len) != 0)
 		return false;
 	dns->tcp_sock = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
 	if (dns->tcp_sock < 0)
 		return false;
 	(void)setsockopt(dns->tcp_sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	if (bind(dns->tcp_sock, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-			listen(dns->tcp_sock, 256) != 0) {
+	        listen(dns->tcp_sock, 256) != 0)
+	{
 		close_fd(&dns->tcp_sock);
 		return false;
 	}
@@ -257,12 +277,14 @@ int localdns_answer_local(dnsserver_t *dns, struct Message *msg, uint8_t *buf)
 	msg->rcode = Ok_ResponseType;
 	msg->anCount = msg->nsCount = msg->arCount = 0;
 	if (msg->questions->qType == A_Resource_RecordType &&
-			msg->questions->qClass == DNS_CLASS_IN) {
+	        msg->questions->qClass == DNS_CLASS_IN)
+	{
 		rr = calloc(1, sizeof(*rr));
 		if (!rr)
 			return 0;
 		rr->name = strdup(msg->questions->qName);
-		if (!rr->name) {
+		if (!rr->name)
+		{
 			free(rr);
 			return 0;
 		}
@@ -273,14 +295,17 @@ int localdns_answer_local(dnsserver_t *dns, struct Message *msg, uint8_t *buf)
 		memcpy(rr->rd_data.a_record.addr, dns->sni_ip, 4);
 		msg->answers = rr;
 		msg->anCount = 1;
-	} else {
+	}
+	else
+	{
 		rr = calloc(1, sizeof(*rr));
 		if (!rr)
 			return 0;
 		rr->name = strdup(msg->questions->qName);
 		rr->rd_data.soa_record.mname = strdup(msg->questions->qName);
 		rr->rd_data.soa_record.rname = strdup(msg->questions->qName);
-		if (!rr->name || !rr->rd_data.soa_record.mname || !rr->rd_data.soa_record.rname) {
+		if (!rr->name || !rr->rd_data.soa_record.mname || !rr->rd_data.soa_record.rname)
+		{
 			free(rr->name);
 			free(rr->rd_data.soa_record.mname);
 			free(rr->rd_data.soa_record.rname);
@@ -298,8 +323,10 @@ int localdns_answer_local(dnsserver_t *dns, struct Message *msg, uint8_t *buf)
 		msg->authorities = rr;
 		msg->nsCount = 1;
 	}
-	if (!dns_encode_msg_n(msg, buf, DNS_MSG_SIZE, &written) || written > DNS_MSG_SIZE) {
-		if (msg->authorities) {
+	if (!dns_encode_msg_n(msg, buf, DNS_MSG_SIZE, &written) || written > DNS_MSG_SIZE)
+	{
+		if (msg->authorities)
+		{
 			free(msg->authorities->name);
 			free(msg->authorities->rd_data.soa_record.mname);
 			free(msg->authorities->rd_data.soa_record.rname);

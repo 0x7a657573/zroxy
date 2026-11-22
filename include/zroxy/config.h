@@ -11,20 +11,20 @@
 #include <stddef.h>
 
 /*max len of hostname*/
-#define ZROXY_MAX_HOSTNAME		(255)
+#define ZROXY_MAX_HOSTNAME (255)
 
 /*max ip len*/
-#define ZROXY_MAX_IP_TEXT		(16)
+#define ZROXY_MAX_IP_TEXT (16)
 
 /* DNS endpoint host, not including the NUL. */
-#define ZROXY_MAX_DNS_HOST		(253)
+#define ZROXY_MAX_DNS_HOST (253)
 
 /*max port len*/
-#define ZROXY_MAX_PORT_TEXT	(10)
+#define ZROXY_MAX_PORT_TEXT (10)
 
 /* config line and value limits, including room for a NUL in the value buffer */
-#define ZROXY_MAX_CONFIG_LINE		(1024)
-#define ZROXY_MAX_CONFIG_VALUE	(512)
+#define ZROXY_MAX_CONFIG_LINE (1024)
+#define ZROXY_MAX_CONFIG_VALUE (512)
 
 /*
  * Overwrite secret bytes in a way the compiler may not drop as a dead

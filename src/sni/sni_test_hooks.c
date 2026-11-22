@@ -28,7 +28,8 @@ int sni_take_fault(enum sni_fault which)
 {
 	int *counter;
 	int cur;
-	switch (which) {
+	switch (which)
+	{
 	case SNI_FAULT_EINTR_READ: counter = &g_eintr_read; break;
 	case SNI_FAULT_EAGAIN_WRITE: counter = &g_eagain_write; break;
 	case SNI_FAULT_EINTR_WRITE: counter = &g_eintr_write; break;
@@ -40,9 +41,10 @@ int sni_take_fault(enum sni_fault which)
 	default: return 0;
 	}
 	cur = __atomic_load_n(counter, __ATOMIC_RELAXED);
-	while (cur > 0) {
+	while (cur > 0)
+	{
 		if (__atomic_compare_exchange_n(counter, &cur, cur - 1, 1,
-				__ATOMIC_RELAXED, __ATOMIC_RELAXED))
+		            __ATOMIC_RELAXED, __ATOMIC_RELAXED))
 			return 1;
 	}
 	return 0;
@@ -76,9 +78,10 @@ void sni_note_client_read(uint32_t n)
 void sni_note_pending(uint32_t n)
 {
 	uint32_t cur = __atomic_load_n(&g_max_pending, __ATOMIC_RELAXED);
-	while (n > cur) {
+	while (n > cur)
+	{
 		if (__atomic_compare_exchange_n(&g_max_pending, &cur, n, 1,
-				__ATOMIC_RELAXED, __ATOMIC_RELAXED))
+		            __ATOMIC_RELAXED, __ATOMIC_RELAXED))
 			break;
 	}
 }
@@ -106,7 +109,8 @@ void sni_note_accept_pause(void)
 void sni_test_set_faults(const sni_test_faults *faults)
 {
 	sni_test_faults none;
-	if (!faults) {
+	if (!faults)
+	{
 		memset(&none, 0, sizeof(none));
 		faults = &none;
 	}

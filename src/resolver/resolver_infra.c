@@ -12,16 +12,20 @@
 void resolver_commit_infra_locked(resolve_slot *slot, int gai_error)
 {
 	if (slot->req_id != g_resolver_pool->cache_refresh_req && g_resolver_pool->cache_refresh_req != 0 &&
-			slot->req_id != g_resolver_pool->cache_refresh_req) {
+	        slot->req_id != g_resolver_pool->cache_refresh_req)
+	{
 		/* A newer refresh owns the cache. This result is stale. */
 	}
-	if (slot->req_id == g_resolver_pool->cache_refresh_req || g_resolver_pool->cache_refresh_inflight) {
-		if (slot->req_id == g_resolver_pool->cache_refresh_req) {
+	if (slot->req_id == g_resolver_pool->cache_refresh_req || g_resolver_pool->cache_refresh_inflight)
+	{
+		if (slot->req_id == g_resolver_pool->cache_refresh_req)
+		{
 			g_resolver_pool->cache_refresh_inflight = 0;
-			if (gai_error == 0 && slot->address_count > 0) {
+			if (gai_error == 0 && slot->address_count > 0)
+			{
 				int64_t now = net_mono_ms();
 				memcpy(g_resolver_pool->cache_addrs, slot->addresses,
-						slot->address_count * sizeof(slot->addresses[0]));
+				        slot->address_count * sizeof(slot->addresses[0]));
 				g_resolver_pool->cache_count = slot->address_count;
 				g_resolver_pool->cache_valid = 1;
 				if (now < 0)
@@ -84,15 +88,18 @@ void resolver_watch_bind(uint32_t listener_id, const char *bindip, uint16_t port
 	if (inet_pton(AF_INET, bindip, &ip) != 1)
 		return;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
-		if (g_resolver_pool->binds[i].used && g_resolver_pool->binds[i].listener_id == listener_id) {
+	for (i = 0; i < RESOLVER_BIND_MAX; i++)
+	{
+		if (g_resolver_pool->binds[i].used && g_resolver_pool->binds[i].listener_id == listener_id)
+		{
 			free_i = i;
 			break;
 		}
 		if (!g_resolver_pool->binds[i].used && free_i < 0)
 			free_i = i;
 	}
-	if (free_i >= 0) {
+	if (free_i >= 0)
+	{
 		g_resolver_pool->binds[free_i].used = 1;
 		g_resolver_pool->binds[free_i].listener_id = listener_id;
 		g_resolver_pool->binds[free_i].port = port;
@@ -108,7 +115,8 @@ void resolver_unwatch_bind(uint32_t listener_id)
 	if (!g_resolver_pool || listener_id == 0)
 		return;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	for (i = 0; i < RESOLVER_BIND_MAX; i++) {
+	for (i = 0; i < RESOLVER_BIND_MAX; i++)
+	{
 		if (g_resolver_pool->binds[i].used && g_resolver_pool->binds[i].listener_id == listener_id)
 			g_resolver_pool->binds[i].used = 0;
 	}
@@ -148,19 +156,24 @@ bool resolver_prime_socks(const char *host, uint16_t port, int wait_ms)
 		return false;
 	pthread_mutex_lock(&g_resolver_pool->mu);
 	if (g_resolver_pool->cache_valid && strcmp(g_resolver_pool->cache_host, norm) == 0 &&
-			g_resolver_pool->cache_port == port) {
+	        g_resolver_pool->cache_port == port)
+	{
 		int64_t now = net_mono_ms();
-		if (now >= 0 && now < g_resolver_pool->cache_refresh_after) {
+		if (now >= 0 && now < g_resolver_pool->cache_refresh_after)
+		{
 			pthread_mutex_unlock(&g_resolver_pool->mu);
 			return true;
 		}
 	}
-	if (submit_infra_locked(norm, port) != 0 && !g_resolver_pool->cache_refresh_inflight) {
+	if (submit_infra_locked(norm, port) != 0 && !g_resolver_pool->cache_refresh_inflight)
+	{
 		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return true;
 	}
-	if (resolver_mono_deadline(wait_ms, &ts) == 0) {
-		while (g_resolver_pool->cache_refresh_inflight) {
+	if (resolver_mono_deadline(wait_ms, &ts) == 0)
+	{
+		while (g_resolver_pool->cache_refresh_inflight)
+		{
 			int wr = pthread_cond_timedwait(&g_resolver_pool->infra_cv, &g_resolver_pool->mu, &ts);
 			if (wr == ETIMEDOUT)
 				break;
@@ -171,7 +184,7 @@ bool resolver_prime_socks(const char *host, uint16_t port, int wait_ms)
 }
 
 int resolver_copy_upstream(const char *host, uint16_t port,
-		resolver_addr *out, size_t *count)
+        resolver_addr *out, size_t *count)
 {
 	char norm[RESOLVER_HOST_MAX + 1];
 	int st;
@@ -185,7 +198,8 @@ int resolver_copy_upstream(const char *host, uint16_t port,
 	if (!g_resolver_pool)
 		return RESOLVER_UP_NEED_RESOLVE;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	if (!g_resolver_pool->cache_valid || strcmp(g_resolver_pool->cache_host, norm) != 0) {
+	if (!g_resolver_pool->cache_valid || strcmp(g_resolver_pool->cache_host, norm) != 0)
+	{
 		if (g_resolver_pool->cache_host[0] != '\0' && strcmp(g_resolver_pool->cache_host, norm) == 0)
 			(void)submit_infra_locked(norm, port);
 		pthread_mutex_unlock(&g_resolver_pool->mu);
@@ -197,4 +211,3 @@ int resolver_copy_upstream(const char *host, uint16_t port,
 	pthread_mutex_unlock(&g_resolver_pool->mu);
 	return st;
 }
-

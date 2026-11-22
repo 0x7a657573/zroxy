@@ -24,7 +24,7 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
  * monitor only borrows it: stat must outlive the monitor and is never freed
  * here. Returns false for a NULL argument.
  */
-bool monitor_attach_stat(mon_t *self,statistics_t *stat);
+bool monitor_attach_stat(mon_t *self, statistics_t *stat);
 /* Adds a top-level object written by fn. ctx must outlive the monitor. */
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx);
 /*

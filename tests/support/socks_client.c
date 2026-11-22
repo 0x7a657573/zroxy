@@ -9,7 +9,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h> /*Lib Socket*/
 #include <sys/types.h>
-#include <unistd.h>  	/*Header file for sleep(). man 3 sleep for details.*/
+#include <unistd.h> /*Header file for sleep(). man 3 sleep for details.*/
 #include <zroxy/log.h>
 #include <string.h>
 #include <stdbool.h>
@@ -30,7 +30,7 @@ static void socks5_close(int *sockfd)
 	}
 }
 
-bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port, int timeout_sec)
+bool socks5_connect(int *sockfd, sockshost_t *socks, const char *host, int port, int timeout_sec)
 {
 	int io_ms;
 	char *socks5_host;
@@ -43,13 +43,13 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port, 
 
 	*sockfd = -1;
 	if (port < 0 || port > 65535 ||
-		!socks5_client_init(&client, socks->user, socks->pass, host, (uint16_t)port))
+	        !socks5_client_init(&client, socks->user, socks->pass, host, (uint16_t)port))
 		return false;
 	io_ms = net_timeout_ms(timeout_sec);
 	socks5_host = socks->host;
 
 	/*if host is domain need resolve domain*/
-	if (!net_connect(sockfd,socks5_host, socks->port, timeout_sec))
+	if (!net_connect(sockfd, socks5_host, socks->port, timeout_sec))
 	{
 		log_error("Socks Error: Connect to %s Failed", socks5_host);
 		socks5_close(sockfd);
@@ -73,7 +73,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port, 
 		else
 		{
 			if (client.need > sizeof(reply) ||
-				!net_read_exact_ms(*sockfd, reply, client.need, io_ms))
+			        !net_read_exact_ms(*sockfd, reply, client.need, io_ms))
 			{
 				log_error("[!] Error reading SOCKS handshake from %s", socks5_host);
 				socks5_close(sockfd);
@@ -86,7 +86,7 @@ bool socks5_connect(int *sockfd,sockshost_t *socks, const char *host, int port, 
 	if (step != S5_DONE)
 	{
 		log_error("[!] SOCKS server %s:%u: %s", socks5_host, (unsigned)socks->port,
-			socks5_client_strerror(&client));
+		        socks5_client_strerror(&client));
 		socks5_close(sockfd);
 		return false;
 	}

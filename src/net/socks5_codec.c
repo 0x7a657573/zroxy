@@ -47,7 +47,7 @@ const char *socks5_rep_name(uint8_t rep)
 	case 0xF5: return "onion service wrong client authorization";
 	case 0xF6: return "invalid onion service address";
 	case 0xF7: return "onion service introduction timed out";
-	default:   return "unknown";
+	default: return "unknown";
 	}
 }
 
@@ -74,14 +74,14 @@ static s5_step fail(socks5_client *c, s5_error error, uint8_t code)
 		return S5_FAIL;
 	case S5_ERR_AUTH_UNOFFERED:
 		snprintf(c->msg, sizeof(c->msg),
-			"selected username/password auth, which we did not offer");
+		        "selected username/password auth, which we did not offer");
 		return S5_FAIL;
 	case S5_ERR_CREDS:
 		snprintf(c->msg, sizeof(c->msg), "username/password length rejected");
 		return S5_FAIL;
 	case S5_ERR_AUTH:
 		snprintf(c->msg, sizeof(c->msg),
-			"rejected username/password authentication (status 0x%02X)", (unsigned)code);
+		        "rejected username/password authentication (status 0x%02X)", (unsigned)code);
 		return S5_FAIL;
 	case S5_ERR_REPLY_VERSION:
 		snprintf(c->msg, sizeof(c->msg), "CONNECT reply has bad version %u", (unsigned)code);
@@ -89,11 +89,11 @@ static s5_step fail(socks5_client *c, s5_error error, uint8_t code)
 	case S5_ERR_REFUSED:
 		why = socks5_rep_name(code);
 		snprintf(c->msg, sizeof(c->msg), "refused CONNECT: reply 0x%02X (%s)",
-			(unsigned)code, why);
+		        (unsigned)code, why);
 		return S5_FAIL;
 	case S5_ERR_ATYP:
 		snprintf(c->msg, sizeof(c->msg), "CONNECT reply has unsupported address type 0x%02X",
-			(unsigned)code);
+		        (unsigned)code);
 		return S5_FAIL;
 	case S5_ERR_NONE:
 	default:
@@ -172,7 +172,7 @@ static s5_step queue_request(socks5_client *c)
 }
 
 bool socks5_client_init(socks5_client *c, const char *user, const char *pass,
-		const char *host, uint16_t port)
+        const char *host, uint16_t port)
 {
 	if (!c || !host)
 		return false;

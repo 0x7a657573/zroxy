@@ -12,7 +12,7 @@
 
 #include "fuzz_common.h"
 
-#define MAX_REQUEST 4096u	/* MON_MAX_HEADER */
+#define MAX_REQUEST 4096u /* MON_MAX_HEADER */
 
 /* Parts of the input that the harness also tries as the token. */
 #define TOKEN "s3cret-token"

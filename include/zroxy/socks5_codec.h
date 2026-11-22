@@ -52,16 +52,16 @@ typedef enum
 
 typedef struct
 {
-	int phase;			/* private */
-	const char *user;		/* borrowed; both needed to offer auth */
+	int phase;        /* private */
+	const char *user; /* borrowed; both needed to offer auth */
 	const char *pass;
-	const char *host;		/* target: name or IPv4 literal */
+	const char *host; /* target: name or IPv4 literal */
 	uint16_t port;
-	uint8_t out[S5_OUT_MAX];	/* valid after S5_SEND */
+	uint8_t out[S5_OUT_MAX]; /* valid after S5_SEND */
 	size_t out_len;
-	size_t need;			/* valid after S5_READ */
-	s5_error error;			/* valid after S5_FAIL */
-	uint8_t code;			/* offending byte: version, method, status, rep or atyp */
+	size_t need;    /* valid after S5_READ */
+	s5_error error; /* valid after S5_FAIL */
+	uint8_t code;   /* offending byte: version, method, status, rep or atyp */
 	char msg[112];
 } socks5_client;
 
@@ -70,7 +70,7 @@ const char *socks5_rep_name(uint8_t rep);
 
 /* user and pass may be NULL; auth is offered only when both are set. */
 bool socks5_client_init(socks5_client *c, const char *user, const char *pass,
-		const char *host, uint16_t port);
+        const char *host, uint16_t port);
 s5_step socks5_client_start(socks5_client *c);
 s5_step socks5_client_sent(socks5_client *c);
 s5_step socks5_client_feed(socks5_client *c, const uint8_t *in, size_t len);

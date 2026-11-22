@@ -23,7 +23,7 @@ static bool parse_uint(const char *str, unsigned long maxv, unsigned long *out)
 		if (!isdigit((unsigned char)*s))
 			return false;
 		if (value > maxv / 10ul ||
-		    (value == maxv / 10ul && (unsigned long)(*s - '0') > maxv % 10ul))
+		        (value == maxv / 10ul && (unsigned long)(*s - '0') > maxv % 10ul))
 			return false;
 		value = value * 10ul + (unsigned long)(*s - '0');
 		s++;
@@ -88,28 +88,28 @@ static void free_sockshost(sockshost_t *socks)
 	free(socks);
 }
 
-static bool parse_ports(zroxy_t *ptr,char *str);
-static bool parse_socks(zroxy_t *ptr,char *str);
-static bool parse_monitor(zroxy_t *ptr,char *str);
-static bool parse_monitor_token(zroxy_t *ptr,char *str);
-static bool parse_secret_path(char **slot,char *str);
-static bool parse_monitor_timeout(zroxy_t *ptr,char *str);
-static bool parse_whitelist(zroxy_t *ptr,char *str);
-static bool parse_dns_server(zroxy_t *ptr,char *str);
-static bool parse_dns_upstream(zroxy_t *ptr,char *str);
-static bool parse_dns_socks(zroxy_t *ptr,char *str);
-static bool parse_sni_ip(zroxy_t *ptr,char *str);
-static bool parse_dns_timeout(zroxy_t *ptr,char *str);
-static bool parse_dns_cache(zroxy_t *ptr,char *str);
-static bool parse_dns_ttl(zroxy_t *ptr,char *str);
-static bool parse_dns_acl(zroxy_t *ptr,char *str);
-static bool parse_dns_rate(zroxy_t *ptr,char *str);
-static bool parse_dns_connections(zroxy_t *ptr,char *str);
-static bool parse_log_level(zroxy_t *ptr,char *str);
-static bool parse_sni_timeout(zroxy_t *ptr,char *str);
-static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str);
-static bool parse_sni_max_conn(zroxy_t *ptr,char *str);
-static bool parse_sni_acl(zroxy_t *ptr,char *str);
+static bool parse_ports(zroxy_t *ptr, char *str);
+static bool parse_socks(zroxy_t *ptr, char *str);
+static bool parse_monitor(zroxy_t *ptr, char *str);
+static bool parse_monitor_token(zroxy_t *ptr, char *str);
+static bool parse_secret_path(char **slot, char *str);
+static bool parse_monitor_timeout(zroxy_t *ptr, char *str);
+static bool parse_whitelist(zroxy_t *ptr, char *str);
+static bool parse_dns_server(zroxy_t *ptr, char *str);
+static bool parse_dns_upstream(zroxy_t *ptr, char *str);
+static bool parse_dns_socks(zroxy_t *ptr, char *str);
+static bool parse_sni_ip(zroxy_t *ptr, char *str);
+static bool parse_dns_timeout(zroxy_t *ptr, char *str);
+static bool parse_dns_cache(zroxy_t *ptr, char *str);
+static bool parse_dns_ttl(zroxy_t *ptr, char *str);
+static bool parse_dns_acl(zroxy_t *ptr, char *str);
+static bool parse_dns_rate(zroxy_t *ptr, char *str);
+static bool parse_dns_connections(zroxy_t *ptr, char *str);
+static bool parse_log_level(zroxy_t *ptr, char *str);
+static bool parse_sni_timeout(zroxy_t *ptr, char *str);
+static bool parse_sni_idle_timeout(zroxy_t *ptr, char *str);
+static bool parse_sni_max_conn(zroxy_t *ptr, char *str);
+static bool parse_sni_acl(zroxy_t *ptr, char *str);
 static bool parse_bool(char *str, bool *out);
 static bool validate_ip(char *ip);
 
@@ -149,7 +149,7 @@ static dnshost_t *dns_config(zroxy_t *ptr)
 {
 	if (!ptr->dnsserver)
 	{
-		ptr->dnsserver = (dnshost_t*)calloc(1, sizeof(dnshost_t));
+		ptr->dnsserver = (dnshost_t *)calloc(1, sizeof(dnshost_t));
 		if (!ptr->dnsserver)
 			return NULL;
 		ptr->dnsserver->Local.port = 53;
@@ -164,53 +164,144 @@ static dnshost_t *dns_config(zroxy_t *ptr)
 
 int args_apply_option(int key, char *arg, void *userprm)
 {
-	zroxy_t *setting = (zroxy_t*)userprm;
+	zroxy_t *setting = (zroxy_t *)userprm;
 
 	/*remove space form arg*/
-	if(arg)
-		while(*arg==' ') arg++;
+	if (arg)
+		while (*arg == ' ')
+			arg++;
 	if (key != 'h' && (!arg || arg[0] == '\0'))
 		return -1;
 
-    switch (key)
-    {
-		case 'c': if (!args_parse_config(setting,arg)) return -1; break;
-		case 'p': if (!parse_ports(setting,arg)) return -1; break;
-		case 's': if (!parse_socks(setting,arg)) return -1; break;
-		case 'm': if (!parse_monitor(setting,arg)) return -1; break;
-		case 'k': if (!parse_monitor_token(setting,arg)) return -1; break;
-		case 'K': if (!parse_secret_path(&setting->monitor_token_file,arg)) return -1; break;
-		case 'S': if (!parse_secret_path(&setting->socks_pass_file,arg)) return -1; break;
-		case 'X': if (!parse_secret_path(&setting->dsocks_pass_file,arg)) return -1; break;
-		case 'a': if (!parse_monitor_timeout(setting,arg)) return -1; break;
-		case 'w': if (!parse_whitelist(setting,arg)) return -1; break;
-		case 'd': if (!parse_dns_server(setting,arg)) return -1; break;
-		case 'u': if (!parse_dns_upstream(setting,arg)) return -1; break;
-		case 'x': if (!parse_dns_socks(setting,arg)) return -1; break;
-		case 'i': if (!parse_sni_ip(setting,arg)) return -1; break;
-		case 't': if (!parse_dns_timeout(setting,arg)) return -1; break;
-		case 'e': if (!parse_dns_cache(setting,arg)) return -1; break;
-		case 'r': if (!parse_dns_ttl(setting,arg)) return -1; break;
-		case 'A': if (!parse_dns_acl(setting,arg)) return -1; break;
-		case 'R': if (!parse_dns_rate(setting,arg)) return -1; break;
-		case 'C': if (!parse_dns_connections(setting,arg)) return -1; break;
-		case 'l': if (!parse_log_level(setting,arg)) return -1; break;
-		case 'o': if (!parse_sni_timeout(setting,arg)) return -1; break;
-		case 'L': if (!parse_bool(arg, &setting->allow_loopback)) return -1; break;
-		case 'P': if (!parse_bool(arg, &setting->deny_private)) return -1; break;
-		case 'U': if (!parse_secret_path(&setting->run_user,arg)) return -1; break;
-		case 'G': if (!parse_secret_path(&setting->run_group,arg)) return -1; break;
-		case 'O': if (!parse_bool(arg, &setting->open_proxy)) return -1; break;
-		case 'I': if (!parse_sni_idle_timeout(setting,arg)) return -1; break;
-		case 'n': if (!parse_sni_max_conn(setting,arg)) return -1; break;
-		case 'N': if (!parse_sni_acl(setting,arg)) return -1; break;
-		case 'h': args_print_usage(); exit(0);
-		default: return -1;
-    }
-    return 0;
+	switch (key)
+	{
+	case 'c':
+		if (!args_parse_config(setting, arg))
+			return -1;
+		break;
+	case 'p':
+		if (!parse_ports(setting, arg))
+			return -1;
+		break;
+	case 's':
+		if (!parse_socks(setting, arg))
+			return -1;
+		break;
+	case 'm':
+		if (!parse_monitor(setting, arg))
+			return -1;
+		break;
+	case 'k':
+		if (!parse_monitor_token(setting, arg))
+			return -1;
+		break;
+	case 'K':
+		if (!parse_secret_path(&setting->monitor_token_file, arg))
+			return -1;
+		break;
+	case 'S':
+		if (!parse_secret_path(&setting->socks_pass_file, arg))
+			return -1;
+		break;
+	case 'X':
+		if (!parse_secret_path(&setting->dsocks_pass_file, arg))
+			return -1;
+		break;
+	case 'a':
+		if (!parse_monitor_timeout(setting, arg))
+			return -1;
+		break;
+	case 'w':
+		if (!parse_whitelist(setting, arg))
+			return -1;
+		break;
+	case 'd':
+		if (!parse_dns_server(setting, arg))
+			return -1;
+		break;
+	case 'u':
+		if (!parse_dns_upstream(setting, arg))
+			return -1;
+		break;
+	case 'x':
+		if (!parse_dns_socks(setting, arg))
+			return -1;
+		break;
+	case 'i':
+		if (!parse_sni_ip(setting, arg))
+			return -1;
+		break;
+	case 't':
+		if (!parse_dns_timeout(setting, arg))
+			return -1;
+		break;
+	case 'e':
+		if (!parse_dns_cache(setting, arg))
+			return -1;
+		break;
+	case 'r':
+		if (!parse_dns_ttl(setting, arg))
+			return -1;
+		break;
+	case 'A':
+		if (!parse_dns_acl(setting, arg))
+			return -1;
+		break;
+	case 'R':
+		if (!parse_dns_rate(setting, arg))
+			return -1;
+		break;
+	case 'C':
+		if (!parse_dns_connections(setting, arg))
+			return -1;
+		break;
+	case 'l':
+		if (!parse_log_level(setting, arg))
+			return -1;
+		break;
+	case 'o':
+		if (!parse_sni_timeout(setting, arg))
+			return -1;
+		break;
+	case 'L':
+		if (!parse_bool(arg, &setting->allow_loopback))
+			return -1;
+		break;
+	case 'P':
+		if (!parse_bool(arg, &setting->deny_private))
+			return -1;
+		break;
+	case 'U':
+		if (!parse_secret_path(&setting->run_user, arg))
+			return -1;
+		break;
+	case 'G':
+		if (!parse_secret_path(&setting->run_group, arg))
+			return -1;
+		break;
+	case 'O':
+		if (!parse_bool(arg, &setting->open_proxy))
+			return -1;
+		break;
+	case 'I':
+		if (!parse_sni_idle_timeout(setting, arg))
+			return -1;
+		break;
+	case 'n':
+		if (!parse_sni_max_conn(setting, arg))
+			return -1;
+		break;
+	case 'N':
+		if (!parse_sni_acl(setting, arg))
+			return -1;
+		break;
+	case 'h': args_print_usage(); exit(0);
+	default: return -1;
+	}
+	return 0;
 }
 
-static bool parse_whitelist(zroxy_t *ptr,char *str)
+static bool parse_whitelist(zroxy_t *ptr, char *str)
 {
 	char *path;
 	path = dup_bounded(str, ZROXY_MAX_CONFIG_VALUE);
@@ -221,7 +312,7 @@ static bool parse_whitelist(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_monitor(zroxy_t *ptr,char *str)
+static bool parse_monitor(zroxy_t *ptr, char *str)
 {
 	char *colon;
 	char *port_str = str;
@@ -248,7 +339,7 @@ static bool parse_monitor(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_monitor_token(zroxy_t *ptr,char *str)
+static bool parse_monitor_token(zroxy_t *ptr, char *str)
 {
 	char *token = dup_bounded(str, ARGS_MAX_TOKEN);
 	if (!token)
@@ -258,7 +349,7 @@ static bool parse_monitor_token(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_secret_path(char **slot,char *str)
+static bool parse_secret_path(char **slot, char *str)
 {
 	char *path = dup_bounded(str, ZROXY_MAX_CONFIG_VALUE);
 	if (!path)
@@ -268,7 +359,7 @@ static bool parse_secret_path(char **slot,char *str)
 	return true;
 }
 
-static bool parse_monitor_timeout(zroxy_t *ptr,char *str)
+static bool parse_monitor_timeout(zroxy_t *ptr, char *str)
 {
 	uint32_t timeout;
 	if (!parse_u32_in(str, 1, 60, &timeout))
@@ -277,25 +368,25 @@ static bool parse_monitor_timeout(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_dns_timeout(zroxy_t *ptr,char *str)
+static bool parse_dns_timeout(zroxy_t *ptr, char *str)
 {
 	dnshost_t *dns = dns_config(ptr);
 	return dns && parse_u32_in(str, 0, 86400, &dns->timeout);
 }
 
-static bool parse_dns_cache(zroxy_t *ptr,char *str)
+static bool parse_dns_cache(zroxy_t *ptr, char *str)
 {
 	dnshost_t *dns = dns_config(ptr);
 	return dns && parse_u32_in(str, 0, 65536, &dns->cache_entries);
 }
 
-static bool parse_dns_ttl(zroxy_t *ptr,char *str)
+static bool parse_dns_ttl(zroxy_t *ptr, char *str)
 {
 	dnshost_t *dns = dns_config(ptr);
 	return dns && parse_u32_in(str, 1, 86400, &dns->local_ttl);
 }
 
-static bool parse_dns_acl(zroxy_t *ptr,char *str)
+static bool parse_dns_acl(zroxy_t *ptr, char *str)
 {
 	zroxy_cidr_t parsed[32];
 	zroxy_cidr_t *copy;
@@ -314,13 +405,13 @@ static bool parse_dns_acl(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_dns_rate(zroxy_t *ptr,char *str)
+static bool parse_dns_rate(zroxy_t *ptr, char *str)
 {
 	dnshost_t *dns = dns_config(ptr);
 	return dns && parse_u32_in(str, 0, 100000, &dns->rate_qps);
 }
 
-static bool parse_dns_connections(zroxy_t *ptr,char *str)
+static bool parse_dns_connections(zroxy_t *ptr, char *str)
 {
 	uint32_t count;
 	dnshost_t *dns = dns_config(ptr);
@@ -330,7 +421,7 @@ static bool parse_dns_connections(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_dns_server(zroxy_t *ptr,char *str)
+static bool parse_dns_server(zroxy_t *ptr, char *str)
 {
 	char *endname;
 	uint16_t port = 53;
@@ -340,8 +431,8 @@ static bool parse_dns_server(zroxy_t *ptr,char *str)
 		return false;
 	dns->Local.port = 53;
 
-	endname = strchr(str,':');
-	if(endname)
+	endname = strchr(str, ':');
+	if (endname)
 	{
 		*endname++ = 0;
 		if (!parse_u16(endname, &port, 0, 65535))
@@ -357,7 +448,7 @@ static bool parse_dns_server(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_sni_ip(zroxy_t *ptr,char *str)
+static bool parse_sni_ip(zroxy_t *ptr, char *str)
 {
 	unsigned int si[4];
 	char tail = '\0';
@@ -409,14 +500,14 @@ static bool str_equal_null(const char *a, const char *b)
 static bool dns_route_same(const dns_route_t *a, const dns_route_t *b)
 {
 	if (strcasecmp(a->upstream.ip, b->upstream.ip) != 0 ||
-	    a->upstream.port != b->upstream.port || a->direct != b->direct)
+	        a->upstream.port != b->upstream.port || a->direct != b->direct)
 		return false;
 	if (!a->socks || !b->socks)
 		return a->socks == b->socks;
 	return strcasecmp(a->socks->host, b->socks->host) == 0 &&
-		a->socks->port == b->socks->port &&
-		str_equal_null(a->socks->user, b->socks->user) &&
-		str_equal_null(a->socks->pass, b->socks->pass);
+	       a->socks->port == b->socks->port &&
+	       str_equal_null(a->socks->user, b->socks->user) &&
+	       str_equal_null(a->socks->pass, b->socks->pass);
 }
 
 static bool fill_sockshost(sockshost_t *socks, char *str);
@@ -425,7 +516,7 @@ static bool fill_sockshost(sockshost_t *socks, char *str);
  * One DNS= / -u value is one route: HOST[:PORT] [via SOCKS-SPEC|direct].
  * It is parsed completely and appended only when valid.
  */
-static bool parse_dns_upstream(zroxy_t *ptr,char *str)
+static bool parse_dns_upstream(zroxy_t *ptr, char *str)
 {
 	char *endname;
 	char *via;
@@ -438,7 +529,7 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 		return false;
 	memset(&route, 0, sizeof(route));
 
-			via = args_find_dns_via(str);
+	via = args_find_dns_via(str);
 	end = str;
 	while (*end && !isspace((unsigned char)*end))
 		end++;
@@ -447,7 +538,8 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 		/* anything after the host must be the via clause */
 		char *rest = end;
 		*end = '\0';
-		while (isspace((unsigned char)*++rest)) ;
+		while (isspace((unsigned char)*++rest))
+			;
 		if (*rest && !via)
 		{
 			log_error("DNS upstream: unexpected text after the host (use \"HOST[:PORT] via SPEC\")");
@@ -466,7 +558,7 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 			route.direct = true;
 		else
 		{
-			route.socks = (sockshost_t*)calloc(1, sizeof(sockshost_t));
+			route.socks = (sockshost_t *)calloc(1, sizeof(sockshost_t));
 			if (!route.socks)
 				return false;
 			if (!fill_sockshost(route.socks, spec))
@@ -477,8 +569,8 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 		}
 	}
 
-	endname = strchr(str,':');
-	if(endname)
+	endname = strchr(str, ':');
+	if (endname)
 	{
 		*endname++ = 0;
 		if (!parse_u16(endname, &port, 1, 65535))
@@ -493,7 +585,7 @@ static bool parse_dns_upstream(zroxy_t *ptr,char *str)
 		if (dns_route_same(&route, &dns->routes[i]))
 		{
 			log_error("DNS upstream %s:%u is already defined", route.upstream.ip,
-			    (unsigned)route.upstream.port);
+			        (unsigned)route.upstream.port);
 			goto fail;
 		}
 	}
@@ -579,9 +671,9 @@ static bool fill_sockshost(sockshost_t *socks, char *str)
 	return true;
 }
 
-static bool parse_socks(zroxy_t *ptr,char *str)
+static bool parse_socks(zroxy_t *ptr, char *str)
 {
-	sockshost_t *socks = (sockshost_t*)calloc(1, sizeof(sockshost_t));
+	sockshost_t *socks = (sockshost_t *)calloc(1, sizeof(sockshost_t));
 	if (!socks)
 		return false;
 	if (!fill_sockshost(socks, str))
@@ -608,7 +700,7 @@ static uint32_t ip_value(const char *ip)
  * port: the same address, or either one is the wildcard. Port 0 asks for any
  * free port, so two of them never collide.
  */
-static bool listener_conflict(const lport_t *port,const lport_t *other)
+static bool listener_conflict(const lport_t *port, const lport_t *other)
 {
 	uint32_t a = ip_value(port->bindip);
 	uint32_t b = ip_value(other->bindip);
@@ -622,7 +714,7 @@ static void free_port_list(lport_t *p)
 {
 	while (p)
 	{
-		lport_t *next = (lport_t*)p->next;
+		lport_t *next = (lport_t *)p->next;
 		free(p);
 		p = next;
 	}
@@ -633,15 +725,16 @@ static void free_port_list(lport_t *p)
  * from earlier PORT lines or -p options. All or nothing: the entries go into a
  * list of their own first, so a bad entry leaves ptr->ports as it was.
  */
-static bool parse_ports(zroxy_t *ptr,char *str)
+static bool parse_ports(zroxy_t *ptr, char *str)
 {
 	lport_t *head = NULL;
 	lport_t *tail = NULL;
 	lport_t *last;
 	lport_t *port = NULL;
 
-	do{
-		port = (lport_t*)calloc(1, sizeof(lport_t));
+	do
+	{
+		port = (lport_t *)calloc(1, sizeof(lport_t));
 		char *xptr = str;
 		char *Iptr;
 		char *Pptr;
@@ -650,19 +743,19 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 
 		if (!port)
 			goto fail;
-		str = strchr(str,',');
-		if(str)
+		str = strchr(str, ',');
+		if (str)
 		{
-			*str++=0;
+			*str++ = 0;
 		}
 
 		/*check for ip*/
-		Iptr = strchr(xptr,':');
-		if(Iptr)
+		Iptr = strchr(xptr, ':');
+		if (Iptr)
 		{
-			*Iptr++=0;
+			*Iptr++ = 0;
 			if (!validate_ip(xptr) ||
-			    !copy_bounded(port->bindip, sizeof(port->bindip), xptr))
+			        !copy_bounded(port->bindip, sizeof(port->bindip), xptr))
 			{
 				log_error("invalid listener address");
 				goto fail;
@@ -672,12 +765,12 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 		else if (!copy_bounded(port->bindip, sizeof(port->bindip), "0.0.0.0"))
 			goto fail;
 
-		Pptr = strchr(xptr,'@');
-		if(Pptr)
+		Pptr = strchr(xptr, '@');
+		if (Pptr)
 		{
-			*Pptr++=0;
+			*Pptr++ = 0;
 			if (!parse_u16(xptr, &local_port, 0, 65535) ||
-			    !parse_u16(Pptr, &remote_port, 0, 65535))
+			        !parse_u16(Pptr, &remote_port, 0, 65535))
 				goto fail;
 		}
 		else
@@ -691,16 +784,16 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 		port->remote_port = remote_port;
 
 		/*against the earlier lines and the entries of this one*/
-		for (last = ptr->ports; last; last = (lport_t*)last->next)
+		for (last = ptr->ports; last; last = (lport_t *)last->next)
 			if (listener_conflict(port, last))
 				break;
-		for (lport_t *p = head; !last && p; p = (lport_t*)p->next)
+		for (lport_t *p = head; !last && p; p = (lport_t *)p->next)
 			if (listener_conflict(port, p))
 				last = p;
 		if (last)
 		{
 			log_error("listener %s:%u is already defined", port->bindip,
-			    (unsigned)port->local_port);
+			        (unsigned)port->local_port);
 			goto fail;
 		}
 
@@ -710,11 +803,11 @@ static bool parse_ports(zroxy_t *ptr,char *str)
 			head = port;
 		tail = port;
 
-	}while( str!=NULL );
+	} while (str != NULL);
 
 	if (ptr->ports)
 	{
-		for (last = ptr->ports; last->next; last = (lport_t*)last->next)
+		for (last = ptr->ports; last->next; last = (lport_t *)last->next)
 			;
 		last->next = head;
 	}
@@ -755,9 +848,9 @@ void args_free_monitor_token(zroxy_t *ptr)
 
 void args_free_dns(zroxy_t *ptr)
 {
-	if(ptr->dnsserver)
+	if (ptr->dnsserver)
 	{
-		if(ptr->dnsserver->Socks)
+		if (ptr->dnsserver->Socks)
 		{
 			free_sockshost(ptr->dnsserver->Socks);
 		}
@@ -769,13 +862,13 @@ void args_free_dns(zroxy_t *ptr)
 	}
 }
 
-static bool parse_dns_socks(zroxy_t *ptr,char *str)
+static bool parse_dns_socks(zroxy_t *ptr, char *str)
 {
 	sockshost_t *socks;
 	dnshost_t *dns = dns_config(ptr);
 	if (!dns)
 		return false;
-	socks = (sockshost_t*)calloc(1, sizeof(sockshost_t));
+	socks = (sockshost_t *)calloc(1, sizeof(sockshost_t));
 	if (!socks)
 		return false;
 	if (!fill_sockshost(socks, str))
@@ -788,7 +881,7 @@ static bool parse_dns_socks(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_log_level(zroxy_t *ptr,char *str)
+static bool parse_log_level(zroxy_t *ptr, char *str)
 {
 	uint32_t log_level;
 	(void)ptr;
@@ -798,7 +891,7 @@ static bool parse_log_level(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_sni_timeout(zroxy_t *ptr,char *str)
+static bool parse_sni_timeout(zroxy_t *ptr, char *str)
 {
 	uint32_t timeout;
 	if (!parse_u32_in(str, 0, 86400, &timeout))
@@ -807,7 +900,7 @@ static bool parse_sni_timeout(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str)
+static bool parse_sni_idle_timeout(zroxy_t *ptr, char *str)
 {
 	uint32_t timeout;
 	if (!parse_u32_in(str, 1, 86400, &timeout))
@@ -816,7 +909,7 @@ static bool parse_sni_idle_timeout(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_sni_acl(zroxy_t *ptr,char *str)
+static bool parse_sni_acl(zroxy_t *ptr, char *str)
 {
 	zroxy_cidr_t parsed[32];
 	zroxy_cidr_t *copy;
@@ -833,7 +926,7 @@ static bool parse_sni_acl(zroxy_t *ptr,char *str)
 	return true;
 }
 
-static bool parse_sni_max_conn(zroxy_t *ptr,char *str)
+static bool parse_sni_max_conn(zroxy_t *ptr, char *str)
 {
 	uint32_t count;
 	if (!parse_u32_in(str, 1, SNI_CONN_LIMIT_MAX, &count))
@@ -852,4 +945,3 @@ static bool parse_bool(char *str, bool *out)
 		return false;
 	return true;
 }
-

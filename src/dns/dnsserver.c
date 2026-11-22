@@ -14,13 +14,13 @@
 struct dnsserver *dnsserver_start(dnshost_t *conf)
 {
 	dnsserver_t *dns = localdns_init_config(conf);
-	if(!dns)
+	if (!dns)
 	{
 		log_error("dns server config error...");
 		return NULL;
 	}
 
-	if(!localdns_init_sockets(dns))
+	if (!localdns_init_sockets(dns))
 	{
 		log_error("dns server socket error.");
 		localdns_free(dns);
@@ -38,7 +38,7 @@ struct dnsserver *dnsserver_start(dnshost_t *conf)
 	}
 	stats_set_extra(dns->Stat, dns_stats_json, dns);
 
-	log_info("dns server start on %s:%d",conf->Local.ip,conf->Local.port);
+	log_info("dns server start on %s:%d", conf->Local.ip, conf->Local.port);
 	return dns;
 }
 

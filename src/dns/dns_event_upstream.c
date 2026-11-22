@@ -33,7 +33,7 @@ void dnsev_upstream_close(dns_event_t *event, dns_upstream_t *upstream)
 static bool route_ready(dns_event_t *event, unsigned route)
 {
 	return event->routes[route].upstream.ready &&
-		(!event->dns->routes[route].socks || event->routes[route].socks.ready);
+	       (!event->dns->routes[route].socks || event->routes[route].socks.ready);
 }
 
 /* Route for the next attempt: the first ready one from active that is not yet tried. */
@@ -41,7 +41,8 @@ int dnsev_request_pick_route(dns_event_t *event, const dns_request_t *request)
 {
 	unsigned count = event->dns->route_count;
 	unsigned k;
-	for (k = 0; k < count; k++) {
+	for (k = 0; k < count; k++)
+	{
 		unsigned route = (event->active + k) % count;
 		if (count > 1 && (request->tried & (1u << route)))
 			continue;
@@ -55,7 +56,8 @@ int dnsev_request_pick_route(dns_event_t *event, const dns_request_t *request)
 static void route_failed(dns_event_t *event, unsigned route)
 {
 	unsigned count = event->dns->route_count;
-	if (count > 1 && route == event->active) {
+	if (count > 1 && route == event->active)
+	{
 		event->active = (route + 1) % count;
 		__atomic_store_n(&event->dns->active_route, event->active, __ATOMIC_RELAXED);
 		(void)__atomic_fetch_add(&event->dns->route_switches, 1u, __ATOMIC_RELAXED);
@@ -69,32 +71,38 @@ static void route_failed(dns_event_t *event, unsigned route)
  * retried once and a timeout is not.
  */
 void dnsev_request_attempt_failed(dns_event_t *event, dns_request_t *request,
-		int mode, bool reused)
+        int mode, bool reused)
 {
 	unsigned count = event->dns->route_count;
 	int64_t now = dnsev_mono_now();
 
 	if (mode != ATTEMPT_TIMEOUT && now < request->deadline_ms)
 		(void)__atomic_fetch_add(&event->dns->upstream_errors, 1u, __ATOMIC_RELAXED);
-	if (mode == ATTEMPT_LOCAL) {
+	if (mode == ATTEMPT_LOCAL)
+	{
 		dnsev_request_fail(event, request);
 		return;
 	}
-	if (reused && mode == ATTEMPT_ERROR && request->attempts == 0 && now < request->deadline_ms) {
+	if (reused && mode == ATTEMPT_ERROR && request->attempts == 0 && now < request->deadline_ms)
+	{
 		/* a pooled connection the server had already closed says nothing about the route */
 		request->attempts = 1;
 		dnsev_pending_push_front(event, request);
 		return;
 	}
-	if (count > 1) {
+	if (count > 1)
+	{
 		request->tried |= 1u << request->route;
 		route_failed(event, request->route);
-		if (now < request->deadline_ms && request->tried != (1u << count) - 1u) {
+		if (now < request->deadline_ms && request->tried != (1u << count) - 1u)
+		{
 			dnsev_pending_push_front(event, request);
 			return;
 		}
-	} else if (mode == ATTEMPT_ERROR && now < request->deadline_ms &&
-			request->attempts++ == 0) {
+	}
+	else if (mode == ATTEMPT_ERROR && now < request->deadline_ms &&
+	         request->attempts++ == 0)
+	{
 		dnsev_pending_push_front(event, request);
 		return;
 	}
@@ -133,46 +141,52 @@ bool dnsev_upstream_queue_query(dns_upstream_t *upstream)
 static bool upstream_socks_apply(dns_event_t *event, dns_upstream_t *upstream, s5_step step)
 {
 	sockshost_t *socks = event->dns->routes[upstream->route].socks;
-	if (step == S5_SEND) {
+	if (step == S5_SEND)
+	{
 		memcpy(upstream->out, upstream->socks.out, upstream->socks.out_len);
 		upstream->out_len = upstream->socks.out_len;
 		upstream->out_off = 0;
 		upstream->state = UP_SOCKS_WRITE;
 		return true;
 	}
-	if (step == S5_READ) {
+	if (step == S5_READ)
+	{
 		upstream->in_len = 0;
 		upstream->in_need = upstream->socks.need;
 		upstream->state = UP_SOCKS_READ;
 		return true;
 	}
-	if (step == S5_DONE) {
+	if (step == S5_DONE)
+	{
 		upstream->state = UP_IDLE;
 		upstream->idle_since_ms = dnsev_mono_now();
 		return dnsev_upstream_queue_query(upstream);
 	}
 	log_error("[!] SOCKS server %s:%u: %s", socks && socks->host ? socks->host : "?",
-			socks ? (unsigned)socks->port : 0u, socks5_client_strerror(&upstream->socks));
+	        socks ? (unsigned)socks->port : 0u, socks5_client_strerror(&upstream->socks));
 	return false;
 }
 
 static void upstream_connected(dns_event_t *event, dns_upstream_t *upstream)
 {
-	if (event->dns->routes[upstream->route].socks) {
+	if (event->dns->routes[upstream->route].socks)
+	{
 		sockshost_t *socks = event->dns->routes[upstream->route].socks;
 		/* The codec offers user/pass only when both are configured. */
 		if (!socks5_client_init(&upstream->socks, socks->user, socks->pass,
-				event->dns->routes[upstream->route].upstream.ip,
-				(uint16_t)event->dns->routes[upstream->route].upstream.port) ||
-			!upstream_socks_apply(event, upstream, socks5_client_start(&upstream->socks)))
+		            event->dns->routes[upstream->route].upstream.ip,
+		            (uint16_t)event->dns->routes[upstream->route].upstream.port) ||
+		        !upstream_socks_apply(event, upstream, socks5_client_start(&upstream->socks)))
 			dnsev_upstream_fail(event, upstream);
-	} else if (!dnsev_upstream_queue_query(upstream)) {
+	}
+	else if (!dnsev_upstream_queue_query(upstream))
+	{
 		dnsev_upstream_fail(event, upstream);
 	}
 }
 
 int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_request_t *request,
-		unsigned route)
+        unsigned route)
 {
 	const struct sockaddr *addr;
 	socklen_t len;
@@ -181,15 +195,19 @@ int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_reques
 	dns_route_state_t *state = &event->routes[route];
 	if (!route_ready(event, route))
 		return OPEN_WAIT;
-	if (event->dns->routes[route].socks) {
+	if (event->dns->routes[route].socks)
+	{
 		addr = (const struct sockaddr *)&state->socks.addr;
 		len = state->socks.len;
-	} else {
+	}
+	else
+	{
 		addr = (const struct sockaddr *)&state->upstream.addr;
 		len = state->upstream.len;
 	}
 	fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
-	if (fd < 0 || !net_set_nonblock_cloexec(fd)) {
+	if (fd < 0 || !net_set_nonblock_cloexec(fd))
+	{
 		if (fd >= 0)
 			close(fd);
 		return OPEN_WAIT;
@@ -201,12 +219,14 @@ int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_reques
 	upstream->address_generation = state->address_generation;
 	upstream->fd = fd;
 	rc = connect(fd, addr, len);
-	if (rc == 0) {
+	if (rc == 0)
+	{
 		(void)__atomic_fetch_add(&event->dns->active_upstreams, 1u, __ATOMIC_RELAXED);
 		upstream_connected(event, upstream);
 		return OPEN_OK;
 	}
-	if (errno != EINPROGRESS && errno != EALREADY) {
+	if (errno != EINPROGRESS && errno != EALREADY)
+	{
 		upstream->request = NULL;
 		dnsev_close_fd(&upstream->fd);
 		return OPEN_FAILED;
@@ -218,10 +238,12 @@ int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_reques
 
 static void upstream_write(dns_event_t *event, dns_upstream_t *upstream)
 {
-	for (;;) {
+	for (;;)
+	{
 		ssize_t n = write(upstream->fd, upstream->out + upstream->out_off,
-				upstream->out_len - upstream->out_off);
-		if (n > 0) {
+		        upstream->out_len - upstream->out_off);
+		if (n > 0)
+		{
 			upstream->out_off += (size_t)n;
 			if (upstream->out_off < upstream->out_len)
 				return;
@@ -234,7 +256,8 @@ static void upstream_write(dns_event_t *event, dns_upstream_t *upstream)
 		dnsev_upstream_fail(event, upstream);
 		return;
 	}
-	if (upstream->state == UP_QUERY_WRITE) {
+	if (upstream->state == UP_QUERY_WRITE)
+	{
 		upstream->in_len = 0;
 		upstream->in_need = 2;
 		upstream->state = UP_REPLY_LEN;
@@ -249,30 +272,38 @@ static void upstream_read(dns_event_t *event, dns_upstream_t *upstream)
 	dns_request_t *request = upstream->request;
 	uint8_t *dst;
 	size_t left;
-	for (;;) {
-		if (upstream->state == UP_SOCKS_READ || upstream->state == UP_REPLY_LEN) {
+	for (;;)
+	{
+		if (upstream->state == UP_SOCKS_READ || upstream->state == UP_REPLY_LEN)
+		{
 			dst = upstream->in;
 			left = upstream->in_need - upstream->in_len;
-		} else if (upstream->state == UP_REPLY_BODY && request && request->response) {
+		}
+		else if (upstream->state == UP_REPLY_BODY && request && request->response)
+		{
 			dst = request->response;
 			left = request->response_len - request->response_off;
-		} else {
+		}
+		else
+		{
 			dnsev_upstream_fail(event, upstream);
 			return;
 		}
-		ssize_t n = read(upstream->fd, dst +
-			(upstream->state == UP_REPLY_BODY ? request->response_off : upstream->in_len), left);
-		if (n > 0) {
+		ssize_t n = read(upstream->fd, dst + (upstream->state == UP_REPLY_BODY ? request->response_off : upstream->in_len), left);
+		if (n > 0)
+		{
 			if (upstream->state == UP_REPLY_BODY)
 				request->response_off += (size_t)n;
 			else
 				upstream->in_len += (size_t)n;
 			if ((upstream->state == UP_REPLY_BODY && request->response_off < request->response_len) ||
-				(upstream->state != UP_REPLY_BODY && upstream->in_len < upstream->in_need))
+			        (upstream->state != UP_REPLY_BODY && upstream->in_len < upstream->in_need))
 				return;
-			if (upstream->state == UP_SOCKS_READ) {
+			if (upstream->state == UP_SOCKS_READ)
+			{
 				if (!upstream_socks_apply(event, upstream,
-						socks5_client_feed(&upstream->socks, upstream->in, upstream->in_len))) {
+				            socks5_client_feed(&upstream->socks, upstream->in, upstream->in_len)))
+				{
 					dnsev_upstream_fail(event, upstream);
 					return;
 				}
@@ -280,13 +311,16 @@ static void upstream_read(dns_event_t *event, dns_upstream_t *upstream)
 					continue;
 				return;
 			}
-			if (upstream->state == UP_REPLY_LEN) {
+			if (upstream->state == UP_REPLY_LEN)
+			{
 				size_t length = ((size_t)upstream->in[0] << 8) | upstream->in[1];
-				if (length < DNS_HEADER_SIZE) {
+				if (length < DNS_HEADER_SIZE)
+				{
 					dnsev_upstream_fail_mode(event, upstream, ATTEMPT_BAD);
 					return;
 				}
-				if (!dnsev_request_ensure_response(event, request, length)) {
+				if (!dnsev_request_ensure_response(event, request, length))
+				{
 					dnsev_upstream_fail_mode(event, upstream, ATTEMPT_LOCAL);
 					return;
 				}
@@ -315,16 +349,19 @@ static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, uint32_t
 {
 	if (!upstream || upstream->fd < 0)
 		return;
-	if (upstream->state == UP_CONNECT && (revents & (RE_OUT | RE_ERR | RE_HUP))) {
+	if (upstream->state == UP_CONNECT && (revents & (RE_OUT | RE_ERR | RE_HUP)))
+	{
 		int error = 0;
 		socklen_t len = sizeof(error);
-		if (getsockopt(upstream->fd, SOL_SOCKET, SO_ERROR, &error, &len) != 0 || error != 0) {
+		if (getsockopt(upstream->fd, SOL_SOCKET, SO_ERROR, &error, &len) != 0 || error != 0)
+		{
 			dnsev_upstream_fail(event, upstream);
 			return;
 		}
 		upstream_connected(event, upstream);
 	}
-	if (upstream->state == UP_QUERY_WRITE || upstream->state == UP_SOCKS_WRITE) {
+	if (upstream->state == UP_QUERY_WRITE || upstream->state == UP_SOCKS_WRITE)
+	{
 		if (revents & RE_OUT)
 			upstream_write(event, upstream);
 		else if (revents & (RE_ERR | RE_HUP))
@@ -332,7 +369,8 @@ static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, uint32_t
 		return;
 	}
 	if (upstream->state == UP_REPLY_LEN || upstream->state == UP_REPLY_BODY ||
-		upstream->state == UP_SOCKS_READ) {
+	        upstream->state == UP_SOCKS_READ)
+	{
 		if (revents & RE_IN)
 			upstream_read(event, upstream);
 		else if (revents & (RE_ERR | RE_HUP))
@@ -345,10 +383,16 @@ static void upstream_pump(dns_event_t *event, dns_upstream_t *upstream, uint32_t
 
 uint32_t dnsev_upstream_interest(const dns_upstream_t *upstream)
 {
-	switch (upstream->state) {
-	case UP_CONNECT: case UP_QUERY_WRITE: case UP_SOCKS_WRITE:
+	switch (upstream->state)
+	{
+	case UP_CONNECT:
+	case UP_QUERY_WRITE:
+	case UP_SOCKS_WRITE:
 		return RE_OUT;
-	case UP_IDLE: case UP_REPLY_LEN: case UP_REPLY_BODY: case UP_SOCKS_READ:
+	case UP_IDLE:
+	case UP_REPLY_LEN:
+	case UP_REPLY_BODY:
+	case UP_SOCKS_READ:
 		return RE_IN;
 	default:
 		return 0;

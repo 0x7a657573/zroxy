@@ -39,7 +39,7 @@ static bool status_ids_match(const char *text, const char *key, unsigned long wa
 	if (!p)
 		return false;
 	p += strlen(key);
-	for (i = 0; i < 4; i++)	/* real, effective, saved, filesystem */
+	for (i = 0; i < 4; i++) /* real, effective, saved, filesystem */
 	{
 		char *tail = NULL;
 		unsigned long v = strtoul(p, &tail, 10);
@@ -60,14 +60,14 @@ static bool task_ids_match(const char *tid, uid_t uid, gid_t gid)
 	snprintf(path, sizeof(path), "/proc/self/task/%s/status", tid);
 	fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0)
-		return true;	/* the thread ended since readdir */
+		return true; /* the thread ended since readdir */
 	n = read(fd, text, sizeof(text) - 1);
 	close(fd);
 	if (n <= 0)
 		return true;
 	text[n] = '\0';
 	return status_ids_match(text, "\nUid:", (unsigned long)uid) &&
-		status_ids_match(text, "\nGid:", (unsigned long)gid);
+	       status_ids_match(text, "\nGid:", (unsigned long)gid);
 }
 
 /* Every thread must have taken the change. Linux only; best effort if /proc is absent. */
@@ -117,7 +117,7 @@ bool priv_drop(uid_t uid, gid_t gid)
 	}
 
 	if (getuid() != uid || geteuid() != uid || getgid() != gid || getegid() != gid ||
-		getgroups(0, NULL) != 0)
+	        getgroups(0, NULL) != 0)
 	{
 		log_error("privilege drop did not take effect");
 		return false;

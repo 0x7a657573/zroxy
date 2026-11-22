@@ -57,7 +57,7 @@ bool acl_parse(const char *spec, zroxy_cidr_t *out, size_t cap, size_t *count)
 			return false;
 		*slash = '\0';
 		if (strlen(token) == 0 || strlen(slash + 1) == 0 ||
-			strlen(token) >= sizeof(address))
+		        strlen(token) >= sizeof(address))
 			return false;
 		memcpy(address, token, strlen(token) + 1);
 		if (inet_pton(AF_INET, address, &parsed) != 1)

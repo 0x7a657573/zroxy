@@ -15,11 +15,11 @@
 
 typedef struct
 {
-	char 	*host;
+	char *host;
 	uint16_t port;
-	char	*user;
-	char	*pass;
-}sockshost_t;
+	char *user;
+	char *pass;
+} sockshost_t;
 
 typedef struct
 {
@@ -27,12 +27,12 @@ typedef struct
 	uint8_t rep;
 	uint8_t rsv;
 	uint8_t atyp;
-}SocksReplayHeader_t;
+} SocksReplayHeader_t;
 
 typedef struct
 {
 	uint8_t ver;
 	uint8_t status;
-}SocksAuthenticationReplay_t;
+} SocksAuthenticationReplay_t;
 
 #endif /* SOCKS_H_ */

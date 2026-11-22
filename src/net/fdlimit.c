@@ -53,7 +53,8 @@ unsigned long fdlimit_apply(const fdlimit_plan *plan, int *sni_cap)
 	{
 		struct rlimit want = lim;
 		want.rlim_cur = (lim.rlim_max == RLIM_INFINITY || lim.rlim_max >= (rlim_t)need)
-			? (rlim_t)need : lim.rlim_max;
+		                        ? (rlim_t)need
+		                        : lim.rlim_max;
 		if (want.rlim_cur > lim.rlim_cur && setrlimit(RLIMIT_NOFILE, &want) == 0)
 			lim = want;
 		else if (getrlimit(RLIMIT_NOFILE, &lim) != 0)

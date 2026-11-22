@@ -8,7 +8,7 @@
 #include <zroxy/net_io.h>
 
 static bool addr_literal(const char *host, uint16_t port,
-		struct sockaddr_storage *addr, socklen_t *len)
+        struct sockaddr_storage *addr, socklen_t *len)
 {
 	struct sockaddr_in in;
 	if (!host || !addr || !len || inet_pton(AF_INET, host, &in.sin_addr) != 1)
@@ -24,14 +24,15 @@ static bool addr_literal(const char *host, uint16_t port,
 	return true;
 }
 static dns_target_t *resolve_target(dns_event_t *event, uint32_t index,
-		const char **host, uint16_t *port, uint64_t **generation)
+        const char **host, uint16_t *port, uint64_t **generation)
 {
 	unsigned route;
 	if (index < 1 || (index - 1) / 2 >= event->dns->route_count)
 		return NULL;
 	route = (index - 1) / 2;
 	*generation = &event->routes[route].address_generation;
-	if ((index - 1) % 2 == 0) {
+	if ((index - 1) % 2 == 0)
+	{
 		*host = event->dns->routes[route].upstream.ip;
 		*port = event->dns->routes[route].upstream.port;
 		return &event->routes[route].upstream;
@@ -54,15 +55,16 @@ bool dnsev_resolution_submit(dns_event_t *event, uint32_t index)
 		return false;
 	if (target->literal || target->slot >= 0)
 		return true;
-	if (addr_literal(host, port, &target->addr, &target->len)) {
+	if (addr_literal(host, port, &target->addr, &target->len))
+	{
 		target->literal = 1;
 		target->ready = 1;
 		(*generation)++;
 		return true;
 	}
 	if (resolver_submit(event->resolver, index, event->generation, host, port, AF_INET,
-			dnsev_mono_now() + net_timeout_ms((int)event->dns->timeout),
-			&target->slot, &target->req) == RESOLVER_SUBMIT_OK)
+	            dnsev_mono_now() + net_timeout_ms((int)event->dns->timeout),
+	            &target->slot, &target->req) == RESOLVER_SUBMIT_OK)
 		return true;
 	target->resolve_at_ms = dnsev_mono_now() + DNS_RESOLVE_RETRY_MS;
 	return false;
@@ -71,7 +73,8 @@ bool dnsev_resolution_submit(dns_event_t *event, uint32_t index)
 void dnsev_resolution_tick(dns_event_t *event, int64_t now)
 {
 	uint32_t index;
-	for (index = 1; index <= 2u * event->dns->route_count; index++) {
+	for (index = 1; index <= 2u * event->dns->route_count; index++)
+	{
 		const char *host;
 		uint16_t port;
 		uint64_t *generation;
@@ -88,7 +91,8 @@ void dnsev_dns_drain_resolver(dns_event_t *event)
 	size_t i;
 	int64_t now = dnsev_mono_now();
 
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < n; i++)
+	{
 		resolve_slot *slot = done[i];
 		const char *host;
 		uint16_t port;
@@ -97,34 +101,40 @@ void dnsev_dns_drain_resolver(dns_event_t *event)
 
 		if (!slot)
 			continue;
-		if (slot->connection_generation != event->generation) {
+		if (slot->connection_generation != event->generation)
+		{
 			resolver_release(slot->index, slot->req_id);
 			continue;
 		}
 		target = resolve_target(event, slot->connection_index, &host, &port, &generation);
-		if (!target) {
+		if (!target)
+		{
 			resolver_release(slot->index, slot->req_id);
 			continue;
 		}
-		if (target->slot == slot->index && target->req == slot->req_id) {
+		if (target->slot == slot->index && target->req == slot->req_id)
+		{
 			target->slot = -1;
 			target->req = 0;
 		}
 		if (slot->gai_error == 0 && slot->address_count > 0 &&
-				slot->addresses[0].address.ss_family == AF_INET) {
+		        slot->addresses[0].address.ss_family == AF_INET)
+		{
 			/* The resolver returns addresses without a port; apply the configured one. */
 			struct sockaddr_storage resolved = slot->addresses[0].address;
 			bool changed;
 			((struct sockaddr_in *)&resolved)->sin_port = htons(port);
 			changed = !target->ready || target->len != slot->addresses[0].length ||
-				memcmp(&target->addr, &resolved, target->len) != 0;
+			          memcmp(&target->addr, &resolved, target->len) != 0;
 			target->addr = resolved;
 			target->len = slot->addresses[0].length;
 			target->ready = 1;
 			if (changed)
 				(*generation)++;
 			target->resolve_at_ms = now + DNS_RESOLVE_REFRESH_MS;
-		} else {
+		}
+		else
+		{
 			log_error("dns resolver failed for %s; retrying", host);
 			target->resolve_at_ms = now + DNS_RESOLVE_RETRY_MS;
 		}

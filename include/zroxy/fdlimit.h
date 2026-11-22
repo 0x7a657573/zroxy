@@ -19,10 +19,10 @@
 
 typedef struct
 {
-	int sni_conns;		/* configured SNI connection cap */
+	int sni_conns; /* configured SNI connection cap */
 	int sni_listeners;
 	bool dns_enabled;
-	int dns_upstreams;	/* DNS upstream connection cap, used when dns_enabled */
+	int dns_upstreams; /* DNS upstream connection cap, used when dns_enabled */
 	bool monitor_enabled;
 } fdlimit_plan;
 

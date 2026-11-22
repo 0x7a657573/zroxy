@@ -25,17 +25,17 @@ typedef struct filter_set filter_set_t;
 
 typedef struct
 {
-	char   *filepath;		/* NULL for an in-memory list */
-	filter_set_t *set;		/* immutable snapshot, swapped on reload */
-	pthread_rwlock_t lock;	/* readers: lookups; writer: reload swap */
+	char *filepath;        /* NULL for an in-memory list */
+	filter_set_t *set;     /* immutable snapshot, swapped on reload */
+	pthread_rwlock_t lock; /* readers: lookups; writer: reload swap */
 	/* Reload outcomes, updated with relaxed atomics; word-sized for 32-bit targets. */
-	uint32_t reloads;			/* successful reloads since start */
-	uint32_t reload_failures;	/* reloads that kept the previous list */
-	uint32_t last_reload;		/* unix time of the last successful reload, 0 = never */
-	pthread_t watcher;		/* joinable file watcher, valid when watching */
+	uint32_t reloads;         /* successful reloads since start */
+	uint32_t reload_failures; /* reloads that kept the previous list */
+	uint32_t last_reload;     /* unix time of the last successful reload, 0 = never */
+	pthread_t watcher;        /* joinable file watcher, valid when watching */
 	bool watching;
-	int wake[2];			/* pipe that tells the watcher to stop, -1 when unused */
-}filter_t;
+	int wake[2]; /* pipe that tells the watcher to stop, -1 when unused */
+} filter_t;
 
 /* Load a file and start watching it for changes. NULL on any error. */
 filter_t *filter_init(char *filename);
@@ -49,7 +49,7 @@ void filter_free(filter_t *self);
 filter_t *filter_test_open(const char *filename);
 #endif
 
-bool filter_match(filter_t *self,const char *host);
+bool filter_match(filter_t *self, const char *host);
 /* Re-read the file; on any error the current list is kept. */
 void filter_reload(filter_t *self);
 /* Number of entries in the current list. */

@@ -19,7 +19,7 @@
 #define MAX_REPLY 4096u
 
 static void run(const uint8_t *in, size_t size, const char *user, const char *pass,
-		const char *target)
+        const char *target)
 {
 	socks5_client c;
 	size_t off = 0;
@@ -51,12 +51,12 @@ static void run(const uint8_t *in, size_t size, const char *user, const char *pa
 			return;
 		}
 	}
-	abort();	/* a handshake has at most 8 steps */
+	abort(); /* a handshake has at most 8 steps */
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	static const char *const targets[] = { "example.com", "192.0.2.1" };
+	static const char *const targets[] = {"example.com", "192.0.2.1"};
 	uint8_t *in;
 	size_t i;
 

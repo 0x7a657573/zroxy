@@ -16,45 +16,45 @@
 
 struct Message;
 
-#define DNS_MSG_SIZE	512
+#define DNS_MSG_SIZE 512
 
 /* Largest message DNS over TCP can carry (two-byte length prefix). */
-#define DNS_TCP_MSG_MAX	65535
+#define DNS_TCP_MSG_MAX 65535
 
-#define DNS_TCP_IDLE_MS		3000
-#define DNS_TCP_MAX_QUERIES	32
+#define DNS_TCP_IDLE_MS 3000
+#define DNS_TCP_MAX_QUERIES 32
 
 typedef struct
 {
-	uint32_t last_ms;	/* low 32 bits of the last logged time; 0 = never logged */
+	uint32_t last_ms; /* low 32 bits of the last logged time; 0 = never logged */
 	uint32_t suppressed;
 } log_throttle_t;
 
 typedef struct dnsserver
 {
 	/* answer cache and in-flight coalescing; NULL disables both */
-	dnscache_t	  *cache;
-	
+	dnscache_t *cache;
+
 	/* whitelist*/
 	filter_t *whitelist;
-	
+
 	/*sni server ip*/
 	uint8_t sni_ip[4];
 
 	/*bind ip/port*/
-	char 	 	  listen_addr[ZROXY_MAX_DNS_HOST + 1];
-	char	 	  listen_port[ZROXY_MAX_PORT_TEXT];
+	char listen_addr[ZROXY_MAX_DNS_HOST + 1];
+	char listen_port[ZROXY_MAX_PORT_TEXT];
 
-	bool		  rx_started;
-	int			  wake[2];
-	void		  *event_loop;
+	bool rx_started;
+	int wake[2];
+	void *event_loop;
 
-	dns_route_t	  routes[DNS_ROUTES_MAX];
-	unsigned	  route_count;
-	uint32_t	  timeout;
-	uint32_t	  local_ttl;
-	uint16_t	  upstream_connections;
-	
+	dns_route_t routes[DNS_ROUTES_MAX];
+	unsigned route_count;
+	uint32_t timeout;
+	uint32_t local_ttl;
+	uint16_t upstream_connections;
+
 	/*socket file handler*/
 	int local_sock;
 	/* TCP listener on the same address; -1 when it could not be opened */
@@ -73,9 +73,8 @@ typedef struct dnsserver
 	zroxy_cidr_t *acl;
 	size_t acl_count;
 	dns_rate_t rate;
-	statistics_t  *Stat;
-}dnsserver_t;
-
+	statistics_t *Stat;
+} dnsserver_t;
 
 dnsserver_t *localdns_init_config(dnshost_t *conf);
 void localdns_free(dnsserver_t *dns);
@@ -89,7 +88,7 @@ int localdns_answer_local(dnsserver_t *dns, struct Message *msg, uint8_t *buf);
 
 /* Test hook for the time-injected throttle state machine. */
 bool dnsproxy_test_throttle_take(log_throttle_t *t, int64_t now_ms,
-		int64_t interval_ms, uint32_t *dropped);
+        int64_t interval_ms, uint32_t *dropped);
 bool dns_stats_json(void *ctx, char **ptr, char *end);
 
 #endif /* DNS_INTERNAL_H_ */

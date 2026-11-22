@@ -23,28 +23,65 @@
 #define DNS_RESOLVE_RETRY_MS 1000
 #define DNS_RESOLVE_REFRESH_MS 60000
 
-enum request_kind { REQ_UDP, REQ_TCP };
-enum client_state { CLIENT_READ_LEN, CLIENT_READ_QUERY, CLIENT_WAIT, CLIENT_WRITE };
-enum upstream_state {
-	UP_CLOSED, UP_CONNECT, UP_IDLE, UP_QUERY_WRITE, UP_REPLY_LEN, UP_REPLY_BODY,
-	UP_SOCKS_WRITE, UP_SOCKS_READ
+enum request_kind
+{
+	REQ_UDP,
+	REQ_TCP
 };
-enum attempt_result { ATTEMPT_ERROR, ATTEMPT_BAD, ATTEMPT_LOCAL, ATTEMPT_TIMEOUT };
-enum open_result { OPEN_OK, OPEN_WAIT, OPEN_FAILED };
-enum watch_kind { WATCH_UDP, WATCH_TCP_LISTEN, WATCH_WAKE, WATCH_RESOLVER,
-	WATCH_UPSTREAM, WATCH_CLIENT };
+enum client_state
+{
+	CLIENT_READ_LEN,
+	CLIENT_READ_QUERY,
+	CLIENT_WAIT,
+	CLIENT_WRITE
+};
+enum upstream_state
+{
+	UP_CLOSED,
+	UP_CONNECT,
+	UP_IDLE,
+	UP_QUERY_WRITE,
+	UP_REPLY_LEN,
+	UP_REPLY_BODY,
+	UP_SOCKS_WRITE,
+	UP_SOCKS_READ
+};
+enum attempt_result
+{
+	ATTEMPT_ERROR,
+	ATTEMPT_BAD,
+	ATTEMPT_LOCAL,
+	ATTEMPT_TIMEOUT
+};
+enum open_result
+{
+	OPEN_OK,
+	OPEN_WAIT,
+	OPEN_FAILED
+};
+enum watch_kind
+{
+	WATCH_UDP,
+	WATCH_TCP_LISTEN,
+	WATCH_WAKE,
+	WATCH_RESOLVER,
+	WATCH_UPSTREAM,
+	WATCH_CLIENT
+};
 
 typedef struct dns_event dns_event_t;
 typedef struct dns_request dns_request_t;
 typedef struct dns_client dns_client_t;
 typedef struct dns_upstream dns_upstream_t;
 
-typedef struct {
+typedef struct
+{
 	int kind;
 	void *ptr;
 } dns_watch_t;
 
-struct dns_request {
+struct dns_request
+{
 	dns_request_t *next;
 	dns_request_t *followers;
 	dns_request_t *follow_next;
@@ -69,7 +106,8 @@ struct dns_request {
 	uint32_t stats_rx;
 };
 
-struct dns_client {
+struct dns_client
+{
 	dns_client_t *next;
 	dns_client_t *dead_next;
 	dns_watch_t watch;
@@ -91,7 +129,8 @@ struct dns_client {
 	int64_t deadline_ms;
 };
 
-struct dns_upstream {
+struct dns_upstream
+{
 	dns_event_t *event;
 	dns_watch_t watch;
 	uint32_t interest;
@@ -114,7 +153,8 @@ struct dns_upstream {
 };
 
 /* An address being resolved, or already known, for an upstream or a SOCKS proxy. */
-typedef struct {
+typedef struct
+{
 	int slot;
 	uint64_t req;
 	struct sockaddr_storage addr;
@@ -124,13 +164,15 @@ typedef struct {
 	int64_t resolve_at_ms;
 } dns_target_t;
 
-typedef struct {
+typedef struct
+{
 	dns_target_t upstream;
 	dns_target_t socks;
 	uint64_t address_generation;
 } dns_route_state_t;
 
-struct dns_event {
+struct dns_event
+{
 	dnsserver_t *dns;
 	pthread_t thread;
 	int started;
@@ -138,7 +180,7 @@ struct dns_event {
 	resolver_sink *resolver;
 	uint64_t generation;
 	dns_route_state_t routes[DNS_ROUTES_MAX];
-	unsigned active;	/* route that new queries go to */
+	unsigned active; /* route that new queries go to */
 	dns_upstream_t upstreams[DNS_EVENT_UPSTREAMS];
 	reactor re;
 	dns_watch_t fixed[4];
@@ -155,7 +197,7 @@ struct dns_event {
 void dnsev_close_fd(int *fd);
 int64_t dnsev_mono_now(void);
 void dnsev_send_udp(dns_event_t *event, const struct sockaddr_in *peer,
-		const uint8_t *buf, size_t len);
+        const uint8_t *buf, size_t len);
 void dnsev_client_close(dns_event_t *event, dns_client_t *client);
 void dnsev_client_reap(dns_event_t *event);
 bool dnsev_client_queue_reply(dns_client_t *client, const uint8_t *buf, size_t len);
@@ -164,27 +206,27 @@ void dnsev_accept_clients(dns_event_t *event);
 void dnsev_pull_udp(dns_event_t *event);
 uint32_t dnsev_client_interest(const dns_client_t *client);
 dns_request_t *dnsev_request_new(dns_event_t *event, int kind,
-		const uint8_t *query, size_t len, const struct sockaddr_in *peer,
-		dns_client_t *client);
+        const uint8_t *query, size_t len, const struct sockaddr_in *peer,
+        dns_client_t *client);
 void dnsev_request_start(dns_event_t *event, dns_request_t *request);
 void dnsev_schedule(dns_event_t *event);
 void dnsev_pending_push_front(dns_event_t *event, dns_request_t *request);
 void dnsev_request_fail(dns_event_t *event, dns_request_t *request);
 void dnsev_request_finish_upstream(dns_event_t *event, dns_request_t *request);
 bool dnsev_request_ensure_response(dns_event_t *event, dns_request_t *request,
-		size_t cap);
+        size_t cap);
 void dnsev_upstream_close(dns_event_t *event, dns_upstream_t *upstream);
 int dnsev_request_pick_route(dns_event_t *event, const dns_request_t *request);
 void dnsev_request_attempt_failed(dns_event_t *event, dns_request_t *request,
-		int mode, bool reused);
+        int mode, bool reused);
 void dnsev_upstream_fail_mode(dns_event_t *event, dns_upstream_t *upstream, int mode);
 void dnsev_upstream_fail(dns_event_t *event, dns_upstream_t *upstream);
 bool dnsev_upstream_queue_query(dns_upstream_t *upstream);
 int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream,
-		dns_request_t *request, unsigned route);
+        dns_request_t *request, unsigned route);
 uint32_t dnsev_upstream_interest(const dns_upstream_t *upstream);
 void dnsev_upstream_dispatch(dns_event_t *event, dns_upstream_t *upstream,
-		uint32_t revents);
+        uint32_t revents);
 bool dnsev_resolution_submit(dns_event_t *event, uint32_t index);
 void dnsev_resolution_tick(dns_event_t *event, int64_t now);
 void dnsev_dns_drain_resolver(dns_event_t *event);

@@ -16,37 +16,36 @@ typedef bool (*stats_extra_fn)(void *ctx, char **ptr, char *end);
 
 typedef struct
 {
-	time_t 		StartTime;
-	uint64_t	TotalRx;
-	uint64_t	TotalTx;
-	uint32_t 	TotalConnection;
-	uint32_t	ActiveConnection;
-	uint32_t	MaxConnection;
-}stat_t;
+	time_t StartTime;
+	uint64_t TotalRx;
+	uint64_t TotalTx;
+	uint32_t TotalConnection;
+	uint32_t ActiveConnection;
+	uint32_t MaxConnection;
+} stat_t;
 
 typedef struct
 {
 	/*variable*/
 	stat_t stat;
-	char   name[128];
+	char name[128];
 	/*thered lock*/
 	pthread_mutex_t Lock;
 	void *next;
 	stats_extra_fn extra;
 	void *extra_ctx;
-}statistics_t;
+} statistics_t;
 
-
-void stats_init(statistics_t **self,char *name);
+void stats_init(statistics_t **self, char *name);
 
 /* Only when no thread can touch it any more. */
 void stats_free(statistics_t *self);
 
 /* The functions below accept a NULL statistics object and do nothing. */
-void stats_close_connection(statistics_t *self,uint32_t rx,uint32_t tx);
+void stats_close_connection(statistics_t *self, uint32_t rx, uint32_t tx);
 void stats_open_connection(statistics_t *self);
 
-void stats_get(statistics_t *self,stat_t *st);
+void stats_get(statistics_t *self, stat_t *st);
 
 /* Appends ",\n\"Key\" : value" pairs; called with the stats lock held. */
 void stats_set_extra(statistics_t *self, stats_extra_fn fn, void *ctx);

@@ -35,7 +35,8 @@ int resolver_mono_deadline(int timeout_ms, struct timespec *ts)
 		return -1;
 	ts->tv_sec += timeout_ms / 1000;
 	ts->tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
-	if (ts->tv_nsec >= 1000000000L) {
+	if (ts->tv_nsec >= 1000000000L)
+	{
 		ts->tv_sec += 1;
 		ts->tv_nsec -= 1000000000L;
 	}
@@ -47,11 +48,13 @@ static int init_mono_cond(pthread_cond_t *cv)
 	pthread_condattr_t attr;
 	if (pthread_condattr_init(&attr) != 0)
 		return -1;
-	if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0) {
+	if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0)
+	{
 		pthread_condattr_destroy(&attr);
 		return -1;
 	}
-	if (pthread_cond_init(cv, &attr) != 0) {
+	if (pthread_cond_init(cv, &attr) != 0)
+	{
 		pthread_condattr_destroy(&attr);
 		return -1;
 	}
@@ -102,13 +105,18 @@ resolver_sink *resolver_ref_drop_locked(resolver_sink *sink)
 
 static void quota_dec_locked(resolve_slot *slot)
 {
-	if (slot->quota_kind == RESOLVER_QUOTA_DIRECT) {
+	if (slot->quota_kind == RESOLVER_QUOTA_DIRECT)
+	{
 		if (g_resolver_pool->direct_used > 0)
 			g_resolver_pool->direct_used--;
-	} else if (slot->quota_kind == RESOLVER_QUOTA_INFRA) {
+	}
+	else if (slot->quota_kind == RESOLVER_QUOTA_INFRA)
+	{
 		if (g_resolver_pool->infra_used > 0)
 			g_resolver_pool->infra_used--;
-	} else if (slot->quota_kind == RESOLVER_QUOTA_LISTENER) {
+	}
+	else if (slot->quota_kind == RESOLVER_QUOTA_LISTENER)
+	{
 		if (g_resolver_pool->listener_used > 0)
 			g_resolver_pool->listener_used--;
 		if (slot->sink && slot->sink->quota_used > 0)
@@ -122,12 +130,14 @@ resolver_sink *resolver_slot_free_locked(resolve_slot *slot)
 	resolver_sink *die = NULL;
 	if (!slot)
 		return NULL;
-	if (slot->state == RESOLVE_FREE) {
+	if (slot->state == RESOLVE_FREE)
+	{
 		g_resolver_pool->double_free++;
 		return NULL;
 	}
 	quota_dec_locked(slot);
-	if (slot->holds_ref && slot->sink) {
+	if (slot->holds_ref && slot->sink)
+	{
 		slot->holds_ref = 0;
 		die = resolver_ref_drop_locked(slot->sink);
 	}
@@ -142,8 +152,6 @@ resolver_sink *resolver_slot_free_locked(resolve_slot *slot)
 	g_resolver_pool->free_count++;
 	return die;
 }
-
-
 
 static int do_resolve(const char *host, int family, resolver_addr *out, size_t *count)
 {
@@ -162,19 +170,23 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
-	do {
+	do
+	{
 		res = NULL;
 #ifdef RESOLVER_TEST_HOOKS
-		if (g_resolver_pool->hook) {
+		if (g_resolver_pool->hook)
+		{
 			st = g_resolver_pool->hook(host, family, out, RESOLVER_ADDR_MAX, count,
-					g_resolver_pool->hook_cookie);
-		} else
+			        g_resolver_pool->hook_cookie);
+		}
+		else
 #endif
 		{
 			st = getaddrinfo(host, NULL, &hints, &res);
 		}
 		attempts++;
-		if (st == EAI_SYSTEM && errno == EINTR && res) {
+		if (st == EAI_SYSTEM && errno == EINTR && res)
+		{
 			freeaddrinfo(res);
 			res = NULL;
 		}
@@ -184,13 +196,15 @@ static int do_resolve(const char *host, int family, resolver_addr *out, size_t *
 	if (g_resolver_pool->hook)
 		return st;
 #endif
-	if (st != 0) {
+	if (st != 0)
+	{
 		if (res)
 			freeaddrinfo(res);
 		*count = 0;
 		return st;
 	}
-	for (ai = res; ai != NULL && *count < RESOLVER_ADDR_MAX; ai = ai->ai_next) {
+	for (ai = res; ai != NULL && *count < RESOLVER_ADDR_MAX; ai = ai->ai_next)
+	{
 		resolver_addr *dst;
 		if (!ai->ai_addr || ai->ai_addrlen <= 0)
 			continue;
@@ -222,14 +236,14 @@ static void wait_if_held(void)
 }
 #endif
 
-
 static void worker_finish(resolve_slot *slot, int gai_error, const resolver_addr *addrs,
-		size_t count)
+        size_t count)
 {
 	resolver_sink *sink;
 	resolver_sink *die = NULL;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	if (g_resolver_pool->stopping && slot->request_class == RESOLVER_KIND_INFRA) {
+	if (g_resolver_pool->stopping && slot->request_class == RESOLVER_KIND_INFRA)
+	{
 		if (slot->req_id == g_resolver_pool->cache_refresh_req)
 			g_resolver_pool->cache_refresh_inflight = 0;
 		pthread_cond_broadcast(&g_resolver_pool->infra_cv);
@@ -244,7 +258,8 @@ static void worker_finish(resolve_slot *slot, int gai_error, const resolver_addr
 		memcpy(slot->addresses, addrs, count * sizeof(*addrs));
 	slot->state = RESOLVE_DONE;
 	sink = slot->sink;
-	if (!sink) {
+	if (!sink)
+	{
 		resolver_commit_infra_locked(slot, gai_error);
 		die = resolver_slot_free_locked(slot);
 		pthread_mutex_unlock(&g_resolver_pool->mu);
@@ -265,7 +280,8 @@ static void resolve_and_finish(resolve_slot *slot, const char *host, int family)
 #ifdef RESOLVER_TEST_HOOKS
 	wait_if_held();
 #endif
-	if (g_resolver_pool->stopping) {
+	if (g_resolver_pool->stopping)
+	{
 		worker_finish(slot, EAI_AGAIN, NULL, 0);
 		return;
 	}
@@ -282,7 +298,8 @@ static void worker_one(resolve_slot *slot)
 	int64_t now;
 	resolver_sink *die = NULL;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	if (slot->state == RESOLVE_CANCELLED) {
+	if (slot->state == RESOLVE_CANCELLED)
+	{
 		__atomic_fetch_add(&g_resolver_pool->skipped_cancelled, 1u, __ATOMIC_RELAXED);
 		die = resolver_slot_free_locked(slot);
 		pthread_mutex_unlock(&g_resolver_pool->mu);
@@ -290,13 +307,16 @@ static void worker_one(resolve_slot *slot)
 		return;
 	}
 	now = net_mono_ms();
-	if (now >= 0 && slot->deadline_ms > 0 && now >= slot->deadline_ms) {
+	if (now >= 0 && slot->deadline_ms > 0 && now >= slot->deadline_ms)
+	{
 		__atomic_fetch_add(&g_resolver_pool->skipped_expired, 1u, __ATOMIC_RELAXED);
 		slot->gai_error = EAI_AGAIN;
 		slot->address_count = 0;
 		slot->state = RESOLVE_DONE;
-		if (!slot->sink) {
-			if (slot->req_id == g_resolver_pool->cache_refresh_req) {
+		if (!slot->sink)
+		{
+			if (slot->req_id == g_resolver_pool->cache_refresh_req)
+			{
 				g_resolver_pool->cache_refresh_inflight = 0;
 				pthread_cond_broadcast(&g_resolver_pool->infra_cv);
 			}
@@ -314,7 +334,8 @@ static void worker_one(resolve_slot *slot)
 			return;
 		}
 	}
-	if (g_resolver_pool->stopping) {
+	if (g_resolver_pool->stopping)
+	{
 		die = resolver_slot_free_locked(slot);
 		pthread_mutex_unlock(&g_resolver_pool->mu);
 		resolver_destroy_later(die);
@@ -330,14 +351,16 @@ static void worker_one(resolve_slot *slot)
 static void *worker_main(void *arg)
 {
 	resolver_pool *pool = (resolver_pool *)arg;
-	for (;;) {
+	for (;;)
+	{
 		resolve_slot *slot;
 		pthread_mutex_lock(&pool->mu);
 		while (!pool->stopping &&
-				(pool->pause_dequeue ||
-				 (pool->client_head == NULL && pool->infra_head == NULL)))
+		        (pool->pause_dequeue ||
+		                (pool->client_head == NULL && pool->infra_head == NULL)))
 			pthread_cond_wait(&pool->work_cv, &pool->mu);
-		if (pool->stopping && pool->client_head == NULL && pool->infra_head == NULL) {
+		if (pool->stopping && pool->client_head == NULL && pool->infra_head == NULL)
+		{
 			pool->exited++;
 			pthread_cond_broadcast(&pool->infra_cv);
 			pthread_mutex_unlock(&pool->mu);
@@ -363,17 +386,20 @@ static int pool_create(void)
 	pool = (resolver_pool *)calloc(1, sizeof(*pool));
 	if (!pool)
 		return -1;
-	if (pthread_mutex_init(&pool->mu, NULL) != 0) {
+	if (pthread_mutex_init(&pool->mu, NULL) != 0)
+	{
 		free(pool);
 		return -1;
 	}
-	if (init_mono_cond(&pool->work_cv) != 0 || init_mono_cond(&pool->infra_cv) != 0) {
+	if (init_mono_cond(&pool->work_cv) != 0 || init_mono_cond(&pool->infra_cv) != 0)
+	{
 		pthread_mutex_destroy(&pool->mu);
 		free(pool);
 		return -1;
 	}
 #ifdef RESOLVER_TEST_HOOKS
-	if (pthread_mutex_init(&pool->test_mu, NULL) != 0) {
+	if (pthread_mutex_init(&pool->test_mu, NULL) != 0)
+	{
 		pthread_cond_destroy(&pool->work_cv);
 		pthread_cond_destroy(&pool->infra_cv);
 		pthread_mutex_destroy(&pool->mu);
@@ -381,8 +407,9 @@ static int pool_create(void)
 		return -1;
 	}
 	if (pthread_condattr_init(&attr) != 0 ||
-			pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0 ||
-			pthread_cond_init(&pool->test_cv, &attr) != 0) {
+	        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0 ||
+	        pthread_cond_init(&pool->test_cv, &attr) != 0)
+	{
 		pthread_condattr_destroy(&attr);
 		pthread_mutex_destroy(&pool->test_mu);
 		pthread_cond_destroy(&pool->work_cv);
@@ -395,7 +422,8 @@ static int pool_create(void)
 #else
 	(void)attr;
 #endif
-	for (i = 0; i < RESOLVER_SLOTS; i++) {
+	for (i = 0; i < RESOLVER_SLOTS; i++)
+	{
 		pool->slots[i].index = i;
 		pool->slots[i].state = RESOLVE_FREE;
 		pool->slots[i].qnext = pool->free_head;
@@ -405,8 +433,10 @@ static int pool_create(void)
 	pool->next_req_id = 1;
 	pool->next_listener_id = 1;
 	g_resolver_pool = pool;
-	for (i = 0; i < RESOLVER_THREADS; i++) {
-		if (pthread_create(&pool->threads[i], NULL, worker_main, pool) != 0) {
+	for (i = 0; i < RESOLVER_THREADS; i++)
+	{
+		if (pthread_create(&pool->threads[i], NULL, worker_main, pool) != 0)
+		{
 			int j;
 			pthread_mutex_lock(&pool->mu);
 			pool->stopping = 1;
@@ -439,7 +469,8 @@ void resolver_get_stats(resolver_stats *out)
 	out->slots = RESOLVER_SLOTS;
 	/* g_start_mu keeps the pool from being freed under us; it is taken first, as in shutdown. */
 	pthread_mutex_lock(&g_start_mu);
-	if (g_resolver_pool && g_resolver_pool->started) {
+	if (g_resolver_pool && g_resolver_pool->started)
+	{
 		pthread_mutex_lock(&g_resolver_pool->mu);
 		out->slots_in_use = RESOLVER_SLOTS - g_resolver_pool->free_count;
 		out->lookups = __atomic_load_n(&g_resolver_pool->calls, __ATOMIC_RELAXED);
@@ -462,13 +493,13 @@ bool resolver_stats_json(void *ctx, char **ptr, char *end)
 	resolver_get_stats(&st);
 	left = (size_t)(end - *ptr);
 	n = snprintf(*ptr, left, "\"Threads\" : %d ,\n"
-		"\"Slots\" : %d ,\n"
-		"\"SlotsInUse\" : %d ,\n"
-		"\"Lookups\" : %" PRIu32 " ,\n"
-		"\"LookupFailures\" : %" PRIu32 " ,\n"
-		"\"RingFull\" : %" PRIu32,
-		st.threads, st.slots, st.slots_in_use,
-		st.lookups, st.lookup_failures, st.ring_full);
+	                         "\"Slots\" : %d ,\n"
+	                         "\"SlotsInUse\" : %d ,\n"
+	                         "\"Lookups\" : %" PRIu32 " ,\n"
+	                         "\"LookupFailures\" : %" PRIu32 " ,\n"
+	                         "\"RingFull\" : %" PRIu32,
+	        st.threads, st.slots, st.slots_in_use,
+	        st.lookups, st.lookup_failures, st.ring_full);
 	if (n < 0 || (size_t)n >= left)
 		return false;
 	*ptr += n;
@@ -479,11 +510,13 @@ bool resolver_start(void)
 {
 	int rc;
 	pthread_mutex_lock(&g_start_mu);
-	if (g_resolver_pool && g_resolver_pool->started && !g_resolver_pool->abandoned) {
+	if (g_resolver_pool && g_resolver_pool->started && !g_resolver_pool->abandoned)
+	{
 		pthread_mutex_unlock(&g_start_mu);
 		return true;
 	}
-	if (g_resolver_pool && g_resolver_pool->abandoned) {
+	if (g_resolver_pool && g_resolver_pool->abandoned)
+	{
 		pthread_mutex_unlock(&g_start_mu);
 		return false;
 	}
@@ -500,7 +533,8 @@ int resolver_shutdown(int timeout_ms)
 	int i;
 	pthread_mutex_lock(&g_start_mu);
 	pool = g_resolver_pool;
-	if (!pool || !pool->started) {
+	if (!pool || !pool->started)
+	{
 		pthread_mutex_unlock(&g_start_mu);
 		return 0;
 	}
@@ -508,7 +542,8 @@ int resolver_shutdown(int timeout_ms)
 	pool->stopping = 1;
 	pool->pause_dequeue = 0;
 	pthread_cond_broadcast(&pool->work_cv);
-	if (resolver_mono_deadline(timeout_ms, &ts) != 0) {
+	if (resolver_mono_deadline(timeout_ms, &ts) != 0)
+	{
 		pool->abandoned = 1;
 		pthread_mutex_unlock(&pool->mu);
 		for (i = 0; i < RESOLVER_THREADS; i++)
@@ -516,16 +551,19 @@ int resolver_shutdown(int timeout_ms)
 		pthread_mutex_unlock(&g_start_mu);
 		return 1;
 	}
-	while (pool->exited < RESOLVER_THREADS) {
+	while (pool->exited < RESOLVER_THREADS)
+	{
 		int wr = pthread_cond_timedwait(&pool->infra_cv, &pool->mu, &ts);
-		if (wr == ETIMEDOUT) {
+		if (wr == ETIMEDOUT)
+		{
 			pool->abandoned = 1;
 			abandoned = 1;
 			break;
 		}
 	}
 	pthread_mutex_unlock(&pool->mu);
-	if (abandoned) {
+	if (abandoned)
+	{
 		/* Workers that already returned are reaped. A worker still inside
 		 * getaddrinfo stays detached and keeps using this pool, so the
 		 * mutex and slots are left allocated until process exit. */
@@ -549,12 +587,9 @@ int resolver_shutdown(int timeout_ms)
 	return 0;
 }
 
-
-
-
 int resolver_submit(resolver_sink *sink, uint32_t connection_index,
-		uint64_t connection_generation, const char *hostname, uint16_t port,
-		int family, int64_t deadline_ms, int *slot_index, uint64_t *req_id)
+        uint64_t connection_generation, const char *hostname, uint16_t port,
+        int family, int64_t deadline_ms, int *slot_index, uint64_t *req_id)
 {
 	resolve_slot *slot;
 	char norm[RESOLVER_HOST_MAX + 1];
@@ -569,7 +604,8 @@ int resolver_submit(resolver_sink *sink, uint32_t connection_index,
 	if (!g_resolver_pool)
 		return RESOLVER_SUBMIT_OVERFLOW;
 	pthread_mutex_lock(&g_resolver_pool->mu);
-	if (g_resolver_pool->stopping || !resolver_quota_ok_locked(sink) || g_resolver_pool->free_head == NULL) {
+	if (g_resolver_pool->stopping || !resolver_quota_ok_locked(sink) || g_resolver_pool->free_head == NULL)
+	{
 		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return RESOLVER_SUBMIT_OVERFLOW;
 	}
@@ -603,7 +639,6 @@ int resolver_submit(resolver_sink *sink, uint32_t connection_index,
 	return RESOLVER_SUBMIT_OK;
 }
 
-
 void resolver_cancel(int slot_index, uint64_t req_id)
 {
 	resolve_slot *slot;
@@ -611,7 +646,8 @@ void resolver_cancel(int slot_index, uint64_t req_id)
 		return;
 	pthread_mutex_lock(&g_resolver_pool->mu);
 	slot = &g_resolver_pool->slots[slot_index];
-	if (slot->req_id != req_id) {
+	if (slot->req_id != req_id)
+	{
 		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return;
 	}
@@ -628,7 +664,8 @@ void resolver_release(int slot_index, uint64_t req_id)
 		return;
 	pthread_mutex_lock(&g_resolver_pool->mu);
 	slot = &g_resolver_pool->slots[slot_index];
-	if (slot->req_id != req_id || slot->state == RESOLVE_FREE) {
+	if (slot->req_id != req_id || slot->state == RESOLVE_FREE)
+	{
 		pthread_mutex_unlock(&g_resolver_pool->mu);
 		return;
 	}

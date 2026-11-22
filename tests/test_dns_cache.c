@@ -11,300 +11,299 @@ static int failures = 0;
 
 static void expect_true(bool value, const char *name)
 {
-    if (!value)
-    {
-        fprintf(stderr, "FAIL: %s expected true\n", name);
-        failures++;
-    }
+	if (!value)
+	{
+		fprintf(stderr, "FAIL: %s expected true\n", name);
+		failures++;
+	}
 }
 
 static void expect_int(long actual, long expected, const char *name)
 {
-    if (actual != expected)
-    {
-        fprintf(stderr, "FAIL: %s expected %ld, got %ld\n", name, expected, actual);
-        failures++;
-    }
+	if (actual != expected)
+	{
+		fprintf(stderr, "FAIL: %s expected %ld, got %ld\n", name, expected, actual);
+		failures++;
+	}
 }
 
 /* Query for <c>.test A with the given id. */
 static size_t build_query(uint8_t *out, char c, uint16_t id)
 {
-    const uint8_t q[] = {
-        0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x01, 'a', 0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01
-    };
-    memcpy(out, q, sizeof(q));
-    out[0] = (uint8_t)(id >> 8);
-    out[1] = (uint8_t)id;
-    out[13] = (uint8_t)c;
-    return sizeof(q);
+	const uint8_t q[] = {
+	        0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	        0x01, 'a', 0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01};
+	memcpy(out, q, sizeof(q));
+	out[0] = (uint8_t)(id >> 8);
+	out[1] = (uint8_t)id;
+	out[13] = (uint8_t)c;
+	return sizeof(q);
 }
 
 /* The query plus one A record with ttl, as upstream would answer it. */
 static size_t build_reply(uint8_t *out, const uint8_t *query, size_t qlen, uint8_t rcode, uint32_t ttl)
 {
-    const uint8_t rr[] = { 0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01,
-                           (uint8_t)(ttl >> 24), (uint8_t)(ttl >> 16), (uint8_t)(ttl >> 8), (uint8_t)ttl,
-                           0x00, 0x04, 9, 9, 9, 9 };
-    memcpy(out, query, qlen);
-    out[2] = 0x81;
-    out[3] = (uint8_t)(0x80 | rcode);
-    out[7] = 1;
-    memcpy(out + qlen, rr, sizeof(rr));
-    return qlen + sizeof(rr);
+	const uint8_t rr[] = {0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01,
+	        (uint8_t)(ttl >> 24), (uint8_t)(ttl >> 16), (uint8_t)(ttl >> 8), (uint8_t)ttl,
+	        0x00, 0x04, 9, 9, 9, 9};
+	memcpy(out, query, qlen);
+	out[2] = 0x81;
+	out[3] = (uint8_t)(0x80 | rcode);
+	out[7] = 1;
+	memcpy(out + qlen, rr, sizeof(rr));
+	return qlen + sizeof(rr);
 }
 
 static uint32_t answer_ttl(const uint8_t *reply, size_t qlen)
 {
-    const uint8_t *p = reply + qlen + 6;
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+	const uint8_t *p = reply + qlen + 6;
+	return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
 
 /* Begin as leader and publish reply at now_ms. */
 static void lead_and_store(dnscache_t *c, const uint8_t *q, size_t qlen, const uint8_t *r, size_t rlen,
-                           int64_t now_ms)
+        int64_t now_ms)
 {
-    uint8_t out[DNS_UDP_MAX_PAYLOAD];
-    size_t n = 0;
-    dnscache_flight *f = NULL;
-    expect_int(dnscache_begin(c, q, qlen, now_ms, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "lead a miss");
-    dnscache_finish(c, f, r, rlen, rlen, now_ms);
+	uint8_t out[DNS_UDP_MAX_PAYLOAD];
+	size_t n = 0;
+	dnscache_flight *f = NULL;
+	expect_int(dnscache_begin(c, q, qlen, now_ms, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "lead a miss");
+	dnscache_finish(c, f, r, rlen, rlen, now_ms);
 }
 
 static void test_hit_age_and_expiry(void)
 {
-    dnscache_t *c = dnscache_create(16);
-    uint8_t q[64];
-    uint8_t r[128];
-    uint8_t out[DNS_UDP_MAX_PAYLOAD];
-    size_t qlen = build_query(q, 'a', 0x1111);
-    size_t rlen = build_reply(r, q, qlen, 0, 60);
-    size_t n = 0;
-    dnscache_flight *f = NULL;
+	dnscache_t *c = dnscache_create(16);
+	uint8_t q[64];
+	uint8_t r[128];
+	uint8_t out[DNS_UDP_MAX_PAYLOAD];
+	size_t qlen = build_query(q, 'a', 0x1111);
+	size_t rlen = build_reply(r, q, qlen, 0, 60);
+	size_t n = 0;
+	dnscache_flight *f = NULL;
 
-    expect_true(c != NULL, "create cache");
-    if (!c)
-        return;
-    lead_and_store(c, q, qlen, r, rlen, 1000);
-    expect_int((long)dnscache_count(c), 1, "reply stored");
+	expect_true(c != NULL, "create cache");
+	if (!c)
+		return;
+	lead_and_store(c, q, qlen, r, rlen, 1000);
+	expect_int((long)dnscache_count(c), 1, "reply stored");
 
-    /* Another id and spelling, 20 s later. */
-    qlen = build_query(q, 'A', 0x2222);
-    expect_int(dnscache_begin(c, q, qlen, 21000, out, sizeof(out), &n, &f), DNSCACHE_HIT, "hit");
-    expect_int((long)n, (long)rlen, "hit length");
-    expect_true(out[0] == 0x22 && out[1] == 0x22, "hit carries the new id");
-    expect_true(out[13] == 'A', "hit carries the new spelling");
-    expect_int((long)answer_ttl(out, qlen), 40, "hit TTL aged by 20 s");
+	/* Another id and spelling, 20 s later. */
+	qlen = build_query(q, 'A', 0x2222);
+	expect_int(dnscache_begin(c, q, qlen, 21000, out, sizeof(out), &n, &f), DNSCACHE_HIT, "hit");
+	expect_int((long)n, (long)rlen, "hit length");
+	expect_true(out[0] == 0x22 && out[1] == 0x22, "hit carries the new id");
+	expect_true(out[13] == 'A', "hit carries the new spelling");
+	expect_int((long)answer_ttl(out, qlen), 40, "hit TTL aged by 20 s");
 
-    {
-        dnscache_counters counters;
-        dnscache_get_counters(c, &counters);
-        expect_int((long)counters.hits, 1, "cache hit counter");
-        expect_int((long)counters.misses, 1, "cache miss counter");
-        expect_int((long)counters.stored, 1, "cache store counter");
-        expect_int((long)counters.entries, 1, "cache entry counter");
-    }
+	{
+		dnscache_counters counters;
+		dnscache_get_counters(c, &counters);
+		expect_int((long)counters.hits, 1, "cache hit counter");
+		expect_int((long)counters.misses, 1, "cache miss counter");
+		expect_int((long)counters.stored, 1, "cache store counter");
+		expect_int((long)counters.entries, 1, "cache entry counter");
+	}
 
-    expect_int(dnscache_begin(c, q, qlen, 61000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "expired entry is a miss");
-    expect_int((long)dnscache_count(c), 0, "expired entry removed");
-    dnscache_finish(c, f, NULL, 0, 0, 61000);
-    dnscache_free(c);
+	expect_int(dnscache_begin(c, q, qlen, 61000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "expired entry is a miss");
+	expect_int((long)dnscache_count(c), 0, "expired entry removed");
+	dnscache_finish(c, f, NULL, 0, 0, 61000);
+	dnscache_free(c);
 }
 
 static void test_what_is_not_cached(void)
 {
-    dnscache_t *c = dnscache_create(16);
-    uint8_t q[64];
-    uint8_t r[128];
-    uint8_t out[DNS_UDP_MAX_PAYLOAD];
-    size_t qlen = build_query(q, 'b', 1);
-    size_t rlen;
-    size_t n = 0;
-    dnscache_flight *f = NULL;
+	dnscache_t *c = dnscache_create(16);
+	uint8_t q[64];
+	uint8_t r[128];
+	uint8_t out[DNS_UDP_MAX_PAYLOAD];
+	size_t qlen = build_query(q, 'b', 1);
+	size_t rlen;
+	size_t n = 0;
+	dnscache_flight *f = NULL;
 
-    if (!c)
-        return;
-    rlen = build_reply(r, q, qlen, ServerFailure_ResponseType, 60);
-    lead_and_store(c, q, qlen, r, rlen, 1000);
-    expect_int((long)dnscache_count(c), 0, "SERVFAIL not stored");
+	if (!c)
+		return;
+	rlen = build_reply(r, q, qlen, ServerFailure_ResponseType, 60);
+	lead_and_store(c, q, qlen, r, rlen, 1000);
+	expect_int((long)dnscache_count(c), 0, "SERVFAIL not stored");
 
-    rlen = build_reply(r, q, qlen, 0, 0);
-    lead_and_store(c, q, qlen, r, rlen, 1000);
-    expect_int((long)dnscache_count(c), 0, "TTL 0 not stored");
+	rlen = build_reply(r, q, qlen, 0, 0);
+	lead_and_store(c, q, qlen, r, rlen, 1000);
+	expect_int((long)dnscache_count(c), 0, "TTL 0 not stored");
 
-    rlen = build_reply(r, q, qlen, 0, 60);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "lead partial");
-    dnscache_finish(c, f, r, rlen, rlen + 500, 1000);
-    expect_int((long)dnscache_count(c), 0, "partial reply not stored");
+	rlen = build_reply(r, q, qlen, 0, 60);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "lead partial");
+	dnscache_finish(c, f, r, rlen, rlen + 500, 1000);
+	expect_int((long)dnscache_count(c), 0, "partial reply not stored");
 
-    /* NXDOMAIN with a day-long TTL is kept for the negative cap only. */
-    rlen = build_reply(r, q, qlen, NameError_ResponseType, 86400);
-    lead_and_store(c, q, qlen, r, rlen, 1000);
-    expect_int(dnscache_begin(c, q, qlen, 1000 + DNSCACHE_NEG_TTL * 1000 - 1, out, sizeof(out), &n, &f),
-               DNSCACHE_HIT, "NXDOMAIN cached");
-    expect_int(dnscache_begin(c, q, qlen, 1000 + DNSCACHE_NEG_TTL * 1000, out, sizeof(out), &n, &f),
-               DNSCACHE_LEAD, "NXDOMAIN capped at the negative TTL");
-    dnscache_finish(c, f, NULL, 0, 0, 0);
+	/* NXDOMAIN with a day-long TTL is kept for the negative cap only. */
+	rlen = build_reply(r, q, qlen, NameError_ResponseType, 86400);
+	lead_and_store(c, q, qlen, r, rlen, 1000);
+	expect_int(dnscache_begin(c, q, qlen, 1000 + DNSCACHE_NEG_TTL * 1000 - 1, out, sizeof(out), &n, &f),
+	        DNSCACHE_HIT, "NXDOMAIN cached");
+	expect_int(dnscache_begin(c, q, qlen, 1000 + DNSCACHE_NEG_TTL * 1000, out, sizeof(out), &n, &f),
+	        DNSCACHE_LEAD, "NXDOMAIN capped at the negative TTL");
+	dnscache_finish(c, f, NULL, 0, 0, 0);
 
-    q[5] = 2;
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_BYPASS,
-               "two questions bypass the cache");
-    expect_int(dnscache_begin(NULL, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_BYPASS,
-               "no cache bypasses");
-    dnscache_free(c);
+	q[5] = 2;
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_BYPASS,
+	        "two questions bypass the cache");
+	expect_int(dnscache_begin(NULL, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_BYPASS,
+	        "no cache bypasses");
+	dnscache_free(c);
 }
 
 static void test_lru_eviction(void)
 {
-    dnscache_t *c = dnscache_create(2);
-    uint8_t q[64];
-    uint8_t r[128];
-    uint8_t out[DNS_UDP_MAX_PAYLOAD];
-    size_t qlen;
-    size_t rlen;
-    size_t n = 0;
-    dnscache_flight *f = NULL;
-    char name;
+	dnscache_t *c = dnscache_create(2);
+	uint8_t q[64];
+	uint8_t r[128];
+	uint8_t out[DNS_UDP_MAX_PAYLOAD];
+	size_t qlen;
+	size_t rlen;
+	size_t n = 0;
+	dnscache_flight *f = NULL;
+	char name;
 
-    if (!c)
-        return;
-    for (name = 'a'; name <= 'b'; name++)
-    {
-        qlen = build_query(q, name, 1);
-        rlen = build_reply(r, q, qlen, 0, 60);
-        lead_and_store(c, q, qlen, r, rlen, 1000);
-    }
-    /* Touch a so that b is the least recently used. */
-    qlen = build_query(q, 'a', 1);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_HIT, "a cached");
-    qlen = build_query(q, 'c', 1);
-    rlen = build_reply(r, q, qlen, 0, 60);
-    lead_and_store(c, q, qlen, r, rlen, 1000);
-    expect_int((long)dnscache_count(c), 2, "cache stays at its limit");
-    qlen = build_query(q, 'a', 1);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_HIT, "recent entry kept");
-    qlen = build_query(q, 'b', 1);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "LRU entry evicted");
-    dnscache_finish(c, f, NULL, 0, 0, 0);
-    {
-        dnscache_counters counters;
-        dnscache_get_counters(c, &counters);
-        expect_int((long)counters.evicted, 1, "cache eviction counter");
-    }
-    dnscache_free(c);
+	if (!c)
+		return;
+	for (name = 'a'; name <= 'b'; name++)
+	{
+		qlen = build_query(q, name, 1);
+		rlen = build_reply(r, q, qlen, 0, 60);
+		lead_and_store(c, q, qlen, r, rlen, 1000);
+	}
+	/* Touch a so that b is the least recently used. */
+	qlen = build_query(q, 'a', 1);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_HIT, "a cached");
+	qlen = build_query(q, 'c', 1);
+	rlen = build_reply(r, q, qlen, 0, 60);
+	lead_and_store(c, q, qlen, r, rlen, 1000);
+	expect_int((long)dnscache_count(c), 2, "cache stays at its limit");
+	qlen = build_query(q, 'a', 1);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_HIT, "recent entry kept");
+	qlen = build_query(q, 'b', 1);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_LEAD, "LRU entry evicted");
+	dnscache_finish(c, f, NULL, 0, 0, 0);
+	{
+		dnscache_counters counters;
+		dnscache_get_counters(c, &counters);
+		expect_int((long)counters.evicted, 1, "cache eviction counter");
+	}
+	dnscache_free(c);
 }
 
 static void test_coalescing(void)
 {
-    dnscache_t *c = dnscache_create(16);
-    uint8_t q[64];
-    uint8_t fq[64];
-    uint8_t r[128];
-    uint8_t out[DNS_UDP_MAX_PAYLOAD];
-    size_t qlen;
-    size_t fqlen;
-    size_t rlen;
-    size_t n = 0;
-    dnscache_flight *lead = NULL;
-    dnscache_flight *follow = NULL;
-    dnscache_counters counters;
+	dnscache_t *c = dnscache_create(16);
+	uint8_t q[64];
+	uint8_t fq[64];
+	uint8_t r[128];
+	uint8_t out[DNS_UDP_MAX_PAYLOAD];
+	size_t qlen;
+	size_t fqlen;
+	size_t rlen;
+	size_t n = 0;
+	dnscache_flight *lead = NULL;
+	dnscache_flight *follow = NULL;
+	dnscache_counters counters;
 
-    if (!c)
-        return;
-    qlen = build_query(q, 'd', 0x0101);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD,
-               "first query leads");
+	if (!c)
+		return;
+	qlen = build_query(q, 'd', 0x0101);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD,
+	        "first query leads");
 
-    fqlen = build_query(fq, 'D', 0x0202);
-    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow),
-               DNSCACHE_FOLLOW, "same question follows");
-    expect_true(follow == lead, "follower shares the leader's flight");
-    dnscache_get_counters(c, &counters);
-    expect_int((long)counters.shared, 1, "shared counter");
+	fqlen = build_query(fq, 'D', 0x0202);
+	expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow),
+	        DNSCACHE_FOLLOW, "same question follows");
+	expect_true(follow == lead, "follower shares the leader's flight");
+	dnscache_get_counters(c, &counters);
+	expect_int((long)counters.shared, 1, "shared counter");
 
-    rlen = build_reply(r, q, qlen, 0, 60);
-    dnscache_finish(c, lead, r, rlen, rlen, 1000);
-    /* The finished flight is not offered to new queries while a follower holds it. */
-    dnscache_abandon_follower(c, follow);
-    expect_int((long)dnscache_count(c), 1, "leader's reply stored");
-    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow), DNSCACHE_HIT,
-               "follower's question now hits");
-    expect_int((long)n, (long)rlen, "hit length");
-    expect_true(out[0] == 0x02 && out[1] == 0x02 && out[13] == 'D',
-                "hit carries the follower's id and spelling");
+	rlen = build_reply(r, q, qlen, 0, 60);
+	dnscache_finish(c, lead, r, rlen, rlen, 1000);
+	/* The finished flight is not offered to new queries while a follower holds it. */
+	dnscache_abandon_follower(c, follow);
+	expect_int((long)dnscache_count(c), 1, "leader's reply stored");
+	expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow), DNSCACHE_HIT,
+	        "follower's question now hits");
+	expect_int((long)n, (long)rlen, "hit length");
+	expect_true(out[0] == 0x02 && out[1] == 0x02 && out[13] == 'D',
+	        "hit carries the follower's id and spelling");
 
-    /* A failed fetch stores nothing; its followers are released and the next query leads. */
-    qlen = build_query(q, 'e', 1);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD, "lead a fetch that fails");
-    fqlen = build_query(fq, 'e', 2);
-    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow),
-               DNSCACHE_FOLLOW, "follow a fetch that will fail");
-    dnscache_finish(c, lead, NULL, 0, 0, 1000);
-    dnscache_abandon_follower(c, follow);
-    expect_int((long)dnscache_count(c), 1, "failed fetch stores nothing");
-    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD,
-               "query after a failed fetch leads");
-    dnscache_finish(c, lead, NULL, 0, 0, 1000);
+	/* A failed fetch stores nothing; its followers are released and the next query leads. */
+	qlen = build_query(q, 'e', 1);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD, "lead a fetch that fails");
+	fqlen = build_query(fq, 'e', 2);
+	expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow),
+	        DNSCACHE_FOLLOW, "follow a fetch that will fail");
+	dnscache_finish(c, lead, NULL, 0, 0, 1000);
+	dnscache_abandon_follower(c, follow);
+	expect_int((long)dnscache_count(c), 1, "failed fetch stores nothing");
+	expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_LEAD,
+	        "query after a failed fetch leads");
+	dnscache_finish(c, lead, NULL, 0, 0, 1000);
 
-    /* A follower may let go before the leader finishes; the leader still fills the cache. */
-    qlen = build_query(q, 'f', 1);
-    dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead);
-    fqlen = build_query(fq, 'f', 2);
-    expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow), DNSCACHE_FOLLOW,
-               "follow a slow fetch");
-    dnscache_abandon_follower(c, follow);
-    rlen = build_reply(r, q, qlen, 0, 60);
-    dnscache_finish(c, lead, r, rlen, rlen, 1000);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_HIT,
-               "late leader still fills the cache");
-    dnscache_get_counters(c, &counters);
-    expect_int((long)counters.shared, 3, "shared counter after three follows");
-    dnscache_free(c);
+	/* A follower may let go before the leader finishes; the leader still fills the cache. */
+	qlen = build_query(q, 'f', 1);
+	dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead);
+	fqlen = build_query(fq, 'f', 2);
+	expect_int(dnscache_begin(c, fq, fqlen, 1000, out, sizeof(out), &n, &follow), DNSCACHE_FOLLOW,
+	        "follow a slow fetch");
+	dnscache_abandon_follower(c, follow);
+	rlen = build_reply(r, q, qlen, 0, 60);
+	dnscache_finish(c, lead, r, rlen, rlen, 1000);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &lead), DNSCACHE_HIT,
+	        "late leader still fills the cache");
+	dnscache_get_counters(c, &counters);
+	expect_int((long)counters.shared, 3, "shared counter after three follows");
+	dnscache_free(c);
 }
 
 static void test_flight_exhaustion(void)
 {
-    dnscache_t *c = dnscache_create(16);
-    dnscache_flight *flights[DNSCACHE_FLIGHTS];
-    uint8_t q[64];
-    uint8_t out[DNS_UDP_MAX_PAYLOAD];
-    size_t qlen;
-    size_t n = 0;
-    dnscache_flight *f = NULL;
-    int i;
+	dnscache_t *c = dnscache_create(16);
+	dnscache_flight *flights[DNSCACHE_FLIGHTS];
+	uint8_t q[64];
+	uint8_t out[DNS_UDP_MAX_PAYLOAD];
+	size_t qlen;
+	size_t n = 0;
+	dnscache_flight *f = NULL;
+	int i;
 
-    if (!c)
-        return;
-    for (i = 0; i < DNSCACHE_FLIGHTS; i++)
-    {
-        /* <letter><digit>.test: a distinct two-byte first label per flight */
-        const uint8_t name[] = { 0x02, (uint8_t)('a' + i % 26), (uint8_t)('0' + i / 26),
-                                 0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01 };
-        build_query(q, 'a', 1);
-        memcpy(q + 12, name, sizeof(name));
-        qlen = 12 + sizeof(name);
-        expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &flights[i]), DNSCACHE_LEAD,
-                   "claim a flight");
-    }
-    qlen = build_query(q, 'z', 1);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_BYPASS,
-               "no free flight bypasses");
-    for (i = 0; i < DNSCACHE_FLIGHTS; i++)
-        dnscache_finish(c, flights[i], NULL, 0, 0, 1000);
-    expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_LEAD,
-               "flights are reusable");
-    dnscache_finish(c, f, NULL, 0, 0, 1000);
-    dnscache_free(c);
+	if (!c)
+		return;
+	for (i = 0; i < DNSCACHE_FLIGHTS; i++)
+	{
+		/* <letter><digit>.test: a distinct two-byte first label per flight */
+		const uint8_t name[] = {0x02, (uint8_t)('a' + i % 26), (uint8_t)('0' + i / 26),
+		        0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01};
+		build_query(q, 'a', 1);
+		memcpy(q + 12, name, sizeof(name));
+		qlen = 12 + sizeof(name);
+		expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &flights[i]), DNSCACHE_LEAD,
+		        "claim a flight");
+	}
+	qlen = build_query(q, 'z', 1);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_BYPASS,
+	        "no free flight bypasses");
+	for (i = 0; i < DNSCACHE_FLIGHTS; i++)
+		dnscache_finish(c, flights[i], NULL, 0, 0, 1000);
+	expect_int(dnscache_begin(c, q, qlen, 1000, out, sizeof(out), &n, &f), DNSCACHE_LEAD,
+	        "flights are reusable");
+	dnscache_finish(c, f, NULL, 0, 0, 1000);
+	dnscache_free(c);
 }
 
 int main(void)
 {
-    log_set_quiet(1);
-    test_hit_age_and_expiry();
-    test_what_is_not_cached();
-    test_lru_eviction();
-    test_coalescing();
-    test_flight_exhaustion();
-    return failures == 0 ? 0 : 1;
+	log_set_quiet(1);
+	test_hit_age_and_expiry();
+	test_what_is_not_cached();
+	test_lru_eviction();
+	test_coalescing();
+	test_flight_exhaustion();
+	return failures == 0 ? 0 : 1;
 }
