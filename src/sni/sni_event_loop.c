@@ -521,6 +521,7 @@ static void accept_clients(sni_engine *e)
 			close(fd);
 			continue;
 		}
+		(void)net_set_nodelay(fd);
 		c = conn_new(e, fd);
 		if (!c) {
 			log_error("malloc failed for sni connection");

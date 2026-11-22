@@ -14,6 +14,11 @@ These notes describe the `2.2.0` release. Nothing here says the result is produc
   only when accepted by the toolchain and not already set by the packager;
   `ctest` checks the result with readelf on ELF systems.
 
+### SNI
+
+- SNI client and upstream TCP sockets now disable Nagle's algorithm to reduce
+  latency when relaying small TLS and HTTP writes.
+
 ## 2.2.0 - 2026-11-18
 
 Existing configurations keep working unchanged. No option was removed and

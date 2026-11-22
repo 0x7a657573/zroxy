@@ -2,7 +2,6 @@
 #include "dns_event_internal.h"
 
 #include <errno.h>
-#include <netinet/tcp.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -179,7 +178,6 @@ int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_reques
 	socklen_t len;
 	int fd;
 	int rc;
-	int one = 1;
 	dns_route_state_t *state = &event->routes[route];
 	if (!route_ready(event, route))
 		return OPEN_WAIT;
@@ -196,7 +194,7 @@ int dnsev_upstream_open(dns_event_t *event, dns_upstream_t *upstream, dns_reques
 			close(fd);
 		return OPEN_WAIT;
 	}
-	(void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+	(void)net_set_nodelay(fd);
 	upstream->request = request;
 	upstream->route = route;
 	upstream->reused = 0;

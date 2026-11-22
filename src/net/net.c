@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <zroxy/log.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h> /*Lib Socket*/
 #include <sys/types.h>
 #include <string.h>
@@ -36,6 +37,14 @@ bool net_set_nonblock_cloexec(int fd)
     if ((fdflags & FD_CLOEXEC) == 0 && fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) != 0)
         return false;
     return true;
+}
+
+bool net_set_nodelay(int fd)
+{
+	int one = 1;
+
+	return fd >= 0 && setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
+		&one, sizeof(one)) == 0;
 }
 
 bool net_listen_ipv4(in_addr_t addr, uint16_t Port,int *sockfd)

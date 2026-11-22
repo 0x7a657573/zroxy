@@ -87,6 +87,22 @@ static int nodelay(int fd)
 	return setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 }
 
+static void test_net_set_nodelay(void)
+{
+	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	int value = 0;
+	socklen_t len = (socklen_t)sizeof(value);
+
+	expect_true(fd >= 0, "nodelay test socket");
+	if (fd < 0)
+		return;
+	expect_true(net_set_nodelay(fd), "net_set_nodelay succeeds");
+	expect_true(getsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &value, &len) == 0,
+		"get TCP_NODELAY");
+	expect_int(value, 1, "TCP_NODELAY enabled");
+	close(fd);
+}
+
 static int write_full(int fd, const void *buf, size_t len)
 {
 	const uint8_t *p = (const uint8_t *)buf;
@@ -3402,6 +3418,7 @@ int main(void)
 	sigaction(SIGALRM, &sa, NULL);
 	alarm(180);
 	raise_nofile();
+	test_net_set_nodelay();
 
 	{
 		int probe = socket(AF_INET, SOCK_STREAM, 0);

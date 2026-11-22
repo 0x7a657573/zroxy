@@ -163,6 +163,7 @@ static void try_connect(sni_engine *e, sni_conn *c)
 			c->addr_i++;
 			continue;
 		}
+		(void)net_set_nodelay(fd);
 		if (!sni_set_nb_cloexec(fd)) {
 			close(fd);
 			c->addr_i++;
