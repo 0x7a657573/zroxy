@@ -1,0 +1,18 @@
+name: format
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y clang-format-19
+      - run: git ls-files -z "src/*.[ch]" "include/*.h" "tests/*.[ch]" | xargs -0 clang-format-19 --dry-run --Werror

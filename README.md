@@ -645,6 +645,12 @@ The OpenWrt package is not built by this workflow; update its pinned source
 as described in the
 [OpenWrt release checklist](openwrt/README.md#release-checklist).
 
+### Code style
+
+Code style is defined by `.clang-format` and uses clang-format 19. Enable the
+pre-commit hook once with `git config core.hooksPath .githooks`; CI rejects
+unformatted code. Format a file by hand with `clang-format-19 -i path/to/file.c`.
+
 ## Tests
 
 Tests are local and do not require public Internet access, external DNS, SSH,

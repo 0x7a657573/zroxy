@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -- \
+  'src/*.[ch]' 'include/*.[ch]' 'tests/*.[ch]')
+[ -n "$files" ] || exit 0
+
+# Never overwrite unstaged hunks in a partially staged file.
+for file in $files; do
+  if ! git diff --quiet -- "$file"; then
+    echo "pre-commit: $file has unstaged changes; run git clang-format and re-add it" >&2
+    exit 1
+  fi
+done
+
+if command -v git-clang-format-19 >/dev/null 2>&1; then
+  formatter=git-clang-format-19
+  binary=clang-format-19
+elif command -v git-clang-format >/dev/null 2>&1 &&
+     command -v clang-format >/dev/null 2>&1 &&
+     clang-format --version | grep -qE 'version 19([.[:space:]]|$)'; then
+  formatter=git-clang-format
+  binary=clang-format
+else
+  echo "pre-commit: clang-format 19 not found; skipping format check" >&2
+  exit 0
+fi
+
+# The first run rewrites the files; the index and work tree match, as checked above.
+# The --diff run verifies the staged result.
+$formatter --binary "$binary" --staged -- $files || true
+git add -- $files
+
+if ! out=$($formatter --binary "$binary" --diff --staged -- $files); then
+  echo "pre-commit: staged files are not clang-formatted" >&2
+  printf '%s\n' "$out" >&2
+  exit 1
+fi
