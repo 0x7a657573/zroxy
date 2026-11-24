@@ -196,7 +196,10 @@ int main(int argc, const char **argv)
 	{
 		stats_init(&dns_stats, "DNS_Server");
 		if (monitor)
-			monitor_attach_stat(monitor, dns_stats);
+		{
+			if (!monitor_add_section(monitor, dns_stats->name, stats_json, dns_stats))
+				log_error("monitor DNS statistics section failed");
+		}
 		settings.dnsserver->stats = dns_stats;
 
 		settings.dnsserver->whitelist = whitelist;
@@ -216,8 +219,9 @@ int main(int argc, const char **argv)
 		stats_init(&sni_stats, "SNI_Server");
 		if (monitor)
 		{
-			monitor_attach_stat(monitor, sni_stats);
 			stats_set_extra(sni_stats, sni_stats_json, NULL);
+			if (!monitor_add_section(monitor, sni_stats->name, stats_json, sni_stats))
+				log_error("monitor SNI statistics section failed");
 		}
 	}
 

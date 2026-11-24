@@ -74,12 +74,11 @@ slot. TCP is not rate-limited because its connection and pipelined-query caps
 already bound work. Over-limit UDP datagrams are dropped before request
 allocation.
 
-The DNS service exposes cache, queue, and TCP-capacity counters through a
-generic statistics extra hook. The monitor takes the statistics object's lock,
-copies the base counters, and invokes that hook before closing the JSON object;
-the hook takes the cache mutex only after the statistics lock. DNS shutdown
-clears the hook before freeing the cache, so a monitor report cannot retain a
-DNS pointer after service teardown.
+The DNS service exposes cache, queue, and TCP-capacity counters through the
+generic statistics extra hook on its monitor section. `stats_json` takes the
+statistics lock, copies the base counters, and invokes that hook before
+closing the JSON object; the hook takes the cache mutex only after the
+statistics lock. DNS shutdown clears the hook before freeing the cache.
 
 Repeated DNS capacity and `NO DATA` errors use one-second throttles. The event
 loop owns its capacity state; the shared `NO DATA` throttle uses atomic state
@@ -391,7 +390,7 @@ flowchart TB
 - The monitor thread owns the listener, wake pipe, reactor and client slots. It
   closes every client before it exits.
 - `main` creates the SNI and DNS statistics objects and frees them after the
-  services stop. The monitor only borrows them through `monitor_attach_stat`.
+  services stop. The monitor borrows them through section contexts.
 - The monitor owns its sections and token, and frees them in `monitor_stop`. The whitelist filter owns its watcher thread and wake pipe and
   frees them in `filter_free`.
 - The DNS event loop owns its UDP/TCP listeners, wake pipe, resolver completion
@@ -841,13 +840,15 @@ sequenceDiagram
     else token missing or wrong
         R-->>C: empty 401 response
     else GET / authorized
-        R->>L: snapshot statistics-list head
-        L-->>R: list pointer
         R->>R: process object: getrlimit, getrusage, /proc/self/status
-        loop each statistics object
-            R->>S: copy counters under object mutex
-            S-->>R: counter snapshot
+        R->>L: hold stats_lock
+        loop each registered section
+            opt statistics section
+                R->>S: copy counters under object mutex
+                S-->>R: counter snapshot
+            end
         end
+        L-->>R: release stats_lock
         R-->>C: JSON response and close
     else report exceeds 16 KiB
         R-->>C: empty 500 response, logged once
@@ -868,7 +869,8 @@ The report starts with the version, `CountOfOpenFile`, and the `Process`
 object. `Process` is not a statistics object: the monitor thread fills it on each
 request from `getpid`, `getrlimit`, `getrusage`, and platform process APIs
 (Linux `/proc/self/status`, OpenBSD/FreeBSD `sysctl`) into a stack buffer. It takes no lock and
-allocates nothing, except one short-lived buffer for the OpenBSD thread list. Registered sections follow, then the statistics objects.
+allocates nothing, except one short-lived buffer for the OpenBSD thread list.
+Registered sections follow, including the statistics objects.
 
 A section (`monitor_add_section`) is a named top-level object written by a
 callback. `main` registers `Whitelist` this way when a whitelist file is
@@ -884,14 +886,12 @@ empty 500 and logs the overflow once.
 
 The monitor uses two lock levels:
 
-- `stats_lock` protects the linked-list head when statistics objects are attached
-  or the list is read, and the section list. A report walks the section list
-  with it held, so a section callback must be short and must not call back into
-  the monitor (the whitelist callback takes only the filter read lock);
-- each `statistics_t::Lock` protects that object's counters.
+- `stats_lock` protects the section list. A report walks it with the lock held,
+  so a section callback must be short and must not call back into the monitor;
+- each `statistics_t::lock` protects that object's counters.
 
-The list lock is released before `stats_get` takes an individual statistics
-mutex, so those locks are not nested.
+The report lock order is `stats_lock`, then a statistics mutex, then any mutex
+taken by an extra hook such as the DNS cache mutex.
 
 SNI and DNS statistics are updated on close/completion. SNI increments active
 and total connection counters at acceptance, then records byte totals and
@@ -992,7 +992,7 @@ configured DNS options are sufficient to start the service.
 | Resolver completion ring | sink mutex | resolver workers and owning event loop |
 | Filter snapshot pointer | filter rwlock (read: lookup, write: swap) | SNI/DNS readers, reload watcher, `SIGHUP` |
 | Statistics counters | one mutex per statistics object | SNI/DNS event loops and monitor thread |
-| Monitor statistics-list head | monitor `stats_lock` | startup/attach and monitor response generation |
+| Monitor section list | monitor `stats_lock` | startup/registration and monitor response generation |
 | Monitor client slots | monitor thread | monitor reactor and client slots |
 | SNI live-connection count | SNI worker mutex | SNI accept/destruction paths |
 | Listener startup/stop state | listener mutex/condition | `main` and the event-loop thread |
@@ -1113,7 +1113,7 @@ path above) and then the DNS service, as described in
 
 `monitor_stop` wakes and joins the monitor thread. The thread closes every
 client, including clients waiting on a header or a response write, before it
-returns. The monitor then frees its sections, token and state; `main` frees the
+returns. The monitor then frees its sections and token; `main` frees the
 statistics objects and whitelist after the services stop.
 
 ## Observability

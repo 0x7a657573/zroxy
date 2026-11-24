@@ -14,7 +14,6 @@
 #include <zroxy/config.h>
 #include <zroxy/log.h>
 #include <zroxy/net.h>
-#include <inttypes.h>
 #include <zroxy/version.h>
 #include <dirent.h>
 #include <errno.h>
@@ -24,6 +23,8 @@
 #include <fcntl.h>
 #include <sys/resource.h>
 #include <limits.h>
+#include <pthread.h>
+#include <time.h>
 #if defined(__OpenBSD__) || defined(__FreeBSD__)
 #include <sys/sysctl.h>
 #endif
@@ -72,9 +73,8 @@ struct mon
 {
 	int fd;
 	uint16_t port;
-	statistics_t *state;
 	mon_section_t *sections;    /* guarded by stats_lock; nodes are never freed */
-	pthread_mutex_t stats_lock; /* guards the state list head only */
+	pthread_mutex_t stats_lock; /* guards the section list only */
 	char *token;                /* optional bearer secret; NULL disables authentication */
 	int header_timeout;         /* seconds to wait for a complete header */
 	pthread_t thread;           /* joined by monitor_stop */
@@ -332,7 +332,6 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 		free(mon);
 		return NULL;
 	}
-	mon->state = NULL;
 	if (mon_process_start == 0)
 		time(&mon_process_start);
 	mon->wake[0] = mon->wake[1] = -1;
@@ -380,17 +379,6 @@ mon_t *monitor_init(uint16_t port, const char *bind_ip, const char *token, int h
 	}
 
 	return mon;
-}
-
-bool monitor_attach_stat(mon_t *self, statistics_t *stat)
-{
-	if (!self || !stat)
-		return false;
-	pthread_mutex_lock(&self->stats_lock);
-	stat->next = self->state; /* newest first, as the report lists them */
-	self->state = stat;
-	pthread_mutex_unlock(&self->stats_lock);
-	return true;
 }
 
 bool monitor_add_section(mon_t *self, const char *name, mon_section_fn fn, void *ctx)
@@ -848,7 +836,6 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 	char *message = (char *)(response + MON_HEAD_ROOM);
 	char *ptr = message;
 	char *end = message + MON_MAX_BODY;
-	statistics_t *stat = NULL;
 	mon_section_t *section;
 	bool sections_ok = true;
 	int open_files;
@@ -856,9 +843,6 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 
 	if (!owner)
 		return 0;
-	pthread_mutex_lock(&owner->stats_lock);
-	stat = owner->state;
-	pthread_mutex_unlock(&owner->stats_lock);
 
 	open_files = count_open_files();
 	if (!mon_append(&ptr, end, "{\n\"ZroxyVersion\" : \"%s\",\n", version) ||
@@ -880,43 +864,6 @@ static size_t monitor_send_report(uint8_t *response, size_t response_cap, mon_t 
 	if (!sections_ok)
 	{
 		return mon_report_failed(response, response_cap, owner);
-	}
-
-	statistics_t *sta = stat;
-	while (sta)
-	{
-		stat_t stdata;
-		stats_extra_fn extra;
-		void *extra_ctx;
-		time_t CurrentTime;
-		time_t LiveTime;
-		bool ok;
-
-		pthread_mutex_lock(&sta->lock);
-		stdata = sta->stat;
-		extra = sta->extra;
-		extra_ctx = sta->extra_ctx;
-		time(&CurrentTime);
-		LiveTime = CurrentTime - stdata.start_time;
-
-		ok = mon_append(&ptr, end, "\"%s\" : {\n", sta->name) &&
-		     mon_append(&ptr, end, "\"UpTime\" : %lld ,\n", (long long)LiveTime) &&
-		     mon_append(&ptr, end, "\"MaxConnection\" : %" PRIu32 " ,\n", stdata.max_connections) &&
-		     mon_append(&ptr, end, "\"ActiveConnection\" : %" PRIu32 " ,\n", stdata.active_connections) &&
-		     mon_append(&ptr, end, "\"TotalConnection\" : %" PRIu32 " ,\n", stdata.total_connections) &&
-		     mon_append(&ptr, end, "\"TotalRx\" : %" PRIu64 " ,\n", stdata.total_rx) &&
-		     mon_append(&ptr, end, "\"TotalTx\" : %" PRIu64, stdata.total_tx);
-		if (ok && extra)
-			ok = extra(extra_ctx, &ptr, end);
-		if (ok)
-			ok = mon_append(&ptr, end, "\n},\n");
-		pthread_mutex_unlock(&sta->lock);
-		if (!ok)
-		{
-			return mon_report_failed(response, response_cap, owner);
-		}
-
-		sta = (statistics_t *)sta->next;
 	}
 
 	if (ptr - message < 2)

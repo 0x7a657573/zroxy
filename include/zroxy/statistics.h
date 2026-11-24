@@ -28,7 +28,6 @@ typedef struct
 	char name[128];
 	/*thered lock*/
 	pthread_mutex_t lock;
-	void *next;
 	stats_extra_fn extra;
 	void *extra_ctx;
 } statistics_t;
@@ -44,7 +43,10 @@ void stats_open_connection(statistics_t *self);
 
 void stats_get(statistics_t *self, stat_t *st);
 
-/* Appends ",\n\"Key\" : value" pairs; called with the stats lock held. */
+/* Appends the base statistics members and any configured extra members. */
+bool stats_json(void *ctx, char **ptr, char *end);
+
+/* Sets the extra callback and context under the stats lock. */
 void stats_set_extra(statistics_t *self, stats_extra_fn fn, void *ctx);
 
 #endif /* STATISTICS_H_ */
