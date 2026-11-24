@@ -485,8 +485,10 @@ Whitelisted names receive a synthetic A answer using `SNIP` with a configurable
 TTL (`DTTL`, default 300 seconds). IPv6 is not proxied, so every other query type for a whitelisted name (AAAA, HTTPS,
 SVCB, ...) gets an empty NOERROR (NODATA) answer with one SOA authority record
 using the same TTL for RFC 2308 negative caching, and the client falls back to
-IPv4. Other queries are forwarded to the configured `DNS` server over TCP,
-directly or via the optional `DSOCKS` SOCKS5 connection. The SNI proxy itself
+IPv4. Local replies preserve the query's question bytes and are built directly
+from the raw packet; compressed questions and other queries are forwarded to
+the configured `DNS` server over TCP, directly or via the optional `DSOCKS`
+SOCKS5 connection. The SNI proxy itself
 resolves upstream names to IPv4 only.
 
 DNS settings may appear in any CLI or configuration-file order. The parser keeps
@@ -699,7 +701,7 @@ seed corpus in `tests/fuzz/corpus/<name>/`:
 | Harness | Covers |
 | --- | --- |
 | `sni_host` | TLS SNI and HTTP Host extraction, then `resolver_normalize` and the whitelist match |
-| `dns` | DNS message decode and encode, error, truncate, cache key, TTL, age and reply-match helpers |
+| `dns` | Raw DNS question-name extraction and local-answer construction, error, truncate, cache key, TTL, age and reply-match helpers |
 | `socks` | SOCKS5 server replies fed to the sans-IO client codec (`socks5_codec.c`), for every offered authentication and request form |
 | `monitor_request` | monitor request line, end of header and Bearer token checks |
 | `config` | config-file parser (`src/args/`) and whitelist file parser and matcher |

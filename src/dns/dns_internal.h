@@ -11,8 +11,6 @@
 #include <zroxy/filter.h>
 #include <zroxy/dnscache.h>
 
-struct Message;
-
 #define DNS_MSG_SIZE 512
 
 /* Largest message DNS over TCP can carry (two-byte length prefix). */
@@ -79,9 +77,6 @@ void localdns_free(dnsserver_t *dns);
 bool localdns_init_sockets(dnsserver_t *dns);
 /* Open the TCP listener on the UDP address. False leaves the service UDP-only. */
 bool localdns_init_tcp(dnsserver_t *dns);
-
-/* Build the synthetic whitelist answer used by both DNS execution engines. */
-int localdns_answer_local(dnsserver_t *dns, struct Message *msg, uint8_t *buf);
 
 /* Test hook for the time-injected throttle state machine. */
 bool dnsproxy_test_throttle_take(log_throttle_t *t, int64_t now_ms,

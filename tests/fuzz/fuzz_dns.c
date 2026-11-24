@@ -15,34 +15,36 @@
 #include "fuzz_common.h"
 
 #define MAX_PACKET 65535u
-#define ENCODE_CAP 4096u
+#define ANSWER_CAP 512u
 
-static void decode_and_encode(const uint8_t *data, size_t size)
+static void exercise_local_helpers(const uint8_t *data, size_t size)
 {
-	struct Message msg;
 	uint8_t *in = fuzz_dup(data, size);
-	uint8_t *out = malloc(ENCODE_CAP);
-	size_t written = 0;
+	uint8_t out[ANSWER_CAP];
+	char name[256] = {0};
+	static const uint8_t addr[4] = {192, 0, 2, 10};
+	size_t written;
 
-	if (!out)
+	if (dns_question_name(in, size, name, sizeof(name)) &&
+	        !memchr(name, '\0', sizeof(name)))
 		abort();
-	memset(&msg, 0, sizeof(msg));
-	if (dns_decode_msg(&msg, in, (int)size))
+	written = dns_build_local_answer(in, size, addr, 300, out, sizeof(out));
+	if (written > sizeof(out))
+		abort();
+	if (written > 0)
 	{
-		if (dns_encode_msg_n(&msg, out, ENCODE_CAP, &written) && written > ENCODE_CAP)
+		size_t tight_cap = written - 1;
+		written = dns_build_local_answer(in, size, addr, 300, out, tight_cap);
+		if (written > tight_cap)
 			abort();
-		/* A tight capacity must fail cleanly, never write past it. */
-		(void)dns_encode_msg_n(&msg, out, written / 2, &written);
 	}
-	dns_free_msg(&msg);
-	free(out);
 	free(in);
 }
 
 static void single_packet(const uint8_t *data, size_t size)
 {
 	uint8_t *in = fuzz_dup(data, size);
-	uint8_t *out = malloc(ENCODE_CAP);
+	uint8_t *out = malloc(ANSWER_CAP);
 	uint16_t udp_size;
 	uint32_t flags;
 	uint32_t ttl;
@@ -50,19 +52,19 @@ static void single_packet(const uint8_t *data, size_t size)
 
 	if (!out)
 		abort();
-	n = dns_build_error(in, size, Refused_ResponseType, out, ENCODE_CAP);
-	if (n > ENCODE_CAP)
+	n = dns_build_error(in, size, Refused_ResponseType, out, ANSWER_CAP);
+	if (n > ANSWER_CAP)
 		abort();
 	n = dns_build_error(in, size, ServerFailure_ResponseType, out, 12);
 	if (n > 12)
 		abort();
-	n = dns_build_truncated(in, size, out, ENCODE_CAP);
-	if (n > ENCODE_CAP)
+	n = dns_build_truncated(in, size, out, ANSWER_CAP);
+	if (n > ANSWER_CAP)
 		abort();
 	(void)dns_udp_limit(in, size, DNS_UDP_MAX_PAYLOAD);
 	(void)dns_query_opt(in, size, &udp_size, &flags);
-	n = dns_cache_key(in, size, out, ENCODE_CAP);
-	if (n > ENCODE_CAP)
+	n = dns_cache_key(in, size, out, ANSWER_CAP);
+	if (n > ANSWER_CAP)
 		abort();
 	(void)dns_cache_key(in, size, out, 16);
 	(void)dns_reply_ttl(in, size, &ttl);
@@ -94,8 +96,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	r = q + qlen;
 	rlen = size - 1 - qlen;
 
-	decode_and_encode(q, qlen);
-	decode_and_encode(r, rlen);
+	exercise_local_helpers(q, qlen);
+	exercise_local_helpers(r, rlen);
 	single_packet(q, qlen);
 	single_packet(r, rlen);
 

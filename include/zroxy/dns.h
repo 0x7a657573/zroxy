@@ -86,97 +86,6 @@ enum
 	STAR_QueryType = 255
 };
 
-/* Question Section */
-struct Question
-{
-	char *qName;
-	uint16_t qType;
-	uint16_t qClass;
-	struct Question *next; // for linked list
-};
-
-/* Data part of a Resource Record */
-union ResourceData
-{
-	struct
-	{
-		uint8_t txt_data_len;
-		char *txt_data;
-	} txt_record;
-	struct
-	{
-		uint8_t addr[4];
-	} a_record;
-	struct
-	{
-		uint8_t addr[16];
-	} aaaa_record;
-	struct
-	{
-		char *mname;
-		char *rname;
-		uint32_t serial;
-		uint32_t refresh;
-		uint32_t retry;
-		uint32_t expire;
-		uint32_t minimum;
-	} soa_record;
-};
-
-/* Resource Record Section */
-struct ResourceRecord
-{
-	char *name;
-	uint16_t type;
-	uint16_t class;
-	uint32_t ttl;
-	uint16_t rd_length;
-	union ResourceData rd_data;
-	struct ResourceRecord *next; // for linked list
-};
-
-struct Message
-{
-	uint16_t id; /* Identifier */
-
-	/* Flags */
-	uint16_t qr;     /* Query/Response Flag */
-	uint16_t opcode; /* Operation Code */
-	uint16_t aa;     /* Authoritative Answer Flag */
-	uint16_t tc;     /* Truncation Flag */
-	uint16_t rd;     /* Recursion Desired */
-	uint16_t ra;     /* Recursion Available */
-	uint16_t rcode;  /* Response Code */
-
-	uint16_t qdCount; /* Question Count */
-	uint16_t anCount; /* Answer Record Count */
-	uint16_t nsCount; /* Authority Record Count */
-	uint16_t arCount; /* Additional Record Count */
-
-	/* At least one question; questions are copied to the response 1:1 */
-	struct Question *questions;
-
-	/*
-  * Resource records to be send back.
-  * Every resource record can be in any of the following places.
-  * But every place has a different semantic.
-  */
-	struct ResourceRecord *answers;
-	struct ResourceRecord *authorities;
-	struct ResourceRecord *additionals;
-};
-
-/*
-* Deconding/Encoding functions.
-*/
-/*decode dns message*/
-bool dns_decode_msg(struct Message *msg, const uint8_t *buffer, int size);
-/* Encode into buffer[0, capacity). *written is the byte count on success. */
-bool dns_encode_msg_n(struct Message *msg, uint8_t *buffer, size_t capacity, size_t *written);
-
-/*free dns message struct*/
-void dns_free_msg(struct Message *msg);
-
 #define DNS_HEADER_SIZE 12
 #define DNS_CLASS_IN 1
 #define DNS_OPT_RECORD_TYPE 41
@@ -185,9 +94,17 @@ void dns_free_msg(struct Message *msg);
 #define DNS_UDP_MAX_PAYLOAD 1232
 
 /*
- * Wire-level helpers that work on raw packets, so they also cover messages
- * the decoder rejects. Each returns the written length, or 0.
+ * Wire-level helpers that work on raw packets, so they also cover malformed
+ * messages. Each returns the written length, or 0.
  */
+/* Name of the only question as text: labels joined by '.', no trailing dot.
+ * False if qdcount is not 1, the question is cut off or compressed, the name
+ * is empty, or it does not fit in cap bytes with its NUL. */
+bool dns_question_name(const uint8_t *query, size_t qlen, char *name, size_t cap);
+/* Authoritative reply to query for a whitelisted name: IN A gets one A record;
+ * every other type gets NODATA with one SOA in authority. */
+size_t dns_build_local_answer(const uint8_t *query, size_t qlen, const uint8_t addr[4],
+        uint32_t ttl, uint8_t *out, size_t cap);
 /* Reply to query with rcode: its id, opcode, RD and its question when that parses. */
 size_t dns_build_error(const uint8_t *query, size_t qlen, uint8_t rcode, uint8_t *out, size_t cap);
 /* resp's header and question with TC set and every record dropped. resp may be a prefix. */

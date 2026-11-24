@@ -290,9 +290,9 @@ bool dnsev_request_ensure_response(dns_event_t *event, dns_request_t *request, s
 
 static bool handle_local(dns_event_t *event, dns_request_t *request)
 {
-	struct Message msg = {0};
+	char name[ZROXY_MAX_HOSTNAME];
 	uint8_t answer[DNS_MSG_SIZE];
-	int len;
+	size_t len;
 	if (((request->query[2] >> 3) & 0x0f) != QUERY_OperationCode)
 	{
 		request_send_error(event, request, NotImplemented_ResponseType);
@@ -303,18 +303,14 @@ static bool handle_local(dns_event_t *event, dns_request_t *request)
 		request_send_error(event, request, FormatError_ResponseType);
 		return true;
 	}
-	if (!dns_decode_msg(&msg, request->query, request->query_len))
+	if (!event->dns->whitelist ||
+	        !dns_question_name(request->query, request->query_len, name, sizeof(name)) ||
+	        !filter_match(event->dns->whitelist, name))
 		return false;
-	if (!msg.questions || !msg.questions->qName || !event->dns->whitelist ||
-	        !filter_match(event->dns->whitelist, msg.questions->qName))
-	{
-		dns_free_msg(&msg);
-		return false;
-	}
-	len = localdns_answer_local(event->dns, &msg, answer);
-	dns_free_msg(&msg);
+	len = dns_build_local_answer(request->query, request->query_len, event->dns->sni_ip,
+	        event->dns->local_ttl, answer, sizeof(answer));
 	if (len > 0)
-		request_complete(event, request, answer, (size_t)len);
+		request_complete(event, request, answer, len);
 	else
 		request_send_error(event, request, ServerFailure_ResponseType);
 	return true;

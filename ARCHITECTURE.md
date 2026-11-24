@@ -54,11 +54,10 @@ used for synthetic whitelist answers.
 
 For a whitelisted non-A query, local DNS emits NOERROR/NODATA with one SOA in
 the authority section. The SOA owner, primary name server, and responsible
-name are the queried name; its serial is 1, its refresh/retry/expire values are
-3600/600/86400, and its minimum field follows `DTTL`. The encoder calculates
-the SOA RDLENGTH after writing its variable-length names. If the bounded UDP
-response cannot fit the SOA, the service retries as valid NODATA without an
-authority record rather than returning SERVFAIL.
+name are compressed pointers to the question; its serial is 1, its
+refresh/retry/expire values are 3600/600/86400, and its minimum field follows
+`DTTL`. Local replies are assembled from the raw query bytes, so the question
+spelling is preserved and additional records such as OPT are not copied.
 
 The optional DNS ACL is evaluated in the DNS event loop immediately after
 `recvfrom` and on accepted TCP peers before request admission. It uses host-order
@@ -324,8 +323,8 @@ path, then returns `1`.
 | `src/dns/dns_event_upstream.c` | Upstream connections | Owns upstream TCP/SOCKS5 state machines and connection dispatch |
 | `src/dns/dns_event_resolve.c` | Upstream target resolution | Owns literal target handling, resolver submissions and completions |
 | `src/dns/dns_event_internal.h` | Private DNS event-loop types and cross-file declarations | Shared only by the dns_event_* sources |
-| `src/dns/dnsproxy.c` | DNS local answers and legacy test helpers | Shared request validation and reply construction |
-| `src/dns/dns.c` | DNS decode/encode | Bounded packet representation |
+| `src/dns/dnsproxy.c` | DNS service configuration and socket helpers | Owns local DNS service state and lifecycle |
+| `src/dns/dns.c` | Raw DNS wire helpers, question-name extraction and local answers | Bounded packet inspection and construction |
 | `src/stats/statistics.c` | Per-service counters | One mutex per statistics object |
 | `src/stats/monitor.c` | HTTP monitor reactor and JSON | Maximum 32 non-blocking monitor clients |
 | `src/log/log.c` | Logging | Shared logging path |
@@ -753,11 +752,11 @@ flowchart TD
    response buffers are held at once; a request rejected by a bound receives
    SERVFAIL when it is a valid DNS query.
 3. A non-QUERY opcode gets NOTIMP and a QDCOUNT other than 1 gets FORMERR.
-   Otherwise the event loop decodes the message. A whitelisted name is answered
-   locally: A gets `SNIP` with a 300-second TTL, every other type (AAAA,
-   HTTPS, SVCB, ...) gets NODATA, because IPv6 is not proxied and a real
-   address would bypass the proxy. Anything else, including a message the
-   decoder rejects, is forwarded upstream unchanged.
+   Otherwise the event loop extracts the uncompressed question name from the
+   raw bytes. A whitelisted name is answered locally: A gets `SNIP` with a
+   300-second TTL, every other type (AAAA, HTTPS, SVCB, ...) gets NODATA,
+   because IPv6 is not proxied and a real address would bypass the proxy.
+   Compressed questions and anything else are forwarded upstream unchanged.
 5. A forwarded query is given one absolute deadline of twice `DTIMEOUT`.
    The loop never blocks on an upstream connect, TCP read/write, SOCKS5
    exchange, or cache follower. Otherwise the answer cache
@@ -907,7 +906,7 @@ flowchart LR
     Mutex[filter rwlock]
     Match[filter_match]
     SNI[normalized SNI/Host]
-    DNS[decoded DNS qName]
+    DNS[raw question name as text]
     Watch[inotify on parent dir (Linux)\nkqueue on file (OpenBSD/FreeBSD)\nor SIGHUP]
     Reload[build replacement snapshot]
 
@@ -945,9 +944,10 @@ pipe (`poll` on Linux, a `kqueue` read filter on OpenBSD/FreeBSD); `filter_free`
 to the pipe, joins the thread and then frees the filter, so it is valid for
 every filter, with or without a watcher.
 
-The DNS path matches the decoded query name and the SNI path matches the
-normalized SNI/Host name. The whitelist is not a universal firewall for every
-protocol; it affects the hostname-aware paths described above.
+The DNS path matches the question name extracted from raw query bytes, and the
+SNI path matches the normalized SNI/Host name. The whitelist is not a universal
+firewall for every protocol; it affects the hostname-aware paths described
+above.
 
 ## Configuration and object relationships
 
@@ -1162,7 +1162,7 @@ The test layout mirrors the major boundaries:
 | --- | --- |
 | `test_net_host_extract` | HTTP Host and TLS SNI parser behavior |
 | `test_filter_whitelist` | whitelist matching: exact, suffix, generic patterns, case, no prefix match |
-| `test_dns_codec` | bounded DNS decode/encode |
+| `test_dns_codec` | raw DNS question-name and local-answer wire behavior plus bounded helper packets |
 | `test_args_parse` | CLI/config parsing and limits |
 | `test_acl` | CIDR list parsing and matching |
 | `test_fdlimit` | open-file limit sizing and the lowered SNI cap |
